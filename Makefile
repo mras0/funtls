@@ -30,6 +30,14 @@ ifdef OPTIMIZED
 	CXXFLAGS+=-O3 -DNDEBUG
 endif
 
+ifndef NO_SANITIZE
+ifndef OPTIMIZED
+ifndef PROFILE
+	CXXFLAGS+=-fsanitize=address
+endif
+endif
+endif
+
 $(EXE): $(OBJS)
 	$(CXX) -o $@ $^ $(CXXFLAGS) $(LDFLAGS)
 

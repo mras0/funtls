@@ -96,8 +96,8 @@ struct uint {
     uint8 data[BitCount/8];
 
     template<typename F>
-    void for_each_member(F f) const {
-        for (const auto& d : data) {
+    void for_each_member(F f) {
+        for (auto& d : data) {
             f(d);
         }
     }
@@ -111,8 +111,8 @@ struct opaque {
     uint8 data[ByteCount];
 
     template<typename F>
-    void for_each_member(F f) const {
-        for (const auto& d : data) {
+    void for_each_member(F f) {
+        for (auto& d : data) {
             f(d);
         }
     }
@@ -128,37 +128,44 @@ struct vector {
     static_assert(LowerBoundInBytes % sizeof(T) == 0, "");
     static_assert(UpperBoundInBytes % sizeof(T) == 0, "");
 
-    constexpr vector() {
+    constexpr vector() : byte_count(0) {
         static_assert(LowerBoundInBytes == 0, "");
     }
 
-    vector(std::initializer_list<T> l) : data(l) {
+    vector(std::initializer_list<T> l) : byte_count(l.size()*sizeof(T)), data(l) {
         // Would be nice if these checks could be static_asserts as well
-        if (l.size() < LowerBoundInBytes/sizeof(T) || l.size() > UpperBoundInBytes/sizeof(T)) {
-            throw std::logic_error(std::to_string(l.size()) + " is out of range [" 
-                    + std::to_string(LowerBoundInBytes/sizeof(T)) + "; "
-                    + std::to_string(l.size() <= UpperBoundInBytes/sizeof(T))
-                    + "]");
+        if (byte_count < LowerBoundInBytes || byte_count > UpperBoundInBytes) {
+            throw std::logic_error("Byte count " + std::to_string(byte_count) + " is out of range [" 
+                    + std::to_string(LowerBoundInBytes) + "; "
+                    + std::to_string(UpperBoundInBytes)
+                    + "] in " + __func__);
         }
 
     }
 
     template<unsigned size>
-    vector(const T (&array)[size]) : data(&array[0], &array[size]) {
+    vector(const T (&array)[size]) : byte_count(sizeof(array)), data(&array[0], &array[size]) {
         static_assert(sizeof(array) >= LowerBoundInBytes, "");
         static_assert(sizeof(array) <= UpperBoundInBytes, "");
     }
 
     template<typename F>
-    void for_each_member(F f) const {
-        f(uint<8*log256(UpperBoundInBytes)>(sizeof(T)*data.size())); // size
-        for (const auto& item : data) {
+    void for_each_member(F f) {
+        f(byte_count);
+        if (byte_count != sizeof(T) * data.size()) {
+            std::cerr << "\nUGLY STUFF IN " << __FILE__ << ":" << __LINE__ << " " << __func__ << std::endl;
+            assert(data.empty());
+            assert(byte_count % sizeof(T) == 0);
+            data.resize(byte_count/sizeof(T));
+        }
+        for (auto& item : data) {
             f(item);
         }
     }
 
 private:
-    std::vector<T> data;
+    uint<8*log256(UpperBoundInBytes)> byte_count;
+    std::vector<T>                    data;
 };
 
 enum class content_type : uint8_t {
@@ -186,7 +193,7 @@ struct protocol_version {
     uint8 minor;
 
     template<typename F>
-    void for_each_member(F f) const {
+    void for_each_member(F f) {
         f(major);
         f(minor);
     }
@@ -209,7 +216,7 @@ struct random {
     opaque<28> random_bytes;
 
     template<typename F>
-    void for_each_member(F f) const {
+    void for_each_member(F f) {
         f(gmt_unix_time);
         f(random_bytes);
     }
@@ -277,6 +284,18 @@ enum class compression_method : uint8 {
     null = 0
 };
 
+struct record {
+    tls::content_type     content_type;
+    tls::protocol_version protocol_version;
+    tls::uint<16>         length;
+    template<typename F>
+    void for_each_member(F f) {
+        f(content_type);
+        f(protocol_version);
+        f(length);
+    }
+};
+
 struct client_hello {
     tls::protocol_version                               client_version;
     tls::random                                         random;
@@ -285,7 +304,7 @@ struct client_hello {
     tls::vector<tls::compression_method, 1, (1<<8)-1>   compression_methods;
 
     template<typename F>
-    void for_each_member(F f) const {
+    void for_each_member(F f) {
         f(client_version);
         f(random);
         f(session_id);
@@ -300,9 +319,16 @@ struct server_hello {
     tls::session_id         session_id;
     tls::cipher_suite       cipher_suite;
     tls::compression_method compression_method;
+
+    template<typename F>
+    void for_each_member(F f) {
+        f(server_version);
+        f(random);
+        f(session_id);
+        f(cipher_suite);
+        f(compression_method);
+    }
 };
-
-
 
 namespace detail {
 
@@ -338,7 +364,7 @@ struct append_helper {
     }
     template<typename U=T>
     static void append(std::vector<uint8_t>& buffer, const T& item, typename std::enable_if<has_for_each_member<U>::value>::type* = 0) {
-        item.for_each_member(appender{buffer});
+        const_cast<T&>(item).for_each_member(appender{buffer});
     }
 private:
     struct appender {
@@ -360,7 +386,7 @@ struct size_helper {
     }
     template<typename U=T>
     static void size(size_t& sz, const T& item, typename std::enable_if<has_for_each_member<U>::value>::type* = 0) {
-        item.for_each_member(sizer{sz});
+        const_cast<T&>(item).for_each_member(sizer{sz});
     }
 private:
     struct sizer {
@@ -372,6 +398,36 @@ private:
         size_t& sz;
     };
 };
+
+template<typename T>
+struct from_bytes_helper {
+   template<typename U=T>
+    static void from_bytes(T& item, const uint8_t* buffer, size_t buffer_size, size_t& index, typename std::enable_if<!has_for_each_member<U>::value>::type* = 0) {
+        static_assert(std::is_pod<T>::value, "");
+        if (index + sizeof(T) > buffer_size) {
+            assert(false);
+            throw std::runtime_error("Too few bytes available in " + std::string(__func__));
+        }
+        memcpy(&item, &buffer[index], sizeof(T));
+        index += sizeof(T);
+    }
+    template<typename U=T>
+    static void from_bytes(T& item, const uint8_t* buffer, size_t buffer_size, size_t& index, typename std::enable_if<has_for_each_member<U>::value>::type* = 0) {
+        item.for_each_member(iter_helper{buffer,buffer_size,index});
+    }
+private:
+    struct iter_helper {
+        iter_helper(const uint8_t* buffer, size_t buffer_size, size_t& index) : buffer(buffer), buffer_size(buffer_size), index(index) {}
+        template<typename MemberItemType>
+        void operator()(MemberItemType& member_item) {
+            from_bytes_helper<MemberItemType>::from_bytes(member_item, buffer, buffer_size, index);
+        }
+        const uint8_t* buffer;
+        size_t         buffer_size;
+        size_t&        index;
+    };
+};
+
 } // namespace detail
 
 template<typename T>
@@ -386,32 +442,56 @@ size_t size(const T& item) {
     return sz;
 }
 
+template<typename T>
+void from_bytes(T& item, const std::vector<uint8_t>& buffer, size_t& index)
+{
+    assert(!buffer.empty());
+    detail::from_bytes_helper<T>::from_bytes(item, &buffer[0], buffer.size(), index);
+}
+
 } // namespace tls
 
 void HandleServerHello(boost::asio::ip::tcp::socket& socket)
 {
     std::vector<uint8_t> buffer(5);
     boost::asio::read(socket, boost::asio::buffer(buffer));
-    const auto content_type     = static_cast<tls::content_type>(buffer[0]);
-    const auto protocol_version = tls::protocol_version{buffer[1], buffer[2]};
-    const auto length           = tls::uint_from_bytes(buffer[3], buffer[4]);
 
-    if (content_type != tls::content_type::handshake) {
-        throw std::runtime_error("Invalid record content type " + hexstring(&content_type, sizeof(content_type)) + " in " + __func__);
+    tls::record record;
+    size_t index = 0;
+    tls::from_bytes(record, buffer, index);
+    assert(index == buffer.size());
+
+    if (record.content_type != tls::content_type::handshake) {
+        throw std::runtime_error("Invalid record content type " + hexstring(&record.content_type, sizeof(record.content_type)) + " in " + __func__);
     }
-    if (protocol_version != tls::protocol_version_tls_1_2) {
-        throw std::runtime_error("Invalid record protocol version " + hexstring(&protocol_version, sizeof(protocol_version)) + " in " + __func__);
+    if (record.protocol_version != tls::protocol_version_tls_1_2) {
+        throw std::runtime_error("Invalid record protocol version " + hexstring(&record.protocol_version, sizeof(record.protocol_version)) + " in " + __func__);
     }
     const size_t max_length = (1<<14)-1;
-    if (length < 1 || length > max_length) {
-        throw std::runtime_error("Invalid record length " + std::to_string(length) + " in " + __func__);
+    if (record.length < 1 || record.length > max_length) {
+        throw std::runtime_error("Invalid record length " + std::to_string(record.length) + " in " + __func__);
     }
 
-    buffer.resize(length);
+    buffer.resize(record.length);
     boost::asio::read(socket, boost::asio::buffer(buffer));
+    tls::server_hello server_hello;
+    index = 0;
+    std::cout << "\n\nReading ServerHello\n\n";
+    tls::handshake_type handshake_type;
+    tls::uint<24> body_size;
+    tls::from_bytes(handshake_type, buffer, index);
+    tls::from_bytes(body_size, buffer, index);
+    if (handshake_type != tls::handshake_type::server_hello) {
+        throw std::runtime_error("Invalid handshake type " + hexstring(&handshake_type, sizeof(handshake_type)) + " in " + __func__);
+    }
+    if (index + body_size > buffer.size()) {
+        throw std::runtime_error("Invalid body size " + std::to_string(body_size));
+    }
+    tls::from_bytes(server_hello, buffer, index);
+    assert(index == buffer.size());
 
-    std::cout << hexstring(buffer) << std::endl;
-    assert(false);
+    std::cout << "Cipher: "      << hexstring(&server_hello.cipher_suite, 2) << std::endl;
+    std::cout << "Compresison: " << (int)server_hello.compression_method << std::endl;
 }
 
 void SendClientHello(boost::asio::ip::tcp::socket& socket)
@@ -424,12 +504,13 @@ void SendClientHello(boost::asio::ip::tcp::socket& socket)
         { tls::rsa_with_aes_256_cbc_sha256 },
         { tls::compression_method::null },
     };
-
     auto body_size = tls::size(body);
-    // Record header
-    tls::append_to_buffer(buffer, tls::content_type::handshake);
-    tls::append_to_buffer(buffer, tls::protocol_version_tls_1_2);
-    tls::append_to_buffer(buffer, tls::uint<16>(body_size + 4));
+    tls::record record {
+        tls::content_type::handshake,
+        tls::protocol_version_tls_1_2,
+        tls::uint<16>(body_size + 4)
+    };
+    tls::append_to_buffer(buffer, record);
     assert(buffer.size() == 5);
     // Handshake header
     tls::append_to_buffer(buffer, tls::handshake_type::client_hello);
