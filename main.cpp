@@ -73,6 +73,7 @@ using uint8  = std::uint8_t;
 
 template<unsigned BitCount>
 struct uint {
+    static_assert(BitCount >= 8, "");
     static_assert(BitCount % 8 == 0, "");
     uint() : data() {}
     uint(uint64_t x) {
@@ -83,6 +84,15 @@ struct uint {
             data[i] = x >> ((BitCount/8-1-i)*8);
         }
     }
+
+    operator uint64_t() const {
+        uint64_t result = 0;
+        for (unsigned i = 0; i < BitCount/8; ++i) {
+            result |= static_cast<uint64_t>(data[i]) << ((BitCount/8-1-i)*8);
+        }
+        return result;
+    }
+
     uint8 data[BitCount/8];
 
     template<typename F>
@@ -92,6 +102,9 @@ struct uint {
         }
     }
 };
+
+uint8    uint_from_bytes(uint8_t b0) { return b0; }
+uint<16> uint_from_bytes(uint8_t b0, uint8_t b1) { return (static_cast<uint64_t>(b0)<<8)|b1; }
 
 template<unsigned ByteCount>
 struct opaque {
@@ -178,6 +191,16 @@ struct protocol_version {
         f(minor);
     }
 };
+
+constexpr bool operator==(const protocol_version& a, const protocol_version& b)
+{
+    return a.major == b.major && a.minor == b.minor;
+}
+
+constexpr bool operator!=(const protocol_version& a, const protocol_version& b)
+{
+    return !(a == b);
+}
 
 constexpr protocol_version protocol_version_tls_1_2{3, 3};
 
@@ -271,6 +294,16 @@ struct client_hello {
     }
 };
 
+struct server_hello {
+    tls::protocol_version   server_version;
+    tls::random             random;
+    tls::session_id         session_id;
+    tls::cipher_suite       cipher_suite;
+    tls::compression_method compression_method;
+};
+
+
+
 namespace detail {
 
 // http://en.wikibooks.org/wiki/More_C++_Idioms/Member_Detector
@@ -355,41 +388,33 @@ size_t size(const T& item) {
 
 } // namespace tls
 
-#if 0
+void HandleServerHello(boost::asio::ip::tcp::socket& socket)
+{
+    std::vector<uint8_t> buffer(5);
+    boost::asio::read(socket, boost::asio::buffer(buffer));
+    const auto content_type     = static_cast<tls::content_type>(buffer[0]);
+    const auto protocol_version = tls::protocol_version{buffer[1], buffer[2]};
+    const auto length           = tls::uint_from_bytes(buffer[3], buffer[4]);
 
-struct {
-    ProtocolVersion client_version;
-    Random random;
-    SessionID session_id;
-    CipherSuite cipher_suites<2..2^16-2>;
-    CompressionMethod compression_methods<1..2^8-1>;
-    select (extensions_present) {
-        case false:
-            struct {};
-        case true:
-            Extension extensions<0..2^16-1>;
-    };
-} ClientHello;
+    if (content_type != tls::content_type::handshake) {
+        throw std::runtime_error("Invalid record content type " + hexstring(&content_type, sizeof(content_type)) + " in " + __func__);
+    }
+    if (protocol_version != tls::protocol_version_tls_1_2) {
+        throw std::runtime_error("Invalid record protocol version " + hexstring(&protocol_version, sizeof(protocol_version)) + " in " + __func__);
+    }
+    const size_t max_length = (1<<14)-1;
+    if (length < 1 || length > max_length) {
+        throw std::runtime_error("Invalid record length " + std::to_string(length) + " in " + __func__);
+    }
 
-struct {
-    HandshakeType msg_type;    /* handshake type */
-    uint24 length;             /* bytes in message */
-    select (HandshakeType) {
-        case hello_request:       HelloRequest;
-        case client_hello:        ClientHello;
-        case server_hello:        ServerHello;
-        case certificate:         Certificate;
-        case server_key_exchange: ServerKeyExchange;
-        case certificate_request: CertificateRequest;
-        case server_hello_done:   ServerHelloDone;
-        case certificate_verify:  CertificateVerify;
-        case client_key_exchange: ClientKeyExchange;
-        case finished:            Finished;
-    } body;
-} Handshake;
-#endif
+    buffer.resize(length);
+    boost::asio::read(socket, boost::asio::buffer(buffer));
 
-void ClientHello(boost::asio::ip::tcp::socket& socket)
+    std::cout << hexstring(buffer) << std::endl;
+    assert(false);
+}
+
+void SendClientHello(boost::asio::ip::tcp::socket& socket)
 {
     std::vector<uint8_t> buffer;
     tls::client_hello body{
@@ -447,16 +472,12 @@ int main()
         */
 
         std::cout << "Sending ClientHello ..." << std::flush;
-        ClientHello(socket);
+        SendClientHello(socket);
         std::cout << " OK" << std::endl;
 
-        std::vector<uint8_t> buffer;
-        buffer.resize(1024);
-
-        size_t byte_count = socket.read_some(boost::asio::buffer(buffer));
-        std::cout << byte_count << " bytes read:\n";
-        std::cout << hexstring(buffer) << std::endl;
-
+        std::cout << "Handling ServerHello ..." << std::flush;
+        HandleServerHello(socket);
+        std::cout << " OK" << std::endl;
 
     } catch (const std::exception& e) {
         std::cerr << e.what() << std::endl;
