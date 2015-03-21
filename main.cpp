@@ -56,7 +56,7 @@ void get_random_bytes(void* dest, size_t count) {
 
 template<typename T>
 void get_random_bytes(T& t) {
-    static_assert(std::is_pod<T>::value, "");
+    static_assert(std::is_pod<T>::value && !std::is_pointer<T>::value, "");
     get_random_bytes(&t, sizeof(T));
 }
 
@@ -79,8 +79,8 @@ struct uint {
         if (x >> BitCount) {
             throw std::logic_error(std::to_string(x) + " is out of range for uint<" + std::to_string(BitCount) + ">");
         }
-        for (int i = BitCount/8-1; i >= 0; i--) {
-            data[i] = x >> (i*8);
+        for (unsigned i = 0; i < BitCount/8; ++i) {
+            data[i] = x >> ((BitCount/8-1-i)*8);
         }
     }
     uint8 data[BitCount/8];
@@ -130,10 +130,15 @@ struct vector {
 
     }
 
+    template<unsigned size>
+    vector(const T (&array)[size]) : data(&array[0], &array[size]) {
+        static_assert(sizeof(array) >= LowerBoundInBytes, "");
+        static_assert(sizeof(array) <= UpperBoundInBytes, "");
+    }
 
     template<typename F>
     void for_each_member(F f) const {
-        f(uint<8*log256(UpperBoundInBytes/sizeof(T))>(data.size())); // size
+        f(uint<8*log256(UpperBoundInBytes)>(sizeof(T)*data.size())); // size
         for (const auto& item : data) {
             f(item);
         }
@@ -141,6 +146,13 @@ struct vector {
 
 private:
     std::vector<T> data;
+};
+
+enum class content_type : uint8_t {
+    change_cipher_spec = 20,
+    alert = 21,
+    handshake = 22,
+    application_data = 23,
 };
 
 enum class handshake_type : uint8 {
@@ -187,13 +199,13 @@ inline random make_random() {
     return r;
 }
 
-using session_id  = opaque<32>;
+using session_id  = vector<uint8, 0, 32>;
 
 session_id make_session_id()
 {
-    session_id sid;
-    detail::get_random_bytes(sid);
-    return sid;
+    uint8_t buffer[16];
+    detail::get_random_bytes(buffer);
+    return {buffer};
 }
 
 using cipher_suite = opaque<2>; // Cryptographic suite selector
@@ -231,12 +243,12 @@ constexpr cipher_suite dh_rsa_with_aes_256_cbc_sha256  = { 0x00,0x69 };
 constexpr cipher_suite dhe_dss_with_aes_256_cbc_sha256 = { 0x00,0x6A };
 constexpr cipher_suite dhe_rsa_with_aes_256_cbc_sha256 = { 0x00,0x6B };
 
-constexpr cipher_suite dh_ANON_with_rc4_128_md5        = { 0x00,0x18 };
-constexpr cipher_suite dh_ANON_with_3des_ede_cbc_sha   = { 0x00,0x1B };
-constexpr cipher_suite dh_ANON_with_aes_128_cbc_sha    = { 0x00,0x34 };
-constexpr cipher_suite dh_ANON_with_aes_256_cbc_sha    = { 0x00,0x3A };
-constexpr cipher_suite dh_ANON_with_aes_128_cbc_sha256 = { 0x00,0x6C };
-constexpr cipher_suite dh_ANON_with_aes_256_cbc_sha256 = { 0x00,0x6D };
+constexpr cipher_suite dh_anon_with_rc4_128_md5        = { 0x00,0x18 };
+constexpr cipher_suite dh_anon_with_3des_ede_cbc_sha   = { 0x00,0x1B };
+constexpr cipher_suite dh_anon_with_aes_128_cbc_sha    = { 0x00,0x34 };
+constexpr cipher_suite dh_anon_with_aes_256_cbc_sha    = { 0x00,0x3A };
+constexpr cipher_suite dh_anon_with_aes_128_cbc_sha256 = { 0x00,0x6C };
+constexpr cipher_suite dh_anon_with_aes_256_cbc_sha256 = { 0x00,0x6D };
 
 enum class compression_method : uint8 {
     null = 0
@@ -246,7 +258,7 @@ struct client_hello {
     tls::protocol_version                               client_version;
     tls::random                                         random;
     tls::session_id                                     session_id;
-    tls::vector<tls::cipher_suite, 2, (1<<16)-2>        cipher_suits;
+    tls::vector<tls::cipher_suite, 2, (1<<16)-2>        cipher_suites;
     tls::vector<tls::compression_method, 1, (1<<8)-1>   compression_methods;
 
     template<typename F>
@@ -254,7 +266,7 @@ struct client_hello {
         f(client_version);
         f(random);
         f(session_id);
-        f(cipher_suits);
+        f(cipher_suites);
         f(compression_methods);
     }
 };
@@ -306,11 +318,39 @@ private:
     };
 };
 
+template<typename T>
+struct size_helper {
+   template<typename U=T>
+    static void size(size_t& sz, const T&, typename std::enable_if<!has_for_each_member<U>::value>::type* = 0) {
+        static_assert(std::is_pod<T>::value, "");
+        sz += sizeof(T);
+    }
+    template<typename U=T>
+    static void size(size_t& sz, const T& item, typename std::enable_if<has_for_each_member<U>::value>::type* = 0) {
+        item.for_each_member(sizer{sz});
+    }
+private:
+    struct sizer {
+        sizer(size_t& sz) : sz(sz) {}
+        template<typename MemberItemType>
+        void operator()(const MemberItemType& member_item) {
+            size_helper<MemberItemType>::size(sz, member_item);
+        }
+        size_t& sz;
+    };
+};
 } // namespace detail
 
 template<typename T>
 void append_to_buffer(std::vector<uint8_t>& buffer, const T& item) {
     detail::append_helper<T>::append(buffer, item);
+}
+
+template<typename T>
+size_t size(const T& item) {
+    size_t sz = 0;
+    detail::size_helper<T>::size(sz, item);
+    return sz;
 }
 
 } // namespace tls
@@ -352,14 +392,25 @@ struct {
 void ClientHello(boost::asio::ip::tcp::socket& socket)
 {
     std::vector<uint8_t> buffer;
-    tls::append_to_buffer(buffer, tls::client_hello{
+    tls::client_hello body{
         tls::protocol_version_tls_1_2,
         tls::make_random(),
         tls::make_session_id(),
-        { tls::rsa_with_null_md5 },
+        { tls::rsa_with_aes_256_cbc_sha256 },
         { tls::compression_method::null },
-    });
-    //std::cout << "Buffer: " << hexstring(buffer) << std::endl;
+    };
+
+    auto body_size = tls::size(body);
+    // Record header
+    tls::append_to_buffer(buffer, tls::content_type::handshake);
+    tls::append_to_buffer(buffer, tls::protocol_version_tls_1_2);
+    tls::append_to_buffer(buffer, tls::uint<16>(body_size + 4));
+    assert(buffer.size() == 5);
+    // Handshake header
+    tls::append_to_buffer(buffer, tls::handshake_type::client_hello);
+    tls::append_to_buffer(buffer, tls::uint<24>(body_size));
+    tls::append_to_buffer(buffer, body);
+    assert(buffer.size() == 5 + 4 + body_size);
     boost::asio::write(socket, boost::asio::buffer(buffer));
 }
 
