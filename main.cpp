@@ -451,7 +451,7 @@ void from_bytes(T& item, const std::vector<uint8_t>& buffer, size_t& index)
 
 } // namespace tls
 
-void HandleServerHello(boost::asio::ip::tcp::socket& socket)
+std::pair<tls::content_type, std::vector<uint8_t>> read_record(boost::asio::ip::tcp::socket& socket)
 {
     std::vector<uint8_t> buffer(5);
     boost::asio::read(socket, boost::asio::buffer(buffer));
@@ -461,9 +461,6 @@ void HandleServerHello(boost::asio::ip::tcp::socket& socket)
     tls::from_bytes(record, buffer, index);
     assert(index == buffer.size());
 
-    if (record.content_type != tls::content_type::handshake) {
-        throw std::runtime_error("Invalid record content type " + hexstring(&record.content_type, sizeof(record.content_type)) + " in " + __func__);
-    }
     if (record.protocol_version != tls::protocol_version_tls_1_2) {
         throw std::runtime_error("Invalid record protocol version " + hexstring(&record.protocol_version, sizeof(record.protocol_version)) + " in " + __func__);
     }
@@ -471,27 +468,48 @@ void HandleServerHello(boost::asio::ip::tcp::socket& socket)
     if (record.length < 1 || record.length > max_length) {
         throw std::runtime_error("Invalid record length " + std::to_string(record.length) + " in " + __func__);
     }
-
     buffer.resize(record.length);
     boost::asio::read(socket, boost::asio::buffer(buffer));
-    tls::server_hello server_hello;
-    index = 0;
-    std::cout << "\n\nReading ServerHello\n\n";
+
+    return std::make_pair(record.content_type, std::move(buffer));
+}
+
+std::pair<tls::handshake_type, std::vector<uint8_t>> read_handshake(boost::asio::ip::tcp::socket& socket)
+{
+    auto record = read_record(socket);
+    if (record.first != tls::content_type::handshake) {
+        throw std::runtime_error("Invalid record content type " + hexstring(&record.first, sizeof(record.first)) + " in " + __func__);
+    }
+
+    size_t index = 0;
     tls::handshake_type handshake_type;
     tls::uint<24> body_size;
-    tls::from_bytes(handshake_type, buffer, index);
-    tls::from_bytes(body_size, buffer, index);
-    if (handshake_type != tls::handshake_type::server_hello) {
-        throw std::runtime_error("Invalid handshake type " + hexstring(&handshake_type, sizeof(handshake_type)) + " in " + __func__);
-    }
-    if (index + body_size > buffer.size()) {
+    tls::from_bytes(handshake_type, record.second, index);
+    tls::from_bytes(body_size, record.second, index);
+    if (index + body_size > record.second.size()) {
         throw std::runtime_error("Invalid body size " + std::to_string(body_size));
     }
-    tls::from_bytes(server_hello, buffer, index);
-    assert(index == buffer.size());
+    return std::make_pair(handshake_type, std::vector<uint8_t>{record.second.begin() + index, record.second.end()});
+ }
 
+void HandleServerHello(boost::asio::ip::tcp::socket& socket)
+{
+    auto handshake = read_handshake(socket);
+    tls::server_hello server_hello;
+    size_t index = 0;
+    tls::from_bytes(server_hello, handshake.second, index);
+    assert(index == handshake.second.size());
+    if (handshake.first != tls::handshake_type::server_hello) {
+        throw std::runtime_error("Invalid handshake type " + hexstring(&handshake.first, sizeof(handshake.first)) + " in " + __func__);
+    }
     std::cout << "Cipher: "      << hexstring(&server_hello.cipher_suite, 2) << std::endl;
     std::cout << "Compresison: " << (int)server_hello.compression_method << std::endl;
+
+    for (;;) {
+        auto handshake = read_handshake(socket);
+        std::cout << "Got handshake: " << hexstring(&handshake.first, sizeof(handshake.first)) << std::endl;
+        if (handshake.first == tls::handshake_type::server_hello_done) break;
+    }
 }
 
 void SendClientHello(boost::asio::ip::tcp::socket& socket)
