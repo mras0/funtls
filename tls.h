@@ -88,6 +88,11 @@ struct vector {
         assert(index < size());
         return data[index];
     }
+
+    const std::vector<T>& as_vector() const {
+        return data;
+    }
+
 private:
     std::vector<T>  data;
 };
@@ -136,9 +141,17 @@ struct random {
 random make_random();
 
 using session_id  = vector<uint8, 0, 32>;
-session_id make_session_id();
 
 using cipher_suite = opaque<2>; // Cryptographic suite selector
+
+inline bool operator==(const cipher_suite& a, const cipher_suite& b) {
+    return a.data[0] == b.data[0] && a.data[1] == b.data[1];
+}
+
+inline bool operator!=(const cipher_suite& a, const cipher_suite& b) {
+    return !(a == b);
+}
+
 enum class compression_method : uint8 {
     null = 0
 };
@@ -178,10 +191,17 @@ struct server_hello_done {
     static constexpr tls::handshake_type handshake_type = tls::handshake_type::server_hello_done;
 };
 
+struct client_key_exchange {
+    static constexpr tls::handshake_type handshake_type = tls::handshake_type::client_key_exchange;
+
+    // For RSA
+    opaque<48> encrypted_pre_master_secret;
+};
+
 struct handshake {
     static constexpr tls::content_type content_type = tls::content_type::handshake;
 
-    tls::variant<client_hello, server_hello, certificate, server_hello_done> body;
+    tls::variant<client_hello, server_hello, certificate, server_hello_done, client_key_exchange> body;
 
     tls::handshake_type type() const {
         int type = -1;
@@ -319,6 +339,10 @@ inline void append_to_buffer(std::vector<uint8_t>& buffer, const server_hello_do
     assert(!"Not implemented");
 }
 
+inline void append_to_buffer(std::vector<uint8_t>& buffer, const client_key_exchange& item) {
+    append_to_buffer(buffer, item.encrypted_pre_master_secret);
+}
+
 inline void append_to_buffer(std::vector<uint8_t>& buffer, const handshake& item) {
     std::vector<uint8_t> body_buffer;
     append_to_buffer(body_buffer, item.body);
@@ -431,6 +455,8 @@ inline void from_bytes(certificate& item, const std::vector<uint8_t>& buffer, si
     }
     item.certificate_list = std::move(certificate_list);
 }
+
+handshake handshake_from_bytes(const std::vector<uint8_t>& buffer, size_t& index);
 
 } // namespace tls
 

@@ -17,8 +17,6 @@ CXXFLAGS+=-std=c++11 -Wall -Wextra -g3
 SRCFILES=main.cpp tls.cpp variant.cpp
 OBJS=$(patsubst %.cpp,%.o,$(SRCFILES)) $(BOOSTOBJS)
 
-LDFLAGS+=-lSDL
-
 CXXFLAGS+=-MMD # Generate .d files
 -include $(OBJS:.o=.d)
 

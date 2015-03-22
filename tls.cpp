@@ -37,11 +37,33 @@ random make_random() {
     return r;
 }
 
-session_id make_session_id()
+handshake handshake_from_bytes(const std::vector<uint8_t>& buffer, size_t& index)
 {
-    uint8_t buffer[16];
-    get_random_bytes(buffer);
-    return {buffer};
+    tls::handshake_type handshake_type;
+    tls::uint<24> body_size;
+    tls::from_bytes(handshake_type, buffer, index);
+    tls::from_bytes(body_size, buffer, index);
+    if (index + body_size > buffer.size()) {
+        throw std::runtime_error("Invalid body size " + std::to_string(body_size));
+    }
+    if (handshake_type == tls::handshake_type::server_hello) {
+        tls::server_hello server_hello;
+        tls::from_bytes(server_hello, buffer, index);
+        assert(index == buffer.size());
+        return tls::handshake{std::move(server_hello)};
+    } else if (handshake_type == tls::handshake_type::certificate) {
+        tls::certificate certificate;
+        tls::from_bytes(certificate, buffer, index);
+        assert(index == buffer.size());
+        return tls::handshake{std::move(certificate)};
+    } else if (handshake_type == tls::handshake_type::server_hello_done) {
+        if (body_size != 0) {
+            throw std::runtime_error("Got body " + std::to_string(body_size) + " for server_hello_done");
+        }
+        assert(index == buffer.size());
+        return tls::handshake{tls::server_hello_done{}};
+    }
+    throw std::runtime_error("Unknown handshake type " + std::to_string((int)handshake_type));
 }
 
 
