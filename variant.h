@@ -2,6 +2,7 @@
 #include <utility>
 #include <cassert>
 #include <cstddef>
+#include <stdexcept>
 
 namespace tls {
 namespace detail {
@@ -72,10 +73,11 @@ void invoke(void* storage, int type, F f)
 template<typename... Ts>
 class variant {
 public:
+    // , typename std::enable_if<!std::is_same<typename std::decay<U>::type, variant>::value>::type* =0
     template<typename U>
-    variant(U&& the_u) : type(detail::get_index<U, Ts...>()) {
+    variant(U&& the_u) : type(detail::get_index<typename std::decay<U>::type, Ts...>()) {
         assert(type >= 0);
-        new (&storage) U(std::forward<U>(the_u));
+        new (&storage) typename std::decay<U>::type(std::forward<U>(the_u));
     }
 
     ~variant() {
@@ -114,6 +116,15 @@ public:
     void invoke(F f) const {
         // Lazy...
         detail::invoke<Ts...>(const_cast<void*>(static_cast<const void*>(&storage)), type, f);
+    }
+
+    template<typename U>
+    U& get() {
+        int wanted_type = detail::get_index<typename std::decay<U>::type, Ts...>();
+        if (type != wanted_type) {
+            throw std::logic_error("Invalid cast to type " + std::to_string(wanted_type) + " from " + std::to_string(type));
+        }
+        return *reinterpret_cast<U*>(&storage);
     }
 
 private:

@@ -143,12 +143,6 @@ enum class compression_method : uint8 {
     null = 0
 };
 
-struct record {
-    tls::content_type           content_type;
-    tls::protocol_version       protocol_version;
-    tls::uint<16>               length;
-};
-
 struct client_hello {
     static constexpr tls::handshake_type handshake_type = tls::handshake_type::client_hello;
 
@@ -169,8 +163,25 @@ struct server_hello {
     tls::compression_method compression_method;
 };
 
+using asn1cert = tls::vector<tls::uint8, 1, (1<<24)-1>;
+
+struct certificate {
+    static constexpr tls::handshake_type handshake_type = tls::handshake_type::certificate;
+
+    static constexpr size_t max_length = (1<<24)-1;
+
+    //tls::vector<tls::asn1cert, 0, (1<<24)-1> certificate_list;
+    std::vector<tls::asn1cert> certificate_list;
+};
+
+struct server_hello_done {
+    static constexpr tls::handshake_type handshake_type = tls::handshake_type::server_hello_done;
+};
+
 struct handshake {
-    tls::variant<client_hello, server_hello> body;
+    static constexpr tls::content_type content_type = tls::content_type::handshake;
+
+    tls::variant<client_hello, server_hello, certificate, server_hello_done> body;
 
     tls::handshake_type type() const {
         int type = -1;
@@ -191,6 +202,33 @@ private:
         int& type;
     };
 };
+
+struct record {
+    static constexpr size_t max_length = (1<<14)-1;
+
+    tls::protocol_version       protocol_version;
+    tls::variant<handshake>     payload;
+
+    tls::content_type type() const {
+        int type = -1;
+        payload.invoke(type_helper{type});
+        assert(type >= 0 && type <= 255);
+        return static_cast<tls::content_type>(type);
+    }
+
+private:
+    struct type_helper {
+        type_helper(int& type) : type(type) {}
+        template<typename T>
+        void operator()(const T&) {
+            assert(type < 0);
+            type = static_cast<int>(T::content_type);
+            assert(type >= 0 && type <= 255);
+        }
+        int& type;
+    };
+};
+
 
 inline void append_to_buffer(std::vector<uint8_t>& buffer, uint8 item) {
     buffer.push_back(item);
@@ -253,12 +291,6 @@ inline void append_to_buffer(std::vector<uint8_t>& buffer, const protocol_versio
     buffer.push_back(item.minor);
 }
 
-inline void append_to_buffer(std::vector<uint8_t>& buffer, const record& item) {
-    append_to_buffer(buffer, item.content_type);
-    append_to_buffer(buffer, item.protocol_version);
-    append_to_buffer(buffer, item.length);
-}
-
 inline void append_to_buffer(std::vector<uint8_t>& buffer, const random& item) {
     append_to_buffer(buffer, item.gmt_unix_time);
     append_to_buffer(buffer, item.random_bytes);
@@ -272,7 +304,17 @@ inline void append_to_buffer(std::vector<uint8_t>& buffer, const client_hello& i
     append_to_buffer(buffer, item.compression_methods);
 }
 
+inline void append_to_buffer(std::vector<uint8_t>& buffer, const certificate& item) {
+    (void) buffer; (void) item;
+    assert(!"Not implemented");
+}
+
 inline void append_to_buffer(std::vector<uint8_t>& buffer, const server_hello& item) {
+    (void) buffer; (void) item;
+    assert(!"Not implemented");
+}
+
+inline void append_to_buffer(std::vector<uint8_t>& buffer, const server_hello_done& item) {
     (void) buffer; (void) item;
     assert(!"Not implemented");
 }
@@ -284,6 +326,18 @@ inline void append_to_buffer(std::vector<uint8_t>& buffer, const handshake& item
     append_to_buffer(buffer, item.type());
     append_to_buffer(buffer, tls::uint<24>{body_buffer.size()});
     buffer.insert(buffer.end(), body_buffer.begin(), body_buffer.end());
+}
+
+inline void append_to_buffer(std::vector<uint8_t>& buffer, const record& item) {
+    std::vector<uint8_t> payload_buffer;
+    append_to_buffer(payload_buffer, item.payload);
+
+    assert(payload_buffer.size() < record::max_length);
+
+    append_to_buffer(buffer, item.type());
+    append_to_buffer(buffer, item.protocol_version);
+    append_to_buffer(buffer, tls::uint<16>{payload_buffer.size()});
+    buffer.insert(buffer.end(), payload_buffer.begin(), payload_buffer.end());
 }
 
 template<unsigned BitCount>
@@ -343,17 +397,39 @@ inline void from_bytes(random& item, const std::vector<uint8_t>& buffer, size_t&
     from_bytes(item.gmt_unix_time, buffer, index);
     from_bytes(item.random_bytes, buffer, index);
 }
-inline void from_bytes(record& item, const std::vector<uint8_t>& buffer, size_t& index) {
-    from_bytes(item.content_type, buffer, index);
-    from_bytes(item.protocol_version, buffer, index);
-    from_bytes(item.length, buffer, index);
-}
 inline void from_bytes(server_hello& item, const std::vector<uint8_t>& buffer, size_t& index) {
     from_bytes(item.server_version, buffer, index);
     from_bytes(item.random, buffer, index);
     from_bytes(item.session_id, buffer, index);
     from_bytes(item.cipher_suite, buffer, index);
     from_bytes(item.compression_method, buffer, index);
+}
+inline void from_bytes(certificate& item, const std::vector<uint8_t>& buffer, size_t& index) {
+    // TODO: XXX: This is ugly...
+    uint<24> length;
+    from_bytes(length, buffer, index);
+    std::vector<tls::asn1cert> certificate_list;
+    std::cout << "Reading " << length << " bytes of certificate data\n";
+    if (index + length > buffer.size()) {
+        throw std::runtime_error("Out of data in " + std::string(__func__));
+    }
+    size_t bytes_used = 3;
+    for (;;) {
+        uint<24> cert_length;
+        from_bytes(cert_length, buffer, index);
+        std::cout << " Found certificate of length " << cert_length << "\n";
+        if (!cert_length) throw std::runtime_error("Empty certificate found");
+        if (index + cert_length > buffer.size()) throw std::runtime_error("Out of data in " + std::string(__func__));
+        std::vector<uint8> cert_data(&buffer[index], &buffer[index+cert_length]);
+        index+=cert_length;
+        certificate_list.emplace_back(std::move(cert_data));
+        bytes_used+=cert_length;
+        if (bytes_used >= length) {
+            assert(bytes_used == length);
+            break;
+        }
+    }
+    item.certificate_list = std::move(certificate_list);
 }
 
 } // namespace tls
