@@ -109,6 +109,19 @@ void SendClientHello(boost::asio::ip::tcp::socket& socket)
         { tls::rsa_with_aes_256_cbc_sha256 },
         { tls::compression_method::null },
     });
+
+    tls::handshake handshake{
+        tls::handshake_type::client_hello,
+        body.size(),
+        tls::client_hello{
+            tls::protocol_version_tls_1_2,
+            tls::make_random(),
+            tls::make_session_id(),
+            { tls::rsa_with_aes_256_cbc_sha256 },
+            { tls::compression_method::null },
+        }
+    };
+
     std::vector<uint8_t> buffer;
     tls::record record {
         tls::content_type::handshake,

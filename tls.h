@@ -11,6 +11,8 @@
 #include <string>
 #include <iostream>
 
+#include "variant.h"
+
 namespace tls {
 
 using uint8  = std::uint8_t;
@@ -78,6 +80,15 @@ struct vector {
         return data.size() * sizeof(T);
     }
 
+    size_t size() const {
+        return data.size();
+    }
+
+    T operator[](size_t index) const {
+        assert(index < size());
+        return data[index];
+    }
+private:
     std::vector<T>  data;
 };
 
@@ -133,9 +144,9 @@ enum class compression_method : uint8 {
 };
 
 struct record {
-    tls::content_type     content_type;
-    tls::protocol_version protocol_version;
-    tls::uint<16>         length;
+    tls::content_type           content_type;
+    tls::protocol_version       protocol_version;
+    tls::uint<16>               length;
 };
 
 struct client_hello {
@@ -152,6 +163,13 @@ struct server_hello {
     tls::session_id         session_id;
     tls::cipher_suite       cipher_suite;
     tls::compression_method compression_method;
+};
+
+struct handshake {
+    tls::handshake_type         handshake_type;
+    tls::uint<24>               length;
+    tls::variant<client_hello,
+                 server_hello>  body;
 };
 
 inline void append_to_buffer(std::vector<uint8_t>& buffer, uint8 item) {
@@ -182,8 +200,8 @@ inline void append_to_buffer(std::vector<uint8_t>& buffer, const opaque<ByteCoun
 template<typename T, size_t LowerBoundInBytes, size_t UpperBoundInBytes>
 inline void append_to_buffer(std::vector<uint8_t>& buffer, const vector<T, LowerBoundInBytes, UpperBoundInBytes>& item) {
     append_to_buffer(buffer, item.byte_count());
-    for (const auto& subitem : item.data) {
-        append_to_buffer(buffer, subitem);
+    for (size_t i = 0, sz = item.size(); i < sz; ++i) {
+        append_to_buffer(buffer, item[i]);
     }
 }
 
