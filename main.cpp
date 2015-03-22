@@ -101,27 +101,27 @@ void HandleServerHello(boost::asio::ip::tcp::socket& socket)
 
 void SendClientHello(boost::asio::ip::tcp::socket& socket)
 {
-    std::vector<uint8_t> buffer;
-    tls::client_hello body{
+    std::vector<uint8_t> body;
+    tls::append_to_buffer(body, tls::client_hello{
         tls::protocol_version_tls_1_2,
         tls::make_random(),
         tls::make_session_id(),
         { tls::rsa_with_aes_256_cbc_sha256 },
         { tls::compression_method::null },
-    };
-    auto body_size = tls::size(body);
+    });
+    std::vector<uint8_t> buffer;
     tls::record record {
         tls::content_type::handshake,
         tls::protocol_version_tls_1_2,
-        tls::uint<16>(body_size + 4)
+        tls::uint<16>(body.size() + 4)
     };
     tls::append_to_buffer(buffer, record);
     assert(buffer.size() == 5);
     // Handshake header
-    tls::append_to_buffer(buffer, tls::handshake_type::client_hello);
-    tls::append_to_buffer(buffer, tls::uint<24>(body_size));
-    tls::append_to_buffer(buffer, body);
-    assert(buffer.size() == 5 + 4 + body_size);
+    buffer.push_back(static_cast<uint8_t>(tls::handshake_type::client_hello));
+    tls::append_to_buffer(buffer, tls::uint<24>(body.size()));
+    buffer.insert(buffer.end(), body.begin(), body.end());
+    assert(buffer.size() == 5 + 4 + body.size());
     boost::asio::write(socket, boost::asio::buffer(buffer));
 }
 
