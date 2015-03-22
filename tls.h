@@ -150,6 +150,8 @@ struct record {
 };
 
 struct client_hello {
+    static constexpr tls::handshake_type handshake_type = tls::handshake_type::client_hello;
+
     tls::protocol_version                               client_version;
     tls::random                                         random;
     tls::session_id                                     session_id;
@@ -158,6 +160,8 @@ struct client_hello {
 };
 
 struct server_hello {
+    static constexpr tls::handshake_type handshake_type = tls::handshake_type::server_hello;
+
     tls::protocol_version   server_version;
     tls::random             random;
     tls::session_id         session_id;
@@ -166,14 +170,34 @@ struct server_hello {
 };
 
 struct handshake {
-    tls::handshake_type         handshake_type;
-    tls::uint<24>               length;
-    tls::variant<client_hello,
-                 server_hello>  body;
+    tls::variant<client_hello, server_hello> body;
+
+    tls::handshake_type type() const {
+        int type = -1;
+        body.invoke(type_helper{type});
+        assert(type >= 0 && type <= 255);
+        return static_cast<tls::handshake_type>(type);
+    }
+
+private:
+    struct type_helper {
+        type_helper(int& type) : type(type) {}
+        template<typename T>
+        void operator()(const T&) {
+            assert(type < 0);
+            type = static_cast<int>(T::handshake_type);
+            assert(type >= 0 && type <= 255);
+        }
+        int& type;
+    };
 };
 
 inline void append_to_buffer(std::vector<uint8_t>& buffer, uint8 item) {
     buffer.push_back(item);
+}
+
+inline void append_to_buffer(std::vector<uint8_t>& buffer, handshake_type item) {
+    buffer.push_back(static_cast<uint8_t>(item));
 }
 
 inline void append_to_buffer(std::vector<uint8_t>& buffer, content_type item) {
@@ -205,6 +229,25 @@ inline void append_to_buffer(std::vector<uint8_t>& buffer, const vector<T, Lower
     }
 }
 
+namespace detail {
+struct append_helper {
+    append_helper(std::vector<uint8_t>& buffer) : buffer(buffer) {
+    }
+
+    template<typename T>
+    void operator()(const T& t) {
+        append_to_buffer(buffer, t);
+    }
+
+    std::vector<uint8_t>& buffer;
+};
+} // namespace detail
+
+template<typename... Ts>
+void append_to_buffer(std::vector<uint8_t>& buffer, const tls::variant<Ts...>& item) {
+    item.invoke(detail::append_helper{buffer});
+}
+
 inline void append_to_buffer(std::vector<uint8_t>& buffer, const protocol_version& item) {
     buffer.push_back(item.major);
     buffer.push_back(item.minor);
@@ -227,6 +270,20 @@ inline void append_to_buffer(std::vector<uint8_t>& buffer, const client_hello& i
     append_to_buffer(buffer, item.session_id);
     append_to_buffer(buffer, item.cipher_suites);
     append_to_buffer(buffer, item.compression_methods);
+}
+
+inline void append_to_buffer(std::vector<uint8_t>& buffer, const server_hello& item) {
+    (void) buffer; (void) item;
+    assert(!"Not implemented");
+}
+
+inline void append_to_buffer(std::vector<uint8_t>& buffer, const handshake& item) {
+    std::vector<uint8_t> body_buffer;
+    append_to_buffer(body_buffer, item.body);
+
+    append_to_buffer(buffer, item.type());
+    append_to_buffer(buffer, tls::uint<24>{body_buffer.size()});
+    buffer.insert(buffer.end(), body_buffer.begin(), body_buffer.end());
 }
 
 template<unsigned BitCount>

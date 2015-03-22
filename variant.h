@@ -107,7 +107,13 @@ public:
 
     template<typename F>
     void invoke(F f) {
-       detail::invoke<Ts...>(&storage, type, f);
+        detail::invoke<Ts...>(&storage, type, f);
+    }
+
+    template<typename F>
+    void invoke(F f) const {
+        // Lazy...
+        detail::invoke<Ts...>(const_cast<void*>(static_cast<const void*>(&storage)), type, f);
     }
 
 private:
