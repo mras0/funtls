@@ -7,7 +7,7 @@ test: all
 	./$(EXE)
 
 CFLAGS+=-Wall -Wextra -std=c99
-SRCFILES=shatest.c sha1.c usha.c
+SRCFILES=shatest.c sha1.c sha224-256.c
 
 OBJS=$(patsubst %.c,%.o,$(SRCFILES))
 

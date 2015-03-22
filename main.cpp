@@ -38,25 +38,7 @@ std::string hexstring(const T& x)
     return hexstring(&x[0], x.size() * sizeof(x[0]));
 }
 
-#if 0
-std::pair<tls::handshake_type, std::vector<uint8_t>> read_handshake(boost::asio::ip::tcp::socket& socket)
-{
-    auto record = read_record(socket);
-    if (record.first != tls::content_type::handshake) {
-        throw std::runtime_error("Invalid record content type " + hexstring(&record.first, sizeof(record.first)) + " in " + __func__);
-    }
 
-    size_t index = 0;
-    tls::handshake_type handshake_type;
-    tls::uint<24> body_size;
-    tls::from_bytes(handshake_type, record.second, index);
-    tls::from_bytes(body_size, record.second, index);
-    if (index + body_size > record.second.size()) {
-        throw std::runtime_error("Invalid body size " + std::to_string(body_size));
-    }
-    return std::make_pair(handshake_type, std::vector<uint8_t>{record.second.begin() + index, record.second.end()});
-}
-#endif
 
 class tls_socket {
 public:
@@ -235,6 +217,7 @@ private:
         */
 
         tls::client_key_exchange client_key_exchange;
+        assert(false);
         send_record(tls::handshake{client_key_exchange});
     }
 };
