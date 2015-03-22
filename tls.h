@@ -15,6 +15,8 @@
 
 namespace tls {
 
+void get_random_bytes(void* dest, size_t count);
+
 using uint8  = std::uint8_t;
 
 template<unsigned BitCount>
@@ -194,14 +196,26 @@ struct server_hello_done {
 struct client_key_exchange {
     static constexpr tls::handshake_type handshake_type = tls::handshake_type::client_key_exchange;
 
+    //Implementation note: Public-key-encrypted data is represented as an
+    //opaque vector <0..2^16-1> (see Section 4.7).  Thus, the RSA-encrypted
+    //PreMasterSecret in a ClientKeyExchange is preceded by two length
+    //bytes.
+
     // For RSA
-    opaque<48> encrypted_pre_master_secret;
+    vector<uint8, 0, (1<<16)-1> encrypted_pre_master_secret; // Always 48 bytes for RSA
+};
+
+struct finished {
+    static constexpr tls::handshake_type handshake_type = tls::handshake_type::finished;
+
+    static constexpr size_t verify_data_length = 12; // For RSA at least
+    opaque<verify_data_length> verify_data;
 };
 
 struct handshake {
     static constexpr tls::content_type content_type = tls::content_type::handshake;
 
-    tls::variant<client_hello, server_hello, certificate, server_hello_done, client_key_exchange> body;
+    tls::variant<client_hello, server_hello, certificate, server_hello_done, client_key_exchange, finished> body;
 
     tls::handshake_type type() const {
         int type = -1;
@@ -223,11 +237,17 @@ private:
     };
 };
 
+struct change_cipher_spec {
+    static constexpr tls::content_type content_type = tls::content_type::change_cipher_spec;
+    enum : uint8 { change_cipher_spec_type = 1 };
+    /*enum change_cipher_spec_type type;*/
+};
+
 struct record {
     static constexpr size_t max_length = (1<<14)-1;
 
-    tls::protocol_version       protocol_version;
-    tls::variant<handshake>     payload;
+    tls::protocol_version                        protocol_version;
+    tls::variant<handshake, change_cipher_spec>  payload;
 
     tls::content_type type() const {
         int type = -1;
@@ -341,6 +361,14 @@ inline void append_to_buffer(std::vector<uint8_t>& buffer, const server_hello_do
 
 inline void append_to_buffer(std::vector<uint8_t>& buffer, const client_key_exchange& item) {
     append_to_buffer(buffer, item.encrypted_pre_master_secret);
+}
+
+inline void append_to_buffer(std::vector<uint8_t>& buffer, const finished& item) {
+    append_to_buffer(buffer, item.verify_data);
+}
+
+inline void append_to_buffer(std::vector<uint8_t>& buffer, const change_cipher_spec&) {
+    buffer.push_back(change_cipher_spec::change_cipher_spec_type);
 }
 
 inline void append_to_buffer(std::vector<uint8_t>& buffer, const handshake& item) {

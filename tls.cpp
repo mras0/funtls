@@ -3,18 +3,10 @@
 #include <sys/time.h> // gettimeofday
 
 namespace {
-// "random"
-void get_random_bytes(void* dest, size_t count) {
-    static uint8_t seed = 0;
-    uint8_t* b = static_cast<uint8_t*>(dest);
-    while (count--) {
-        *b++ = seed++;
-    }
-}
 template<typename T>
 void get_random_bytes(T& t) {
     static_assert(std::is_pod<T>::value && !std::is_pointer<T>::value, "");
-    get_random_bytes(&t, sizeof(T));
+    tls::get_random_bytes(&t, sizeof(T));
 }
 
 uint32_t get_gmt_unix_time()
@@ -27,13 +19,20 @@ uint32_t get_gmt_unix_time()
 } // unnamed namespace
 
 namespace tls {
-namespace detail {
-} // namespace detail
+
+// "random"
+void get_random_bytes(void* dest, size_t count) {
+    static uint8_t seed = 0;
+    uint8_t* b = static_cast<uint8_t*>(dest);
+    while (count--) {
+        *b++ = seed++;
+    }
+}
 
 random make_random() {
     random r;
     r.gmt_unix_time = get_gmt_unix_time();
-    get_random_bytes(r.random_bytes);
+    ::get_random_bytes(r.random_bytes);
     return r;
 }
 

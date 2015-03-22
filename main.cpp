@@ -70,8 +70,11 @@ public:
         send_client_hello();
         read_server_hello();
         read_until_server_hello_done();
-
         send_client_key_exchange();
+        send_change_cipher_spec();
+        send_finished();
+        read_change_cipher_spec();
+        read_finished();
 
         std::cout << "Session " << hexstring(sesion_id.as_vector()) << " in progress\n";
     }
@@ -189,36 +192,40 @@ private:
         // OK, now it's time to do ClientKeyExchange
         // Since we're doing RSA, we'll be sending the EncryptedPreMasterSecret
 
-        /*
-   If RSA is being used for key agreement and authentication, the
-      client generates a 48-byte premaster secret, encrypts it using the
-      public key from the server's certificate, and sends the result in
-      an encrypted premaster secret message.  This structure is a
-      variant of the ClientKeyExchange message and is not a message in
-      itself.
+        // Prepare pre-master secret (version + 46 random bytes)
+        uint8_t pre_master_secret[48];
+        pre_master_secret[0] = current_protocol_version.major;
+        pre_master_secret[1] = current_protocol_version.minor;
+        tls::get_random_bytes(&pre_master_secret[2], 46);
 
-   Structure of this message:
+        // TODO: Encrypt pre_master_secret using the public key from the server's certificate
+        std::cout << "Not encrypting pre-master secret in " << __PRETTY_FUNCTION__ << std::endl;
 
-      struct {
-          ProtocolVersion client_version;
-          opaque random[46];
-      } PreMasterSecret;
-
-      client_version
-         The latest (newest) version supported by the client.  This is
-         used to detect version rollback attacks.
-
-      random
-         46 securely-generated random bytes.
-
-      struct {
-          public-key-encrypted PreMasterSecret pre_master_secret;
-      } EncryptedPreMasterSecret;
-        */
-
-        tls::client_key_exchange client_key_exchange;
-        assert(false);
+        tls::client_key_exchange client_key_exchange{tls::vector<tls::uint8,0,(1<<16)-1>{pre_master_secret}};
         send_record(tls::handshake{client_key_exchange});
+    }
+
+    void send_change_cipher_spec()
+    {
+        send_record(tls::change_cipher_spec{});
+    }
+
+    void send_finished() {
+//      verify_data = PRF(master_secret, finished_label, Hash(handshake_messages))[0..verify_data_length-1]
+        std::cout << "Not encrypting data in " << __PRETTY_FUNCTION__ << std::endl;
+        tls::opaque<tls::finished::verify_data_length> verify_data;
+        send_record(tls::handshake{tls::finished{verify_data}});
+    }
+
+    void read_change_cipher_spec(){
+        (void) read_record().payload.get<tls::change_cipher_spec>();
+        std::cout << "Got ChangeCipherSpec from server\n";
+    }
+
+    void read_finished() {
+        auto record = read_record();
+        auto& finished = record.payload.get<tls::handshake>().body.get<tls::finished>();
+        std::cout << "Got finished from server: " << hexstring(finished.verify_data.data, tls::finished::verify_data_length) << std::endl;
     }
 };
 
