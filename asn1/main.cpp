@@ -2,6 +2,7 @@
 #include <fstream>
 #include <vector>
 #include <string>
+#include <sstream>
 #include <stdexcept>
 #include <cassert>
 #include <iomanip>
@@ -47,6 +48,12 @@ struct buffer_view {
         return buffer_[index_++];
     }
 
+    void get_many(void* dest, size_t num_bytes) {
+        if (index_ + num_bytes > size_) throw std::runtime_error("Out of data in " + std::string(__PRETTY_FUNCTION__));
+        memcpy(dest, &buffer_[index_], num_bytes);
+        index_ += num_bytes;
+    }
+
     buffer_view get_slice(size_t slice_size) {
         if (index_ + slice_size > size_) throw std::runtime_error("Out of data in " + std::string(__PRETTY_FUNCTION__));
         const uint8_t* slice_buffer = buffer_ + index_;
@@ -64,10 +71,14 @@ class asn1_identifier {
 public:
     static constexpr uint8_t constructed_bit = 0x20;
     enum asn1_tag : uint8_t {
-        integer   = 0x02,
-        object_id = 0x06,
-        sequence  = 0x10,
-        set       = 0x11,
+        integer              = 0x02,
+        bit_string           = 0x03,
+        object_id            = 0x06,
+        utf8_string          = 0x0C,
+        sequence             = 0x10,
+        set                  = 0x11,
+        printable_string     = 0x13,
+        utc_time             = 0x17,
         constructed_sequence = sequence | constructed_bit,
         constructed_set      = set      | constructed_bit,
     };
@@ -123,16 +134,6 @@ asn1_identifier read_asn1_identifier(buffer_view& buf)
     return asn1_identifier{id};
 }
 
-uint64_t asn1_get_unsigned(buffer_view& buf, size_t len)
-{
-    uint64_t n = 0;
-    for (unsigned i = 0; i < len; ++i) {
-        n <<= 8;
-        n |= buf.get();
-    }
-    return n;
-}
-
 size_t read_asn1_length(buffer_view& buf)
 {
     const uint8_t first_size_byte = buf.get();
@@ -140,7 +141,11 @@ size_t read_asn1_length(buffer_view& buf)
         const uint8_t length_octets = first_size_byte & 0x7f;
         if (length_octets == 0x7f) throw std::runtime_error("Illegal length octet");
         if (length_octets > sizeof(size_t)) throw std::runtime_error("Unsupported length octet count " + std::to_string(length_octets));
-        size_t sz = asn1_get_unsigned(buf, length_octets);
+        size_t sz = 0;
+        for (unsigned i = 0; i < length_octets; ++i) {
+            sz <<= 8;
+            sz |= buf.get();
+        }
         return sz;
     } else {
         return first_size_byte & 0x7f;
@@ -169,27 +174,69 @@ int_type asn1_read_integer(buffer_view& buf)
         val <<= 8;
         val |= int_buf.get();
     }
-    std::cout << "Read integer: " << val << std::endl;
     return val;
 }
 
-void put_oid(std::ostream& os, const std::vector<uint64_t>& oid)
+bool asn1_is_valid_printable_character(char c)
 {
-    assert(!oid.empty());
-    os << oid[0];
-    for (unsigned i = 1; i < oid.size(); ++i) {
-        os << "." << oid[i];
+    if (c >= 'A' && c <= 'Z') return true;
+    if (c >= 'a' && c <= 'z') return true;
+    if (c >= '0' && c <= '9') return true;
+    for (const char* check_char = " '()+,-./:=?"; *check_char; ++check_char) {
+        if (*check_char == c) return true;
     }
+    return false;
 }
 
-std::vector<uint64_t> asn1_read_object_id(buffer_view& buf)
+class asn1_object_id {
+public:
+    asn1_object_id() : components_() {
+    }
+
+    asn1_object_id(std::vector<uint32_t> components) : components_(components) {
+    }
+
+    asn1_object_id(std::initializer_list<uint32_t> components) : components_(components) {
+    }
+
+    size_t size() const {
+        return components_.size();
+    }
+
+    uint32_t operator[](size_t index) const {
+        assert(index < size());
+        return components_[index];
+    }
+
+    bool operator==(const asn1_object_id& rhs) const {
+        return components_ == rhs.components_;
+    }
+
+    bool operator!=(const asn1_object_id& rhs) const {
+        return !(*this == rhs);
+    }
+
+    friend std::ostream& operator<<(std::ostream& os, const asn1_object_id& oid) {
+        assert(!oid.components_.empty());
+        os << oid.components_[0];
+        for (unsigned i = 1; i < oid.components_.size(); ++i) {
+            os << "." << oid.components_[i];
+        }
+        return os;
+    }
+
+private:
+    std::vector<uint32_t> components_;
+};
+
+asn1_object_id asn1_read_object_id(buffer_view& buf)
 {
     auto oid_buf = asn1_expect_id(buf, asn1_identifier::object_id);
     if (oid_buf.size() < 1 || oid_buf.size() > 20) { // What are common sizes?
         throw std::runtime_error("Invalid oid size " + std::to_string(oid_buf.size()) + " in " + __PRETTY_FUNCTION__);
     }
     const uint8_t first = oid_buf.get();
-    std::vector<uint64_t> res;
+    std::vector<uint32_t> res;
     /*
        The first octet has value 40 * value1 + value2.
        (This is unambiguous, since value1 is limited to values 0, 1, and 2; value2 is limited to the 
@@ -205,9 +252,14 @@ std::vector<uint64_t> asn1_read_object_id(buffer_view& buf)
        }
     */
     while (oid_buf.remaining()) {
-        uint64_t value = 0;
+        uint32_t value = 0;
         uint8_t read_byte = 0;
         do {
+            if (value >= (1<<21)) {
+                // OIDs must be less than 2^28, so if the value before shifting by 7 is >= 2^21
+                // it is about to become out of range
+                throw std::runtime_error("OID value out of range in " + std::string(__PRETTY_FUNCTION__));
+            }
             read_byte = oid_buf.get();
             value <<= 7;
             value |= read_byte & 0x7f;
@@ -231,60 +283,365 @@ void print_all(buffer_view& buf, const char* name)
         buf.skip(len);
     }
 }
+enum class x500_attribute_type : uint32_t {
+    objectClass = 0,
+    aliasedEntryName = 1,
+    knowldgeinformation = 2,
+    commonName = 3,
+    surname = 4,
+    serialNumber = 5,
+    countryName = 6,
+    localityName = 7,
+    stateOrProvinceName = 8,
+    streetAddress = 9,
+    organizationName = 10,
+    organizationalUnitName = 11,
+    title = 12,
+    description = 13,
+    searchGuide = 14,
+    businessCategory = 15,
+    postalAddress = 16,
+    postalCode = 17,
+    postOfficeBox = 18,
+    physicalDeliveryOfficeName = 19,
+    telephoneNumber = 20,
+    telexNumber = 21,
+    teletexTerminalIdentifier = 22,
+    facsimileTelephoneNumber = 23,
+    x121Address = 24,
+    internationalISDNNumber = 25,
+    registeredAddress = 26,
+    destinationIndicator = 27,
+    preferredDeliveryMethod = 28,
+    presentationAddress = 29,
+    supportedApplicationContext = 30,
+    member = 31,
+    owner = 32,
+    roleOccupant = 33,
+    seeAlso = 34,
+    userPassword = 35,
+    userCertificate = 36,
+    cACertificate = 37,
+    authorityRevocationList = 38,
+    certificateRevocationList = 39,
+    crossCertificatePair = 40,
+    name = 41,
+    givenName = 42,
+    initials = 43,
+    generationQualifier = 44,
+    uniqueIdentifier = 45,
+    dnQualifier = 46,
+    enhancedSearchGuide = 47,
+    protocolInformation = 48,
+    distinguishedName = 49,
+    uniqueMember = 50,
+    houseIdentifier = 51,
+    supportedAlgorithms = 52,
+    deltaRevocationList = 53,
+    //    Attribute Certificate attribute (attributeCertificate) = 58
+    pseudonym = 65,
+};
 
+std::ostream& operator<<(std::ostream& os, const x500_attribute_type& attr) {
+    switch (attr) {
 
-void parse_TBSCertificate(buffer_view& buf)
+    case x500_attribute_type::commonName:
+        os << "Common name";
+        break;
+    case x500_attribute_type::countryName:
+        os << "Country";
+        break;
+    case x500_attribute_type::stateOrProvinceName:
+        os << "State/Province";
+        break;
+    case x500_attribute_type::organizationName:
+        os << "Organization";
+        break;
+    default:
+        os << "Unknown " << static_cast<uint32_t>(attr);
+        break;
+    }
+    return os;
+}
+
+void parse_Name(buffer_view& buf)
 {
-    auto elem_buf = asn1_expect_id(buf, asn1_identifier::constructed_sequence);
-
-    auto version_buf = asn1_expect_id(elem_buf, asn1_identifier::tagged(0) | asn1_identifier::constructed_bit);
-    auto ver = asn1_read_integer(version_buf);
-    assert(version_buf.remaining() == 0);
-    std::cout << "Version " << (ver+1) << std::endl;
-    assert(ver == 2); // v3
-
-    auto serial_number = asn1_read_integer(elem_buf);
-    std::cout << "Serial number: 0x" << std::hex << serial_number << std::dec << std::endl;
-
-    auto algo_buf = asn1_expect_id(elem_buf, asn1_identifier::constructed_sequence);
-    auto algo_id = asn1_read_object_id(algo_buf); // algorithm OBJECT IDENTIFIER,
-    //Ignore - parameters  ANY DEFINED BY algorithm OPTIONAL  }
-    std::cout << "Algorithm: "; put_oid(std::cout, algo_id); std::cout << std::endl;
-    std::cout << "  - Expecting 1.2.840.113549.1.1.11 (sha256WithRSAEncryption)" << std::endl;
-    assert(algo_id == std::vector<uint64_t>({1,2,840,113549,1,1,11}));
 
     // Name ::= CHOICE { RDNSequence }
     // RDNSequence ::= SEQUENCE OF RelativeDistinguishedName 
     // RelativeDistinguishedName ::= SET OF AttributeValueAssertion
     // AttributeValueAssertion ::= SEQUENCE { AttributeType, AttributeValue }
     // AttributeType ::= OBJECT IDENTIFIER
-    // AttributeValue ::= ANY
-    auto issuer_name_buf = asn1_expect_id(elem_buf, asn1_identifier::constructed_sequence); // RDNSequence
-    while (issuer_name_buf.remaining()) {
-        auto rdn_buf = asn1_expect_id(issuer_name_buf, asn1_identifier::constructed_set);
+    auto name_buf = asn1_expect_id(buf, asn1_identifier::constructed_sequence); // RDNSequence
+    while (name_buf.remaining()) {
+        auto rdn_buf = asn1_expect_id(name_buf, asn1_identifier::constructed_set);
         while (rdn_buf.remaining()) {
             auto av_pair_buf = asn1_expect_id(rdn_buf, asn1_identifier::constructed_sequence);
             auto attribute_type = asn1_read_object_id(av_pair_buf);
-            std::cout << "Attribute: "; put_oid(std::cout, attribute_type); std::cout << std::endl;
+
+            // 2.5.4 - X.500 attribute types
+            // http://www.alvestrand.no/objectid/2.5.4.html
+            if (attribute_type.size() != 4 || attribute_type[0] != 2 || attribute_type[1] != 5 || attribute_type[2] != 4) {
+                std::ostringstream oss;
+                oss << "Invalid attribute found in " << __PRETTY_FUNCTION__ << ": " << attribute_type;
+                throw std::runtime_error(oss.str());
+            }
+            const auto x500_attr_type = static_cast<x500_attribute_type>(attribute_type[3]);
             auto id = read_asn1_identifier(av_pair_buf);
             auto len = read_asn1_length(av_pair_buf);
-            std::cout << "Skipping value:  len=" << std::setw(4) << len << " " << id << std::endl;
-            // 12 and 19 are UTF8String and PrintableString  respectively
-            // must be some kind of string type
-            av_pair_buf.skip(len);
+            const size_t name_max_length = 200;
+            if (len < 1 || len > name_max_length) {
+                throw std::runtime_error("Invalid length found in " + std::string(__PRETTY_FUNCTION__) + " id=" + std::to_string((uint8_t)id) + " len=" + std::to_string(len));
+            }
+            if (id == asn1_identifier::printable_string || id == asn1_identifier::utf8_string) {
+                std::string s(len, '\0');
+                if (len) av_pair_buf.get_many(&s[0], len);
+                // TODO: check that the string is valid
+                std::cout << " " << x500_attr_type << ": '" << s << "'" << std::endl;
+            } else {
+                // Only TeletexString, UniversalString or BMPString allowed here
+                throw std::runtime_error("Unknown type found in " + std::string(__PRETTY_FUNCTION__) + " id=" + std::to_string((uint8_t)id) + " len=" + std::to_string(len));
+            }
             assert(av_pair_buf.remaining() == 0);
         }
-        std::cout << std::endl; // end of RelativeDistinguishedName
+        // end of RelativeDistinguishedName
+    }
+}
+
+class asn1_utc_time {
+public:
+    asn1_utc_time(const std::string& s) {
+        // Valid formats:
+        // 0123456789012345678
+        // YYMMDDhhmmZ
+        // YYMMDDhhmm+hh'mm'
+        // YYMMDDhhmm-hh'mm'
+        // YYMMDDhhmmssZ
+        // YYMMDDhhmmss+hh'mm'
+        // YYMMDDhhmmss-hh'mm'
+        if (s.length() < 11 || s.length() > 19) {
+            throw std::runtime_error("Invalid length of UTCTime '" + s + "'");
+        }
+        year   = 2000 + get_2digit_int(&s[0]);
+        month  = get_2digit_int_checked(&s[2], 1, 12, "month");
+        date   = get_2digit_int_checked(&s[4], 1, 31, "date");
+        hour   = get_2digit_int_checked(&s[6], 0, 23, "hour");
+        minute = get_2digit_int_checked(&s[8], 0, 59, "minute");
+        if (isdigit(s[10])) {
+            if (s.length() < 13) {
+                throw std::runtime_error("Invalid length of UTCTime '" + s + "'");
+            }
+            second = get_2digit_int_checked(&s[10], 0, 59, "second");
+            tz = std::string(&s[12]);
+        } else {
+            second = 0;
+            tz = std::string(&s[10]);
+        }
+        // TODO: Check that the date is legal (e.g. no february 31th)
+        // TODO: Check that the time zone is valid
     }
 
-    print_all(elem_buf, "TDS");
+    friend std::ostream& operator<<(std::ostream& os, const asn1_utc_time& t) {
+        auto fill = os.fill();
+        os.fill('0');
+        os << std::setw(4) << t.year << "-" << std::setw(2) << t.month << "-" << std::setw(2) << t.date << " ";
+        os << std::setw(2) << t.hour << ":" << std::setw(2) << t.minute << ":" << std::setw(2) << t.second << t.tz;
+        os.fill(fill);
+        return os;
+    }
+
+private:
+    int year;
+    int month;
+    int date;
+    int hour;
+    int minute;
+    int second;
+    std::string tz;
+
+    static int get_digit(char d) {
+        if (d < '0' || d > '9') throw std::runtime_error("Invalid digit found in UTC time: " + std::string(1, d));
+        return d - '0';
+    }
+
+    static int get_2digit_int(const char* src) {
+        return 10 * get_digit(src[0]) + get_digit(src[1]);
+    }
+
+    static int get_2digit_int_checked(const char* src, int min, int max, const char* name) {
+        int n = get_2digit_int(src);
+        if (n < min) throw std::runtime_error(std::string(name) + " is too small " + std::to_string(n) + " < " + std::to_string(min));
+        if (n > max) throw std::runtime_error(std::string(name) + " is too large " + std::to_string(n) + " > " + std::to_string(max));
+        return n;
+    }
+};
+
+asn1_utc_time parse_UTCTime(buffer_view& parent_buf)
+{
+    auto time_buf = asn1_expect_id(parent_buf, asn1_identifier::utc_time);
+    std::string s(time_buf.remaining(), '\0');
+    if (!s.empty()) time_buf.get_many(&s[0], s.length());
+    return s;
+}
+
+asn1_object_id asn1_read_algorithm_identifer(buffer_view& parent_buf)
+{
+    auto algo_buf = asn1_expect_id(parent_buf, asn1_identifier::constructed_sequence);
+    auto algo_id = asn1_read_object_id(algo_buf); // algorithm OBJECT IDENTIFIER,
+    //Ignore - parameters  ANY DEFINED BY algorithm OPTIONAL  }
+    //
+    return algo_id;
+}
+
+class asn1_bit_string {
+public:
+    asn1_bit_string(const std::vector<uint8_t>& data, size_t bit_count) : repr_(data), size_(bit_count) {
+        if (bit_count == 0 || bit_count > data.size() * 8 || bit_count < data.size() * 8 - 7) {
+            std::ostringstream oss;
+            oss << "Invalid bit count " << bit_count << " for data size " << data.size();
+            throw std::logic_error(oss.str());
+        }
+        const size_t remaining = data.size() * 8 - bit_count;
+        assert(!remaining || (data[data.size()-1] & ((1<<remaining)-1)) == 0);
+    }
+    size_t size() const {
+        return size_;
+    }
+    friend std::ostream& operator<<(std::ostream& os, const asn1_bit_string& bs) {
+        os << hexstring(&bs.repr_[0], bs.repr_.size());
+        return os;
+    }
+
+    const uint8_t* data() const {
+        return &repr_[0];
+    }
+
+private:
+    std::vector<uint8_t> repr_;
+    size_t               size_;
+};
+
+asn1_bit_string asn1_read_bit_string(buffer_view& parent_buf)
+{
+    auto data_buf = asn1_expect_id(parent_buf, asn1_identifier::bit_string);
+    if (data_buf.remaining() < 2) {
+        throw std::runtime_error("Too little data in bit string len="+std::to_string(data_buf.remaining()));
+    }
+    const uint8_t unused_bits = data_buf.get();
+    if (unused_bits >= 8) {
+        throw std::runtime_error("Invalid number of bits in bit string: "+std::to_string((int)unused_bits));
+    }
+    std::vector<uint8_t> data(data_buf.remaining());
+    data_buf.get_many(&data[0], data.size());
+    return {data, data.size()*8-unused_bits};
+}
+
+struct rsa_public_key {
+    int_type modolus;           // n
+    int_type public_exponent;   // e
+};
+
+rsa_public_key asn1_read_rsa_public_key(buffer_view& parent_buf)
+{
+    auto elem_buf = asn1_expect_id(parent_buf, asn1_identifier::constructed_sequence);
+    const auto modolus         = asn1_read_integer(elem_buf);
+    const auto public_exponent = asn1_read_integer(elem_buf);
+    assert(elem_buf.remaining() == 0);
+    return rsa_public_key{modolus, public_exponent};
+}
+
+// https://tools.ietf.org/html/rfc4055
+rsa_public_key parse_RSAPublicKey(buffer_view& buf)
+{
+    auto public_key_buf = asn1_expect_id(buf, asn1_identifier::constructed_sequence);
+    const auto pk_algo_id = asn1_read_algorithm_identifer(public_key_buf);
+    const asn1_object_id rsaEncryption{1,2,840,113549,1,1,1}; //1.2.840.113549.1.1 - PKCS-1
+    if (pk_algo_id != rsaEncryption) {
+        std::ostringstream oss;
+        oss << "Unknown key algorithm id " << pk_algo_id << " expected rsaEncryption (" << rsaEncryption << ") in " << __PRETTY_FUNCTION__;
+        throw std::runtime_error(oss.str());
+    }
+    // The public key is DER-encoded inside a bit string
+    auto bs = asn1_read_bit_string(public_key_buf);
+    buffer_view pk_buf{bs.data(),bs.size()/8};
+    const auto public_key = asn1_read_rsa_public_key(pk_buf);
+    assert(public_key_buf.remaining() == 0);
+    return public_key;
+}
+
+void parse_TBSCertificate(buffer_view& buf)
+{
+    auto elem_buf = asn1_expect_id(buf, asn1_identifier::constructed_sequence);
+
+    auto version_buf = asn1_expect_id(elem_buf, asn1_identifier::tagged(0) | asn1_identifier::constructed_bit);
+    auto version = asn1_read_integer(version_buf);
+    assert(version_buf.remaining() == 0);
+    std::cout << "Version " << (version+1) << std::endl;
+    assert(version == 2); // v3
+
+    auto serial_number = asn1_read_integer(elem_buf);
+    std::cout << "Serial number: 0x" << std::hex << serial_number << std::dec << std::endl;
+
+    auto algo_id = asn1_read_algorithm_identifer(elem_buf);
+    const asn1_object_id sha256WithRSAEncryption{1,2,840,113549,1,1,11};
+    std::cout << "Algorithm: " << algo_id;
+    std::cout << "  - Expecting " << sha256WithRSAEncryption << " (sha256WithRSAEncryption)" << std::endl;
+    assert(algo_id == sha256WithRSAEncryption);
+
+    std::cout << "Issuer:\n";
+    parse_Name(elem_buf);
+
+    auto validity_buf = asn1_expect_id(elem_buf, asn1_identifier::constructed_sequence);
+    auto notbefore    = parse_UTCTime(validity_buf);
+    auto notafter     = parse_UTCTime(validity_buf);
+    assert(validity_buf.remaining() == 0);
+    std::cout << "Validity: Between " << notbefore << " and " << notafter << std::endl;
+
+    std::cout << "Subject:\n";
+    parse_Name(elem_buf);
+
+    // SubjectPublicKeyInfo  ::=  SEQUENCE  {
+    //    algorithm            AlgorithmIdentifier,
+    //    subjectPublicKey     BIT STRING  }
+    auto subject_public_key = parse_RSAPublicKey(elem_buf);
+    std::cout << std::hex;
+    std::cout << "Subject public key: n=0x" << subject_public_key.modolus << " e=0x" << subject_public_key.public_exponent << std::endl;
+    std::cout << std::dec;
+
+    while (elem_buf.remaining()) {
+        auto id = read_asn1_identifier(elem_buf);
+        auto len = read_asn1_length(elem_buf);
+        if (id == (asn1_identifier::tagged(1) | asn1_identifier::constructed_bit)) {
+            assert(version == 1 || version == 2); // Must be v2 or v3
+            elem_buf.skip(len); // Skip issuerUniqueID
+        } else if (id == (asn1_identifier::tagged(2) | asn1_identifier::constructed_bit)) {
+            assert(version == 1 || version == 2); // Must be v2 or v3
+            elem_buf.skip(len); // Skip subjectUniqueID
+        } else if (id == (asn1_identifier::tagged(3) | asn1_identifier::constructed_bit)) {
+            assert(version == 2); // Must be v3
+            elem_buf.skip(len); // Skip extensions
+        } else {
+            std::ostringstream oss;
+            oss << "Unknown tag found in " << __PRETTY_FUNCTION__ << ": " << id << " len = " << len;
+            throw std::runtime_error(oss.str());
+        }
+    }
 }
 
 void parse_x509_v3(buffer_view& buf) // in ASN.1 DER encoding (X.690)
 {
     auto elem_buf = asn1_expect_id(buf, asn1_identifier::constructed_sequence);
     parse_TBSCertificate(elem_buf);
-    print_all(elem_buf, "CERT");
+
+    auto sig_algo_id = asn1_read_algorithm_identifer(elem_buf);
+    std::cout << "Signature algorithm id: " << sig_algo_id << std::endl;
+    const asn1_object_id sha256WithRSAEncryption{1,2,840,113549,1,1,11};
+    assert(sig_algo_id == sha256WithRSAEncryption);
+    auto sig_data = asn1_read_bit_string(elem_buf);
+    std::cout << " " << sig_data.size() << " bits" << std::endl;
+    std::cout << " " << sig_data << std::endl;
+
+    assert(elem_buf.remaining() == 0);
 }
 
 std::vector<uint8_t> read_file(const std::string& filename)
