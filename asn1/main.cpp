@@ -73,6 +73,7 @@ public:
     enum asn1_tag : uint8_t {
         integer              = 0x02,
         bit_string           = 0x03,
+        null                 = 0x05,
         object_id            = 0x06,
         utf8_string          = 0x0C,
         sequence             = 0x10,
@@ -488,8 +489,15 @@ asn1_object_id asn1_read_algorithm_identifer(buffer_view& parent_buf)
 {
     auto algo_buf = asn1_expect_id(parent_buf, asn1_identifier::constructed_sequence);
     auto algo_id = asn1_read_object_id(algo_buf); // algorithm OBJECT IDENTIFIER,
-    //Ignore - parameters  ANY DEFINED BY algorithm OPTIONAL  }
-    //
+    //parameters  ANY DEFINED BY algorithm OPTIONA
+    auto param_id = read_asn1_identifier(algo_buf);
+    auto param_len = read_asn1_length(algo_buf);
+    if (param_id != asn1_identifier::null || param_len != 0) { // parameters MUST be null for rsaEncryption at least
+        std::ostringstream oss;
+        oss << "Expected NULL parameter of length 0 in " << __PRETTY_FUNCTION__ << " got " << param_id << " of length " << param_len;
+        throw std::runtime_error(oss.str());
+    }
+    assert(algo_buf.remaining() == 0);
     return algo_id;
 }
 
@@ -550,15 +558,56 @@ rsa_public_key asn1_read_rsa_public_key(buffer_view& parent_buf)
     return rsa_public_key{modolus, public_exponent};
 }
 
+class algorithm_info {
+public:
+    algorithm_info(const std::string& name, const asn1_object_id& algorithm_identifier)
+        : name_(name)
+        , algorithm_identifier_(algorithm_identifier) {
+    }
+
+    std::string    name() const { return name_; }
+    asn1_object_id algorithm_identifier() const { return algorithm_identifier_; }
+
+private:
+    std::string     name_;
+    asn1_object_id  algorithm_identifier_;
+};
+
+static const asn1_object_id x509_rsaEncryption{ 1,2,840,113549,1,1,1 };
+static const asn1_object_id x509_sha256WithRSAEncryption{ 1,2,840,113549,1,1,11 };
+
+static const algorithm_info x509_algorithms[] = {
+    // 1.2.840.113549.1.1 - PKCS-1
+    { "rsaEncryption"           , x509_rsaEncryption },
+    { "sha256WithRSAEncryption" , x509_sha256WithRSAEncryption  },
+};
+
+const algorithm_info& info_from_algorithm_id(const asn1_object_id& oid)
+{
+    for (const auto& algo : x509_algorithms) {
+        if (algo.algorithm_identifier() == oid) {
+            return algo;
+        }
+    }
+    std::ostringstream oss;
+    oss << "Unknown algorithm identifier " << oid;
+    throw std::runtime_error(oss.str());
+}
+
+std::ostream& operator<<(std::ostream& os, const algorithm_info& ai)
+{
+    os << ai.name() << " (" << ai.algorithm_identifier() << ")";
+    return os;
+}
+
 // https://tools.ietf.org/html/rfc4055
 rsa_public_key parse_RSAPublicKey(buffer_view& buf)
 {
     auto public_key_buf = asn1_expect_id(buf, asn1_identifier::constructed_sequence);
     const auto pk_algo_id = asn1_read_algorithm_identifer(public_key_buf);
-    const asn1_object_id rsaEncryption{1,2,840,113549,1,1,1}; //1.2.840.113549.1.1 - PKCS-1
-    if (pk_algo_id != rsaEncryption) {
+    if (pk_algo_id != x509_rsaEncryption) {
         std::ostringstream oss;
-        oss << "Unknown key algorithm id " << pk_algo_id << " expected rsaEncryption (" << rsaEncryption << ") in " << __PRETTY_FUNCTION__;
+        oss << "Unknown key algorithm id " << pk_algo_id << " expected rsaEncryption (" << x509_rsaEncryption << ") in " << __PRETTY_FUNCTION__;
         throw std::runtime_error(oss.str());
     }
     // The public key is DER-encoded inside a bit string
@@ -569,10 +618,8 @@ rsa_public_key parse_RSAPublicKey(buffer_view& buf)
     return public_key;
 }
 
-void parse_TBSCertificate(buffer_view& buf)
+void parse_TBSCertificate(buffer_view& elem_buf)
 {
-    auto elem_buf = asn1_expect_id(buf, asn1_identifier::constructed_sequence);
-
     auto version_buf = asn1_expect_id(elem_buf, asn1_identifier::tagged(0) | asn1_identifier::constructed_bit);
     auto version = asn1_read_integer(version_buf);
     assert(version_buf.remaining() == 0);
@@ -631,17 +678,31 @@ void parse_TBSCertificate(buffer_view& buf)
 void parse_x509_v3(buffer_view& buf) // in ASN.1 DER encoding (X.690)
 {
     auto elem_buf = asn1_expect_id(buf, asn1_identifier::constructed_sequence);
-    parse_TBSCertificate(elem_buf);
+    auto cert_buf = asn1_expect_id(elem_buf, asn1_identifier::constructed_sequence);
+    if (!cert_buf.remaining()) {
+        throw std::runtime_error("Empty certificate in " + std::string(__PRETTY_FUNCTION__));
+    }
 
-    auto sig_algo_id = asn1_read_algorithm_identifer(elem_buf);
-    std::cout << "Signature algorithm id: " << sig_algo_id << std::endl;
-    const asn1_object_id sha256WithRSAEncryption{1,2,840,113549,1,1,11};
-    assert(sig_algo_id == sha256WithRSAEncryption);
-    auto sig_data = asn1_read_bit_string(elem_buf);
-    std::cout << " " << sig_data.size() << " bits" << std::endl;
-    std::cout << " " << sig_data << std::endl;
+    // Save certificate data for verification against the signature
+    std::vector<uint8_t> tbsCertificate(cert_buf.remaining());
+    cert_buf.get_many(&tbsCertificate[0], tbsCertificate.size());
+    buffer_view cert_buf_view(&tbsCertificate[0], tbsCertificate.size());
+    parse_TBSCertificate(cert_buf_view);
 
+    auto sig_algo = info_from_algorithm_id(asn1_read_algorithm_identifer(elem_buf));
+    std::cout << "Signature algorithm: " << sig_algo << std::endl;
+    assert(sig_algo.algorithm_identifier() == x509_sha256WithRSAEncryption);
+    auto sig_value = asn1_read_bit_string(elem_buf);
+    std::cout << " " << sig_value.size() << " bits" << std::endl;
+    std::cout << " " << sig_value << std::endl;
     assert(elem_buf.remaining() == 0);
+
+    // The signatureValue field contains a digital signature computed upon
+    // the ASN.1 DER encoded tbsCertificate.  The ASN.1 DER encoded
+    // tbsCertificate is used as the input to the signature function.
+
+    // TOOD: Check that sig_value == sha256WithRSAEncryption(tbsCertificate)
+    // http://tools.ietf.org/html/rfc3447
 }
 
 std::vector<uint8_t> read_file(const std::string& filename)

@@ -1,5 +1,6 @@
 #include "sha.h"
 #include <stdio.h>
+#include <string.h>
 
 void printhex(const void* data, size_t len)
 {

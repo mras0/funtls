@@ -36,6 +36,10 @@
  *
  */
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #ifndef _SHA_enum_
 #define _SHA_enum_
 /*
@@ -260,8 +264,9 @@ extern int hmacFinalBits(HMACContext *ctx, const uint8_t bits,
 extern int hmacResult(HMACContext *ctx,
                       uint8_t digest[USHAMaxHashSize]);
 
+#ifdef __cplusplus
+}
+#endif
+
+
 #endif /* _SHA_H_ */
-
-
-
-

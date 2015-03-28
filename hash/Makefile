@@ -7,15 +7,17 @@ test: all
 	./$(EXE)
 
 CFLAGS+=-Wall -Wextra -std=c99
-SRCFILES=shatest.c sha1.c sha224-256.c
+CXXFLAGS+=-std=c++11 -Wall -Wextra -g3
+SRCFILES=shatest.cpp sha1.c sha224-256.c
 
-OBJS=$(patsubst %.c,%.o,$(SRCFILES))
+OBJS=$(patsubst %.c,%.o,$(patsubst %.cpp,%.o,$(SRCFILES))) $(BOOSTOBJS)
 
 CFLAGS+=-MMD # Generate .d files
+CXXFLAGS+=-MMD # Generate .d files
 -include $(OBJS:.o=.d)
 
 $(EXE): $(OBJS)
-	$(CC) -o $@ $^ $(CFLAGS) $(LDFLAGS)
+	$(CXX) -o $@ $^ $(CXXFLAGS) $(LDFLAGS)
 
 .PHONY: clean
 clean:
