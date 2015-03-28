@@ -86,7 +86,7 @@ private:
     boost::asio::ip::tcp::socket& socket;
     const tls::random             our_random;
     tls::random                   their_random;
-    tls::certificate              their_certificate;
+    std::vector<uint8_t>          their_certificate;
     tls::session_id               sesion_id;
 
     template<typename Payload>
@@ -185,7 +185,10 @@ private:
             throw std::runtime_error("Unsupported number of certificate lists" + std::to_string(certificate_lists[0].certificate_list.size()));
         }
 
-        their_certificate = certificate_lists[0];
+        their_certificate = certificate_lists[0].certificate_list[0].as_vector();
+
+        //std::ofstream of("/tmp/server.crt");
+        //of.write((const char*)&their_certificate[0], their_certificate.size());
     }
 
     void send_client_key_exchange() {
