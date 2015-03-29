@@ -60,6 +60,26 @@ void type_check(identifier expected, identifier actual)
 {
     FUNTLS_CHECK_BINARY(expected, ==, actual, "Invalid container tag");
 }
+
+std::string read_string(identifier id, const der_encoded_value& repr)
+{
+    type_check(id, repr.id());
+    auto buf = repr.content_view();
+    if (id == identifier::bit_string) {
+        FUNTLS_CHECK_BINARY(buf.remaining(), >=, 2, "Empty bit string");
+        FUNTLS_CHECK_BINARY(buf.get(), ==, 0, "Unsupported bit count");
+        std::string s(buf.remaining(), '\0');
+        buf.read(&s[0], buf.remaining());
+        return s;
+    } else {
+        FUNTLS_CHECK_BINARY(buf.remaining(), >=, 1, "Empty string");
+        std::string s(buf.remaining(), '\0');
+        buf.read(&s[0], buf.remaining());
+        // TODO: Check that the string is valid
+        return s;
+    }
+}
+
 } // namespace detail
 
 identifier read_identifier(util::buffer_view& buffer)
@@ -147,8 +167,8 @@ object_id::object_id(const der_encoded_value& repr)
     FUNTLS_CHECK_ID(repr.id());
     auto oid_buf = repr.content_view();
 
-    FUNTLS_CHECK_BINARY(oid_buf.size(), >=, 1, "Invalid object identifier size");
-    FUNTLS_CHECK_BINARY(oid_buf.size(), <, 20, "Invalid object identifier size");
+    FUNTLS_CHECK_BINARY(oid_buf.remaining(), >=, 1, "Invalid object identifier size");
+    FUNTLS_CHECK_BINARY(oid_buf.remaining(), <, 20, "Invalid object identifier size");
 
     // The first octet has value 40 * value1 + value2.
     // (This is unambiguous, since value1 is limited to values 0, 1, and 2; value2 is limited to the 
@@ -261,6 +281,12 @@ std::ostream& operator<<(std::ostream& os, const utc_time& t) {
         return os;
 #endif
     os << t.as_string();
+    return os;
+}
+
+std::ostream& operator<<(std::ostream& os, const raw_string& s)
+{
+    os << s.as_string();
     return os;
 }
 

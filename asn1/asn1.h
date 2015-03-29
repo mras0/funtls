@@ -250,6 +250,51 @@ private:
 
 std::ostream& operator<<(std::ostream& os, const utc_time& t);
 
+//
+// ASN.1 string types
+//
+
+class raw_string {
+public:
+    std::string as_string() const {
+        return repr_;
+    }
+
+    std::vector<uint8_t> as_vector() const {
+        assert(!repr_.empty());
+        return {repr_.data(), repr_.data()+repr_.length()};
+    }
+
+protected:
+    raw_string(const std::string& repr)
+        : repr_(repr) {
+    }
+
+private:
+    std::string repr_;
+};
+
+std::ostream& operator<<(std::ostream& os, const raw_string& s);
+
+namespace detail {
+std::string read_string(identifier id, const der_encoded_value& repr);
+} // namespace detail
+
+template<identifier::tag tag>
+class string_base : public raw_string {
+public:
+    static constexpr auto id = tag;
+
+    string_base(const der_encoded_value& repr)
+        : raw_string(detail::read_string(id, repr)) {
+    }
+};
+
+using bit_string = string_base<identifier::bit_string>;
+using octet_string = string_base<identifier::octet_string>;
+using utf8_string = string_base<identifier::utf8_string>;
+using printable_string = string_base<identifier::printable_string>;
+
 } } // namespace funtls::asn1
 
 #endif

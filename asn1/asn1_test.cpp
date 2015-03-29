@@ -148,4 +148,24 @@ int main()
         FUNTLS_ASSERT_EQUAL(false, s.has_next());
         FUNTLS_ASSERT_EQUAL(22, integer{x}.as<int8_t>());
     }
+
+    //
+    // strings
+    //
+    {
+        FUNTLS_ASSERT_THROWS(from_bytes<utf8_string>({}), std::runtime_error);
+        FUNTLS_ASSERT_EQUAL("A", from_bytes<utf8_string>({65}).as_string());
+        FUNTLS_ASSERT_EQUAL("hello", from_bytes<utf8_string>({'h','e','l','l','o'}).as_string());
+        auto vec = from_bytes<octet_string>({1,2,3}).as_vector();
+        FUNTLS_ASSERT_EQUAL(3, vec.size());
+        FUNTLS_ASSERT_EQUAL(1, vec[0]);
+        FUNTLS_ASSERT_EQUAL(2, vec[1]);
+        FUNTLS_ASSERT_EQUAL(3, vec[2]);
+
+        FUNTLS_ASSERT_THROWS(from_bytes<bit_string>({}), std::runtime_error);
+        FUNTLS_ASSERT_THROWS(from_bytes<bit_string>({0}), std::runtime_error);
+        FUNTLS_ASSERT_THROWS(from_bytes<bit_string>({1}), std::runtime_error);
+        FUNTLS_ASSERT_THROWS(from_bytes<bit_string>({9}), std::runtime_error);
+        FUNTLS_ASSERT_EQUAL("A", from_bytes<bit_string>({0,65}).as_string());
+    }
 }
