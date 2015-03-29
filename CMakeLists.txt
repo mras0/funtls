@@ -7,6 +7,8 @@ add_custom_target(check COMMAND ${CMAKE_CTEST_COMMAND} --force-new-ctest-process
 
 set(common_flags "-Wall -Wextra -fsanitize=address -pthread")
 
+set(common_flags "${common_flags} -g3")
+
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c99 ${common_flags}")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 ${common_flags}")
 
