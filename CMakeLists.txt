@@ -21,6 +21,7 @@ add_library(boost STATIC ${boost_dir}/libs/system/src/error_code.cpp)
 add_subdirectory(util)
 add_subdirectory(hash)
 add_subdirectory(asn1)
+add_subdirectory(x509)
 
 add_executable(funtls main.cpp tls.cpp variant.cpp)
 target_link_libraries(funtls boost)
