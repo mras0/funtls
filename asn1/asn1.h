@@ -7,6 +7,8 @@
 #include <string>
 #include <initializer_list>
 #include <cassert>
+#include <limits>
+#include <type_traits>
 
 #include <util/buffer.h>
 
@@ -97,7 +99,19 @@ public:
 
     integer(const der_encoded_value& repr);
 
-    explicit operator int64_t() const;
+    // Would have liked to do this as an explicit conversion operator
+    // but I couldn't get G++ 4.8.2 / boost mulitprecision 1.57.0 to play ball
+    template<typename IntType>
+    IntType as() const {
+        assert(octet_count() > 0);
+        check<IntType>(octet_count());
+        IntType res = static_cast<int8_t>(octet(0));
+        for (size_t i = 1; i < octet_count(); ++i) {
+            res <<= 8;
+            res |= octet(i);
+        }
+        return res;
+    }
 
     size_t octet_count() const {
         return repr_.size();
@@ -109,6 +123,18 @@ public:
     }
 private:
     std::vector<uint8_t> repr_;
+
+    template<typename IntType>
+    static void check(size_t octet_count, typename std::enable_if<std::numeric_limits<IntType>::is_bounded, IntType>::type* = 0) {
+        static_assert(std::numeric_limits<IntType>::is_integer, "Can only cast ASN.1 integer to an integer type");
+        do_check_size(sizeof(IntType), octet_count);
+    }
+
+    template<typename IntType>
+    static void check(size_t, typename std::enable_if<!std::numeric_limits<IntType>::is_bounded, IntType>::type* = 0) {
+    }
+
+    static void do_check_size(size_t int_type_size, size_t octet_count);
 };
 
 

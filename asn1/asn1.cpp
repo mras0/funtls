@@ -130,15 +130,9 @@ integer::integer(const der_encoded_value& repr)
     repr_ = copy_of(repr.content_view());
 }
 
-integer::operator int64_t() const {
-    assert(octet_count() > 0);
-    FUNTLS_CHECK_BINARY(repr_.size(), <=, 8, "Integer out of 64-bit range");
-    int64_t res = static_cast<int8_t>(octet(0));
-    for (size_t i = 1; i < octet_count(); ++i) {
-        res <<= 8;
-        res |= octet(i);
-    }
-    return res;
+void integer::do_check_size(size_t int_type_size, size_t octet_count)
+{
+    FUNTLS_CHECK_BINARY(int_type_size, >=, octet_count, "Integer out of " + std::to_string(int_type_size*8) + "-bit integer range");
 }
 
 object_id::object_id(const der_encoded_value& repr)

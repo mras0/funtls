@@ -8,6 +8,8 @@
 #include <util/test.h>
 #include <asn1/asn1.h>
 
+#include <boost/multiprecision/cpp_int.hpp>
+
 funtls::asn1::der_encoded_value value_from_bytes(const std::vector<uint8_t>& data)
 {
     assert(data.size());
@@ -88,11 +90,20 @@ int main()
         for (size_t i = 0; i < int_test_case.bytes.size(); ++i) {
             FUNTLS_ASSERT_EQUAL(int_test_case.bytes[i], the_int.octet(i));
         }
-        FUNTLS_ASSERT_EQUAL(int_test_case.int_val, static_cast<int64_t>(the_int));
+        FUNTLS_ASSERT_EQUAL(int_test_case.int_val, the_int.as<int64_t>());
+        if (int_test_case.bytes.size() == 1) {
+            FUNTLS_ASSERT_EQUAL(static_cast<int8_t>(int_test_case.int_val), the_int.as<int8_t>());
+        } else if (int_test_case.bytes.size() == 2) {
+            FUNTLS_ASSERT_EQUAL(static_cast<int16_t>(int_test_case.int_val), the_int.as<int16_t>());
+        } else {
+            assert(false);
+        }
     }
     auto large_int = from_bytes<integer>({0x7f,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff});
     FUNTLS_ASSERT_EQUAL(10, large_int.octet_count());
-    FUNTLS_ASSERT_THROWS(static_cast<int64_t>(large_int), std::runtime_error);
+    FUNTLS_ASSERT_THROWS(large_int.as<int64_t>(), std::runtime_error);
+    using int_type = boost::multiprecision::cpp_int;
+    FUNTLS_ASSERT_EQUAL(int_type("0x7fffffffffffffffffff"), large_int.as<int_type>());
 
     //
     // OBJECT IDENTIFER

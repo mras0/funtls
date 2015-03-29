@@ -8,14 +8,14 @@
 #include <iomanip>
 #include <array>
 
+#include <boost/multiprecision/cpp_int.hpp>
+using int_type = boost::multiprecision::cpp_int;
+
 #include <hash/sha.h>
 #include <util/base_conversion.h>
 #include <util/buffer.h>
 #include <util/test.h>
 #include <asn1/asn1.h>
-
-#include <boost/multiprecision/cpp_int.hpp>
-using int_type = boost::multiprecision::cpp_int;
 
 using namespace funtls;
 
@@ -31,16 +31,7 @@ util::buffer_view asn1_expect_id(util::buffer_view& buf, asn1::identifier expect
 
 int_type asn1_read_integer(util::buffer_view& buf)
 {
-    auto int_buf = asn1_expect_id(buf, asn1::identifier::integer);
-    if (int_buf.size() < 1 || int_buf.size() > 1000) {
-        throw std::runtime_error("Invalid integer size " + std::to_string(int_buf.size()) + " in " + __PRETTY_FUNCTION__);
-    }
-    int_type val = static_cast<int8_t>(int_buf.get()); // assumes native 2's complement notation
-    for (size_t i = 1; i < int_buf.size(); ++i) {
-        val <<= 8;
-        val |= int_buf.get();
-    }
-    return val;
+    return funtls::asn1::integer{funtls::asn1::read_der_encoded_value(buf)}.as<int_type>();
 }
 
 std::vector<uint8_t> asn1_read_octet_string(util::buffer_view& buf)
