@@ -6,6 +6,9 @@
 #include <stdexcept>
 #include <cassert>
 #include <iomanip>
+#include <array>
+
+#include <hash/sha.h>
 
 #include <boost/multiprecision/cpp_int.hpp>
 using int_type = boost::multiprecision::cpp_int;
@@ -73,6 +76,7 @@ public:
     enum asn1_tag : uint8_t {
         integer              = 0x02,
         bit_string           = 0x03,
+        octet_string         = 0x04,
         null                 = 0x05,
         object_id            = 0x06,
         utf8_string          = 0x0C,
@@ -176,6 +180,14 @@ int_type asn1_read_integer(buffer_view& buf)
         val |= int_buf.get();
     }
     return val;
+}
+
+std::vector<uint8_t> asn1_read_octet_string(buffer_view& buf)
+{
+    auto os_buf = asn1_expect_id(buf, asn1_identifier::octet_string);
+    std::vector<uint8_t> os(os_buf.remaining());
+    if (!os.empty()) os_buf.get_many(&os[0], os.size());
+    return os;
 }
 
 bool asn1_is_valid_printable_character(char c)
@@ -509,8 +521,10 @@ public:
             oss << "Invalid bit count " << bit_count << " for data size " << data.size();
             throw std::logic_error(oss.str());
         }
+#ifndef NDEBUG
         const size_t remaining = data.size() * 8 - bit_count;
         assert(!remaining || (data[data.size()-1] & ((1<<remaining)-1)) == 0);
+#endif
     }
     size_t size() const {
         return size_;
@@ -618,7 +632,7 @@ rsa_public_key parse_RSAPublicKey(buffer_view& buf)
     return public_key;
 }
 
-void parse_TBSCertificate(buffer_view& elem_buf)
+rsa_public_key parse_TBSCertificate(buffer_view& elem_buf)
 {
     auto version_buf = asn1_expect_id(elem_buf, asn1_identifier::tagged(0) | asn1_identifier::constructed_bit);
     auto version = asn1_read_integer(version_buf);
@@ -673,21 +687,66 @@ void parse_TBSCertificate(buffer_view& elem_buf)
             throw std::runtime_error(oss.str());
         }
     }
+
+    return subject_public_key;
+}
+
+std::array<uint8_t, SHA256HashSize> sha256(const void* data, size_t len)
+{
+    SHA256Context context;
+    SHA256Reset(&context);
+    SHA256Input(&context, static_cast<const uint8_t*>(data), len);
+    std::array<uint8_t, SHA256HashSize> digest;
+    SHA256Result(&context, &digest[0]);
+    return digest;
+}
+
+int_type octets_to_int(const asn1_bit_string& bs)
+{
+    int_type res = 0;
+    if (bs.size() % 8) {
+        throw std::runtime_error(std::string("Invalid bit string size " + std::to_string(bs.size()) + " in " + __PRETTY_FUNCTION__));
+    }
+    for (unsigned i = 0; i < bs.size()/8; ++i) {
+        res <<= 8;
+        res |= (bs.data())[i];
+    }
+    return res;
+}
+
+std::vector<uint8_t> int_to_octets(int_type i, size_t byte_count)
+{
+    std::vector<uint8_t> result(byte_count);
+    while (byte_count--) {
+        result[byte_count] = static_cast<uint8_t>(i);
+        i >>= 8;
+    }
+    if (i) {
+        throw std::logic_error("Number too large in " + std::string(__PRETTY_FUNCTION__));
+    }
+    return result;
+}
+
+std::vector<uint8_t> buffer_copy(const buffer_view& buf)
+{
+    auto mut_buf = buf;
+    std::vector<uint8_t> data(mut_buf.remaining());
+    if (!data.empty()) mut_buf.get_many(&data[0], data.size());
+    return data;
 }
 
 void parse_x509_v3(buffer_view& buf) // in ASN.1 DER encoding (X.690)
 {
     auto elem_buf = asn1_expect_id(buf, asn1_identifier::constructed_sequence);
+    // Save certificate data for verification against the signature
+    const auto tbsCertificate = buffer_copy(elem_buf);
+
     auto cert_buf = asn1_expect_id(elem_buf, asn1_identifier::constructed_sequence);
     if (!cert_buf.remaining()) {
         throw std::runtime_error("Empty certificate in " + std::string(__PRETTY_FUNCTION__));
     }
 
-    // Save certificate data for verification against the signature
-    std::vector<uint8_t> tbsCertificate(cert_buf.remaining());
-    cert_buf.get_many(&tbsCertificate[0], tbsCertificate.size());
-    buffer_view cert_buf_view(&tbsCertificate[0], tbsCertificate.size());
-    parse_TBSCertificate(cert_buf_view);
+    auto subject_public_key = parse_TBSCertificate(cert_buf);
 
     auto sig_algo = info_from_algorithm_id(asn1_read_algorithm_identifer(elem_buf));
     std::cout << "Signature algorithm: " << sig_algo << std::endl;
@@ -695,14 +754,79 @@ void parse_x509_v3(buffer_view& buf) // in ASN.1 DER encoding (X.690)
     auto sig_value = asn1_read_bit_string(elem_buf);
     std::cout << " " << sig_value.size() << " bits" << std::endl;
     std::cout << " " << sig_value << std::endl;
+    assert(sig_value.size() % 8 == 0);
     assert(elem_buf.remaining() == 0);
 
     // The signatureValue field contains a digital signature computed upon
     // the ASN.1 DER encoded tbsCertificate.  The ASN.1 DER encoded
     // tbsCertificate is used as the input to the signature function.
 
-    // TOOD: Check that sig_value == sha256WithRSAEncryption(tbsCertificate)
-    // http://tools.ietf.org/html/rfc3447
+    // See 9.2 EMSA-PKCS1-v1_5 in RFC3447
+
+    // The encrypted signature is stored as a base-256 encoded number in the bitstring
+    const auto sig_int  = octets_to_int(sig_value);
+    assert(sig_value.size()%8==0);
+    const size_t em_len = sig_value.size()/8; // encrypted message length
+
+    // Decode the signature using the issuers public key (here using the subjects PK since the cert is selfsigned)
+    const auto issuer_pk = subject_public_key;
+    const auto decoded = int_to_octets(powm(sig_int, issuer_pk.public_exponent, issuer_pk.modolus), em_len);
+    std::cout << "Decoded signature:\n" << hexstring(&decoded[0], decoded.size()) << std::endl;
+
+    // EM = 0x00 || 0x01 || PS || 0x00 || T (T=DER encoded DigestInfo)
+    auto digest_buf = buffer_view{&decoded[0], decoded.size()};
+    const auto sig0 = digest_buf.get();
+    const auto sig1 = digest_buf.get();
+    if (sig0 != 0x00 || sig1 != 0x01) {
+        throw std::runtime_error("Invalid PKCS#1 1.5 signature. Expected 0x00 0x01 Got: 0x" + hexstring(&sig0, 1) + " 0x" + hexstring(&sig1, 1));
+    }
+    // Skip padding
+    for (;;) {
+        const auto b = digest_buf.get();
+        if (b == 0xff) { // Padding...
+            continue;
+        } else if (b == 0x00) { // End of padding
+            break;
+        } else {
+            throw std::runtime_error("Invalid byte in PKCS#1 1.5 padding: 0x" + hexstring(&b, 1));
+        }
+    }
+    // DigestInfo ::= SEQUENCE {
+    //   digestAlgorithm AlgorithmIdentifier,
+    //   digest OCTET STRING }
+
+    auto digest_info_buf = asn1_expect_id(digest_buf, asn1_identifier::constructed_sequence);
+    assert(digest_buf.remaining() == 0);
+
+    auto digest_algo = asn1_read_algorithm_identifer(digest_info_buf);
+    std::cout << "Digest algorithm: " << digest_algo << std::endl;
+    static const asn1_object_id id_sha256{2,16,840,1,101,3,4,2,1};
+    assert(digest_algo == id_sha256);
+    auto digest = asn1_read_octet_string(digest_info_buf);
+    assert(digest_info_buf.remaining() == 0);
+
+    if (digest.size() != SHA256HashSize) {
+        throw std::runtime_error("Invalid digest size expected " + std::to_string(SHA256HashSize) + " got " + std::to_string(digest.size()) + " in " + __PRETTY_FUNCTION__);
+    }
+
+    std::cout << "Digest: " << hexstring(&digest[0], digest.size()) << std::endl;
+
+    // The below is very ugly, but basically we need to check
+    // all of the DER encoded data in tbsCertificate (including the id and length octets)
+    buffer_view temp_buf(&tbsCertificate[0], tbsCertificate.size());
+    auto cert_id = read_asn1_identifier(temp_buf);
+    auto cert_len = read_asn1_length(temp_buf);
+    cert_len += tbsCertificate.size() - temp_buf.remaining();
+    assert(cert_id == asn1_identifier::constructed_sequence);
+    assert(cert_len < tbsCertificate.size());
+
+    const auto calced_digest = sha256(&tbsCertificate[0], cert_len);
+    std::cout << "Calculated digest: " << hexstring(&calced_digest[0], calced_digest.size()) << std::endl;
+    if (!std::equal(calced_digest.begin(), calced_digest.end(), digest.begin())) {
+        throw std::runtime_error("Digest mismatch in " + std::string(__PRETTY_FUNCTION__) + " Calculated: " +
+                hexstring(&calced_digest[0], calced_digest.size()) + " Expected: " +
+                hexstring(&digest[0], digest.size()));
+    }
 }
 
 std::vector<uint8_t> read_file(const std::string& filename)

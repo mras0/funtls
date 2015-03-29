@@ -9,14 +9,14 @@ test: all
 ############# BOOST ASIO ####################################
 BOOST=/home/mras/build/boost_1_57_0/
 CXXFLAGS+=-I$(BOOST) -DBOOST_ALL_NO_LIB -pthread
-#BOOSTOBJS=#error_code.o
 #############################################################
 
-#VPATH=$(BOOST)/libs/system/src/
+VPATH=../hash/
+CXXFLAGS+=-I../
 
 CXXFLAGS+=-std=c++11 -Wall -Wextra -g3
 CFLAGS+=-std=c99 -Wall -Wextra -g3
-SRCFILES=main.cpp
+SRCFILES=main.cpp sha1.c sha224-256.c
 OBJS=$(patsubst %.c,%.o,$(patsubst %.cpp,%.o,$(SRCFILES))) $(BOOSTOBJS)
 
 CFLAGS+=-MMD # Generate .d files
