@@ -64,11 +64,64 @@ identifier read_identifier(util::buffer_view& buffer);
 std::ostream& operator<<(std::ostream& os, const identifier& ident);
 
 //
+// ASN.1 DER encoded value
+//
+
+class der_encoded_value {
+public:
+    asn1::identifier id() const { return id_; }
+
+    util::buffer_view complete_view() const;
+    util::buffer_view content_view() const;
+
+private:
+    der_encoded_value(const util::buffer_view& buffer, size_t content_offset, asn1::identifier id, size_t content_length);
+
+    util::buffer_view  buffer_;
+    size_t             content_offset_;
+    asn1::identifier   id_;
+    size_t             length_;
+
+    friend der_encoded_value read_der_encoded_value(util::buffer_view& buffer);
+};
+
+der_encoded_value read_der_encoded_value(util::buffer_view& buffer);
+std::ostream& operator<<(std::ostream& os, const der_encoded_value& t);
+
+//
+// ASN.1 INTEGER (tag = 0x02)
+//
+class integer {
+public:
+    static constexpr auto id = identifier::integer;
+
+    integer(const der_encoded_value& repr);
+
+    explicit operator int64_t() const;
+
+    size_t octet_count() const {
+        return repr_.size();
+    }
+
+    uint8_t octet(size_t index) const {
+        assert(index < octet_count());
+        return repr_[index];
+    }
+private:
+    std::vector<uint8_t> repr_;
+};
+
+
+//
 // ASN.1 OBJECT IDENTIFIER (tag = 0x06)
 //
 
 class object_id {
 public:
+    static constexpr auto id = identifier::object_id;
+
+    object_id(const der_encoded_value& repr);
+
     object_id(const std::vector<uint32_t>& components) : components_(components) {
         assert(!components_.empty());
         assert(components_[0] == 0 || components_[0] == 1 || components_[0] == 2);
@@ -112,6 +165,10 @@ std::ostream& operator<<(std::ostream& os, const object_id& oid);
 
 class utc_time {
 public:
+    static constexpr auto id = identifier::utc_time;
+
+    utc_time(const der_encoded_value& repr);
+
     utc_time(const std::string& s) : repr_(s) {
         validate(repr_);
     }
@@ -126,27 +183,6 @@ private:
 };
 
 std::ostream& operator<<(std::ostream& os, const utc_time& t);
-
-class der_encoded_value {
-public:
-    asn1::identifier id() const { return id_; }
-    size_t length() const { return length_; }
-
-    util::buffer_view content_view() const;
-
-private:
-    der_encoded_value(const util::buffer_view& buffer, size_t content_offset, asn1::identifier id, size_t content_length);
-
-    util::buffer_view  buffer_;
-    size_t             content_offset_;
-    asn1::identifier   id_;
-    size_t             length_;
-
-    friend der_encoded_value read_der_encoded_value(util::buffer_view& buffer);
-};
-
-der_encoded_value read_der_encoded_value(util::buffer_view& buffer);
-std::ostream& operator<<(std::ostream& os, const der_encoded_value& t);
 
 } } // namespace funtls::asn1
 

@@ -1,9 +1,13 @@
 #include "asn1.h"
 #include <ostream>
 #include <cassert>
+#include <sstream>
 #include <stdexcept>
 
 #include <util/base_conversion.h>
+#include <util/test.h>
+
+#define FUNTLS_CHECK_ID(actual_id) FUNTLS_CHECK_BINARY(id, ==, actual_id, "Unexpected ASN.1 indentifer")
 
 namespace {
 
@@ -14,13 +18,6 @@ static int utc_time_get_digit(char d) {
 
 static int utc_time_get_2digit_int(const char* src) {
     return 10 * utc_time_get_digit(src[0]) + utc_time_get_digit(src[1]);
-}
-
-static int utc_time_get_2digit_int_checked(const char* src, int min, int max, const char* name) {
-    int n = utc_time_get_2digit_int(src);
-    if (n < min) throw std::runtime_error(std::string(name) + " is too small " + std::to_string(n) + " < " + std::to_string(min));
-    if (n > max) throw std::runtime_error(std::string(name) + " is too large " + std::to_string(n) + " > " + std::to_string(max));
-    return n;
 }
 
 size_t read_content_length(funtls::util::buffer_view& buf)
@@ -42,6 +39,16 @@ size_t read_content_length(funtls::util::buffer_view& buf)
     } else {
         return first_size_byte & 0x7f;
     }
+}
+
+std::vector<uint8_t> copy_of(const funtls::util::buffer_view& buf)
+{
+    if (buf.remaining() == 0) return {};
+    auto buf_copy = buf;
+    std::vector<uint8_t> res(buf_copy.remaining());
+    buf_copy.read(&res[0], res.size());
+    assert(buf_copy.remaining() == 0);
+    return res;
 }
 
 } // unnamed namespace
@@ -75,6 +82,102 @@ std::ostream& operator<<(std::ostream& os, const identifier& ident)
     return os;
 }
 
+der_encoded_value::der_encoded_value(const util::buffer_view& buffer, size_t content_offset, asn1::identifier id, size_t content_length)
+    : buffer_(buffer)
+    , content_offset_(content_offset)
+    , id_(id)
+    , length_(content_length)
+{
+}
+
+util::buffer_view der_encoded_value::complete_view() const
+{
+    auto buf_copy = buffer_;
+    return buf_copy;
+}
+
+util::buffer_view der_encoded_value::content_view() const
+{
+    auto buf_copy = buffer_;
+    buf_copy.skip(content_offset_);
+    return buf_copy.get_slice(length_);
+}
+
+std::ostream& operator<<(std::ostream& os, const der_encoded_value& t)
+{
+    uint8_t id = static_cast<uint8_t>(t.id());
+    os << "id = 0x" << util::base16_encode(&id ,1) << " len = " << t.content_view().size();
+    return os;
+}
+
+
+der_encoded_value read_der_encoded_value(util::buffer_view& buffer)
+{
+    auto orig_buf = buffer;
+    const auto id  = read_identifier(buffer);
+    const auto len = read_content_length(buffer);
+    const auto offset = buffer.index() - orig_buf.index();
+    buffer.skip(len);
+    return {orig_buf.get_slice(offset + len), offset, id, len};
+}
+
+integer::integer(const der_encoded_value& repr)
+{
+    FUNTLS_CHECK_ID(repr.id());
+    auto int_buf = repr.content_view();
+    FUNTLS_CHECK_BINARY(int_buf.remaining(), >=, 1, "Empty integer encountered");
+
+    repr_ = copy_of(repr.content_view());
+}
+
+integer::operator int64_t() const {
+    assert(octet_count() > 0);
+    FUNTLS_CHECK_BINARY(repr_.size(), <=, 8, "Integer out of 64-bit range");
+    int64_t res = static_cast<int8_t>(octet(0));
+    for (size_t i = 1; i < octet_count(); ++i) {
+        res <<= 8;
+        res |= octet(i);
+    }
+    return res;
+}
+
+object_id::object_id(const der_encoded_value& repr)
+{
+    FUNTLS_CHECK_ID(repr.id());
+    auto oid_buf = repr.content_view();
+
+    FUNTLS_CHECK_BINARY(oid_buf.size(), >=, 1, "Invalid object identifier size");
+    FUNTLS_CHECK_BINARY(oid_buf.size(), <, 20, "Invalid object identifier size");
+
+    // The first octet has value 40 * value1 + value2.
+    // (This is unambiguous, since value1 is limited to values 0, 1, and 2; value2 is limited to the 
+    // range 0 to 39 when value1 is 0 or 1; and, according to X.208, n is always at least 2.)
+    const uint8_t first = oid_buf.get();
+    components_.push_back(first/40);
+    components_.push_back(first%40);
+
+    FUNTLS_CHECK_BINARY(components_[0], <=, 2, "First component of object identifier not 0, 1 or 2");
+
+    // The following octets, if any, encode value3, ..., valuen. Each value is encoded base 128, 
+    // most significant digit first, with as few digits as possible, and the most significant bit 
+    // of each octet except the last in the value's encoding set to "1."*
+    while (oid_buf.remaining()) {
+        uint32_t value = 0;
+        uint8_t read_byte = 0;
+        do {
+            // OIDs must be less than 2^28, so if the value before shifting by 7 is >= 2^21
+            // it is about to become out of range
+            FUNTLS_CHECK_BINARY(value, <, (1<<21), "Object identifier component value out of range");
+            read_byte = oid_buf.get();
+            value <<= 7;
+            value |= read_byte & 0x7f;
+        } while (read_byte & 0x80);
+        components_.push_back(value);
+    }
+
+    assert(oid_buf.remaining() == 0);
+}
+
 std::ostream& operator<<(std::ostream& os, const object_id& oid)
 {
     assert(!oid.empty());
@@ -83,6 +186,19 @@ std::ostream& operator<<(std::ostream& os, const object_id& oid)
         os << oid[i];
     }
     return os;
+}
+
+utc_time::utc_time(const der_encoded_value& repr) {
+    FUNTLS_CHECK_ID(repr.id());
+    auto utc_time_buf = repr.content_view();
+
+    FUNTLS_CHECK_BINARY(utc_time_buf.remaining(), >=, 11, "Not enough data for UTCTime");
+
+    std::string s(utc_time_buf.remaining(), '\0');
+    utc_time_buf.read(&s[0], s.length());
+    validate(s);
+
+    repr_ = s;
 }
 
 void utc_time::validate(const std::string& s)
@@ -95,29 +211,35 @@ void utc_time::validate(const std::string& s)
     // YYMMDDhhmmssZ
     // YYMMDDhhmmss+hh'mm'
     // YYMMDDhhmmss-hh'mm'
-    if (s.length() < 11 || s.length() > 19) {
-        throw std::runtime_error("Invalid length of UTCTime '" + s + "'");
-    }
+    FUNTLS_CHECK_BINARY(s.length(), >=, 11, "Invalid length oF UTCTime " + s);
+    FUNTLS_CHECK_BINARY(s.length(), <=, 19, "Invalid length oF UTCTime " + s);
     const int year   = 2000 + utc_time_get_2digit_int(&s[0]);
-    const int month  = utc_time_get_2digit_int_checked(&s[2], 1, 12, "month");
-    const int date   = utc_time_get_2digit_int_checked(&s[4], 1, 31, "date");
-    const int hour   = utc_time_get_2digit_int_checked(&s[6], 0, 23, "hour");
-    const int minute = utc_time_get_2digit_int_checked(&s[8], 0, 59, "minute");
+    const int month  = utc_time_get_2digit_int(&s[2]);
+    FUNTLS_CHECK_BINARY(month, >=, 1, "Invalid month in UTCTime " + s);
+    FUNTLS_CHECK_BINARY(month, <=, 12, "Invalid month in UTCTime " + s);
+    const int date   = utc_time_get_2digit_int(&s[4]);
+    FUNTLS_CHECK_BINARY(date, >=, 1, "Invalid date in UTCTime " + s);
+    FUNTLS_CHECK_BINARY(date, <=, 31, "Invalid date in UTCTime " + s);
+    const int hour   = utc_time_get_2digit_int(&s[6]);
+    FUNTLS_CHECK_BINARY(hour, >=, 0, "Invalid hour in UTCTime " + s);
+    FUNTLS_CHECK_BINARY(hour, <=, 23, "Invalid hour in UTCTime " + s);
+    const int minute = utc_time_get_2digit_int(&s[8]);
+    FUNTLS_CHECK_BINARY(minute, >=, 0, "Invalid minute in UTCTime " + s);
+    FUNTLS_CHECK_BINARY(minute, <=, 59, "Invalid minute in UTCTime " + s);
     int second = 0;
     std::string tz;
     if (isdigit(s[10])) {
-        if (s.length() < 13) {
-            throw std::runtime_error("Invalid length of UTCTime '" + s + "'");
-        }
-        second = utc_time_get_2digit_int_checked(&s[10], 0, 59, "second");
+        FUNTLS_CHECK_BINARY(s.length(), >=, 13, "Invalid length oF UTCTime " + s);
+        second = utc_time_get_2digit_int(&s[10]);
+        FUNTLS_CHECK_BINARY(second, >=, 0, "Invalid second in UTCTime " + s);
+        FUNTLS_CHECK_BINARY(second, <=, 59, "Invalid second in UTCTime " + s);
         tz = std::string(&s[12]);
     } else {
         tz = std::string(&s[10]);
     }
     // TODO: Check that the date is legal (e.g. no february 31th)
+    (void) year;
     // TODO: Check that the time zone is valid
-    (void) year; (void) month; (void) date;
-    (void) hour; (void) minute; (void) second;
     (void) tz;
 }
 
@@ -132,38 +254,6 @@ std::ostream& operator<<(std::ostream& os, const utc_time& t) {
 #endif
     os << t.as_string();
     return os;
-}
-
-der_encoded_value::der_encoded_value(const util::buffer_view& buffer, size_t content_offset, asn1::identifier id, size_t content_length)
-    : buffer_(buffer)
-    , content_offset_(content_offset)
-    , id_(id)
-    , length_(content_length)
-{
-}
-
-std::ostream& operator<<(std::ostream& os, const der_encoded_value& t)
-{
-    uint8_t id = static_cast<uint8_t>(t.id());
-    os << "id = 0x" << util::base16_encode(&id ,1) << " len = " << t.length();
-    return os;
-}
-
-util::buffer_view der_encoded_value::content_view() const
-{
-    auto buf_copy = buffer_;
-    buf_copy.skip(content_offset_);
-    return buf_copy.get_slice(length_);
-}
-
-der_encoded_value read_der_encoded_value(util::buffer_view& buffer)
-{
-    auto orig_buf = buffer;
-    const auto id  = read_identifier(buffer);
-    const auto len = read_content_length(buffer);
-    const auto offset = buffer.index() - orig_buf.index();
-    buffer.skip(len);
-    return {orig_buf.get_slice(offset + len), offset, id, len};
 }
 
 } } // namespace funtls::asn1

@@ -19,43 +19,14 @@ using int_type = boost::multiprecision::cpp_int;
 
 using namespace funtls;
 
-asn1::identifier read_asn1_identifier(util::buffer_view& buf)
-{
-    uint8_t id = buf.get();
-    // If the identifier is not universal, its tag may be a number that is greater than 30. 
-    // In that case, the tag does not fit in the 5-bit tag field, and must be encoded in subsequent octets. 
-    // The value 11111 is reserved for identifying such encodings.
-    assert((id&0x1f)!=31);
-    return asn1::identifier{static_cast<asn1::identifier::tag>(id)};
-}
-
-size_t read_asn1_length(util::buffer_view& buf)
-{
-    const uint8_t first_size_byte = buf.get();
-    if (first_size_byte & 0x80) {
-        const uint8_t length_octets = first_size_byte & 0x7f;
-        if (length_octets == 0x7f) throw std::runtime_error("Illegal length octet");
-        if (length_octets > sizeof(size_t)) throw std::runtime_error("Unsupported length octet count " + std::to_string(length_octets));
-        size_t sz = 0;
-        for (unsigned i = 0; i < length_octets; ++i) {
-            sz <<= 8;
-            sz |= buf.get();
-        }
-        return sz;
-    } else {
-        return first_size_byte & 0x7f;
-    }
-}
-
 util::buffer_view asn1_expect_id(util::buffer_view& buf, asn1::identifier expected_id)
 {
-    const auto id = read_asn1_identifier(buf);
-    if (id != expected_id) {
-        throw std::runtime_error(std::string(__PRETTY_FUNCTION__) + ": " + std::to_string(uint8_t(id)) + " is not expected id " + std::to_string(uint8_t(expected_id)));
+    auto value = funtls::asn1::read_der_encoded_value(buf);
+    if (value.id() != expected_id) {
+        throw std::runtime_error(std::string(__PRETTY_FUNCTION__) + ": " + std::to_string(uint8_t(value.id())) + " is not expected id " + std::to_string(uint8_t(expected_id)));
     }
 
-    const auto len = read_asn1_length(buf);
-    return buf.get_slice(len);
+    return value.content_view();
 }
 
 int_type asn1_read_integer(util::buffer_view& buf)
@@ -93,58 +64,17 @@ bool asn1_is_valid_printable_character(char c)
 
 asn1::object_id asn1_read_object_id(util::buffer_view& buf)
 {
-    auto oid_buf = asn1_expect_id(buf, asn1::identifier::object_id);
-    if (oid_buf.size() < 1 || oid_buf.size() > 20) { // What are common sizes?
-        throw std::runtime_error("Invalid oid size " + std::to_string(oid_buf.size()) + " in " + __PRETTY_FUNCTION__);
-    }
-    const uint8_t first = oid_buf.get();
-    std::vector<uint32_t> res;
-    /*
-       The first octet has value 40 * value1 + value2.
-       (This is unambiguous, since value1 is limited to values 0, 1, and 2; value2 is limited to the 
-       range 0 to 39 when value1 is 0 or 1; and, according to X.208, n is always at least 2.)
-    */
-    res.push_back(first/40);
-    res.push_back(first%40);
-
-    /*
-       The following octets, if any, encode value3, ..., valuen. Each value is encoded base 128, 
-       most significant digit first, with as few digits as possible, and the most significant bit 
-       of each octet except the last in the value's encoding set to "1."*
-       }
-    */
-    while (oid_buf.remaining()) {
-        uint32_t value = 0;
-        uint8_t read_byte = 0;
-        do {
-            if (value >= (1<<21)) {
-                // OIDs must be less than 2^28, so if the value before shifting by 7 is >= 2^21
-                // it is about to become out of range
-                throw std::runtime_error("OID value out of range in " + std::string(__PRETTY_FUNCTION__));
-            }
-            read_byte = oid_buf.get();
-            value <<= 7;
-            value |= read_byte & 0x7f;
-        } while (read_byte & 0x80);
-        res.push_back(value);
-    }
-
-    assert(oid_buf.remaining() == 0);
-    return res;
+    return asn1::read_der_encoded_value(buf);
 }
 
-void print_all(util::buffer_view& buf, const char* name)
+void print_all(util::buffer_view& buf, const std::string& name)
 {
     while (buf.remaining()) {
-        // identifer, length, content, end-of-content
-
-        auto id = read_asn1_identifier(buf);
-        auto len = read_asn1_length(buf);
-
-        std::cout << name << " len=" << std::setw(4) << len << " " << id << std::endl;
-        buf.skip(len);
+        auto value = funtls::asn1::read_der_encoded_value(buf);
+        std::cout << name << " " << value << std::endl;
     }
 }
+
 enum class x500_attribute_type : uint32_t {
     objectClass = 0,
     aliasedEntryName = 1,
@@ -249,20 +179,19 @@ void parse_Name(util::buffer_view& buf)
                 throw std::runtime_error(oss.str());
             }
             const auto x500_attr_type = static_cast<x500_attribute_type>(attribute_type[3]);
-            auto id = read_asn1_identifier(av_pair_buf);
-            auto len = read_asn1_length(av_pair_buf);
+            const auto value = funtls::asn1::read_der_encoded_value(av_pair_buf);
             const size_t name_max_length = 200;
-            if (len < 1 || len > name_max_length) {
-                throw std::runtime_error("Invalid length found in " + std::string(__PRETTY_FUNCTION__) + " id=" + std::to_string((uint8_t)id) + " len=" + std::to_string(len));
+            if (value.content_view().size() < 1 || value.content_view().size() > name_max_length) {
+                throw std::runtime_error("Invalid length found in " + std::string(__PRETTY_FUNCTION__) + " id=" + std::to_string((uint8_t)value.id()) + " len=" + std::to_string(value.content_view().size()));
             }
-            if (id == asn1::identifier::printable_string || id == asn1::identifier::utf8_string) {
-                std::string s(len, '\0');
-                if (len) av_pair_buf.read(&s[0], len);
+            if (value.id() == asn1::identifier::printable_string || value.id() == asn1::identifier::utf8_string) {
+                std::string s(value.content_view().size(), '\0');
+                if (value.content_view().size()) value.content_view().read(&s[0], value.content_view().size());
                 // TODO: check that the string is valid
                 std::cout << " " << x500_attr_type << ": '" << s << "'" << std::endl;
             } else {
                 // Only TeletexString, UniversalString or BMPString allowed here
-                throw std::runtime_error("Unknown type found in " + std::string(__PRETTY_FUNCTION__) + " id=" + std::to_string((uint8_t)id) + " len=" + std::to_string(len));
+                throw std::runtime_error("Unknown type found in " + std::string(__PRETTY_FUNCTION__) + " id=" + std::to_string((uint8_t)value.id()) + " len=" + std::to_string(value.content_view().size()));
             }
             assert(av_pair_buf.remaining() == 0);
         }
@@ -270,24 +199,15 @@ void parse_Name(util::buffer_view& buf)
     }
 }
 
-asn1::utc_time parse_UTCTime(util::buffer_view& parent_buf)
-{
-    auto time_buf = asn1_expect_id(parent_buf, asn1::identifier::utc_time);
-    std::string s(time_buf.remaining(), '\0');
-    if (!s.empty()) time_buf.read(&s[0], s.length());
-    return s;
-}
-
 asn1::object_id asn1_read_algorithm_identifer(util::buffer_view& parent_buf)
 {
     auto algo_buf = asn1_expect_id(parent_buf, asn1::identifier::constructed_sequence);
     auto algo_id = asn1_read_object_id(algo_buf); // algorithm OBJECT IDENTIFIER,
     //parameters  ANY DEFINED BY algorithm OPTIONA
-    auto param_id = read_asn1_identifier(algo_buf);
-    auto param_len = read_asn1_length(algo_buf);
-    if (param_id != asn1::identifier::null || param_len != 0) { // parameters MUST be null for rsaEncryption at least
+    auto param_value = funtls::asn1::read_der_encoded_value(algo_buf);
+    if (param_value.id() != asn1::identifier::null || param_value.content_view().size() != 0) { // parameters MUST be null for rsaEncryption at least
         std::ostringstream oss;
-        oss << "Expected NULL parameter of length 0 in " << __PRETTY_FUNCTION__ << " got " << param_id << " of length " << param_len;
+        oss << "Expected NULL parameter of length 0 in " << __PRETTY_FUNCTION__ << " got " << param_value;
         throw std::runtime_error(oss.str());
     }
     assert(algo_buf.remaining() == 0);
@@ -434,8 +354,8 @@ rsa_public_key parse_TBSCertificate(util::buffer_view& elem_buf)
     parse_Name(elem_buf);
 
     auto validity_buf = asn1_expect_id(elem_buf, asn1::identifier::constructed_sequence);
-    auto notbefore    = parse_UTCTime(validity_buf);
-    auto notafter     = parse_UTCTime(validity_buf);
+    auto notbefore    = asn1::utc_time(asn1::read_der_encoded_value(validity_buf));
+    auto notafter     = asn1::utc_time(asn1::read_der_encoded_value(validity_buf));
     assert(validity_buf.remaining() == 0);
     std::cout << "Validity: Between " << notbefore << " and " << notafter << std::endl;
 
@@ -451,20 +371,16 @@ rsa_public_key parse_TBSCertificate(util::buffer_view& elem_buf)
     std::cout << std::dec;
 
     while (elem_buf.remaining()) {
-        auto id = read_asn1_identifier(elem_buf);
-        auto len = read_asn1_length(elem_buf);
-        if (id == asn1::identifier::context_specific_tag_1) {
+        auto value = funtls::asn1::read_der_encoded_value(elem_buf);
+        if (value.id() == asn1::identifier::context_specific_tag_1) {
             assert(version == 1 || version == 2); // Must be v2 or v3
-            elem_buf.skip(len); // Skip issuerUniqueID
-        } else if (id == asn1::identifier::context_specific_tag_2) {
+        } else if (value.id() == asn1::identifier::context_specific_tag_2) {
             assert(version == 1 || version == 2); // Must be v2 or v3
-            elem_buf.skip(len); // Skip subjectUniqueID
-        } else if (id == asn1::identifier::context_specific_tag_3) {
+        } else if (value.id() == asn1::identifier::context_specific_tag_3) {
             assert(version == 2); // Must be v3
-            elem_buf.skip(len); // Skip extensions
         } else {
             std::ostringstream oss;
-            oss << "Unknown tag found in " << __PRETTY_FUNCTION__ << ": " << id << " len = " << len;
+            oss << "Unknown tag found in " << __PRETTY_FUNCTION__ << ": " << value;
             throw std::runtime_error(oss.str());
         }
     }
@@ -595,13 +511,10 @@ void parse_x509_v3(util::buffer_view& buf) // in ASN.1 DER encoding (X.690)
     // The below is very ugly, but basically we need to check
     // all of the DER encoded data in tbsCertificate (including the id and length octets)
     util::buffer_view temp_buf(&tbsCertificate[0], tbsCertificate.size());
-    auto cert_id = read_asn1_identifier(temp_buf);
-    auto cert_len = read_asn1_length(temp_buf);
-    cert_len += tbsCertificate.size() - temp_buf.remaining();
-    assert(cert_id == asn1::identifier::constructed_sequence);
-    assert(cert_len < tbsCertificate.size());
+    auto cert_value = funtls::asn1::read_der_encoded_value(temp_buf);
+    assert(cert_value.id() == asn1::identifier::constructed_sequence);
 
-    const auto calced_digest = sha256(&tbsCertificate[0], cert_len);
+    const auto calced_digest = sha256(&tbsCertificate[0], cert_value.complete_view().size());
     std::cout << "Calculated digest: " << util::base16_encode(&calced_digest[0], calced_digest.size()) << std::endl;
     if (!std::equal(calced_digest.begin(), calced_digest.end(), digest.begin())) {
         throw std::runtime_error("Digest mismatch in " + std::string(__PRETTY_FUNCTION__) + " Calculated: " +
@@ -635,23 +548,100 @@ funtls::asn1::der_encoded_value value_from_bytes(const std::vector<uint8_t>& dat
     return value;
 }
 
+std::vector<uint8_t> make_vec(funtls::asn1::identifier id, const std::vector<uint8_t>& data)
+{
+    assert(data.size() < 0x80);
+    std::vector<uint8_t> res;
+    res.push_back(static_cast<uint8_t>(id));
+    res.push_back(data.size());
+    res.insert(res.end(), data.begin(), data.end());
+    return res;
+}
+
+template<typename T>
+T from_bytes(const std::vector<uint8_t>& d)
+{
+    const auto bytes = make_vec(T::id, d);
+    return T{value_from_bytes(bytes)};
+}
+
 void test_der_encoded_value()
 {
     using namespace funtls::util;
     using namespace funtls::asn1;
 
-    const auto null_value_bytes = std::vector<uint8_t>{static_cast<uint8_t>(identifier::null), 0};
+    std::vector<uint8_t> illegal_length{ static_cast<uint8_t>(identifier::integer), 4, 0 };
+    FUNTLS_ASSERT_THROWS(value_from_bytes(illegal_length), std::runtime_error);
+
+    //
+    // NULL
+    //
+
+    const auto null_value_bytes = make_vec(identifier::null, {});
     auto null_value = value_from_bytes(null_value_bytes);
     FUNTLS_ASSERT_EQUAL(identifier::null, null_value.id());
-    FUNTLS_ASSERT_EQUAL(0, null_value.length());
+    FUNTLS_ASSERT_EQUAL(2, null_value.complete_view().size());
     FUNTLS_ASSERT_EQUAL(0, null_value.content_view().size());
 
-    const auto int_value_1_bytes = std::vector<uint8_t>{static_cast<uint8_t>(identifier::integer), 1, 42};
+    //
+    // INTEGER
+    //
+
+    const auto int_value_1_bytes = make_vec(identifier::integer, {42});
     auto int_value_1 = value_from_bytes(int_value_1_bytes);
     FUNTLS_ASSERT_EQUAL(identifier::integer, int_value_1.id());
-    FUNTLS_ASSERT_EQUAL(1, int_value_1.length());
+    FUNTLS_ASSERT_EQUAL(3, int_value_1.complete_view().size());
     FUNTLS_ASSERT_EQUAL(1, int_value_1.content_view().size());
     FUNTLS_ASSERT_EQUAL(42, int_value_1.content_view().get());
+    auto int_value_1_ = integer{int_value_1};
+    FUNTLS_ASSERT_EQUAL(1, int_value_1_.octet_count());
+    FUNTLS_ASSERT_EQUAL(42, int_value_1_.octet(0));
+
+    // TODO: Check illegal encodings
+    // E.g. ints encoded with more than the needed bytes
+
+    static const struct {
+        int64_t int_val;
+        std::vector<uint8_t> bytes;
+    } int_test_cases[] = {
+        { 0, { 0 } },
+        { 60, { 60 } },
+        { 127, { 0x7f } },
+        { 128, { 0x00, 0x80 } },
+        { 256, { 0x01, 0x00 } },
+        { -128, { 0x80 } },
+        { -129, { 0xFF, 0x7F } },
+    };
+
+    for (const auto& int_test_case : int_test_cases) {
+        auto the_int = from_bytes<integer>(int_test_case.bytes);
+        FUNTLS_ASSERT_EQUAL(int_test_case.bytes.size(), the_int.octet_count());
+        for (size_t i = 0; i < int_test_case.bytes.size(); ++i) {
+            FUNTLS_ASSERT_EQUAL(int_test_case.bytes[i], the_int.octet(i));
+        }
+        FUNTLS_ASSERT_EQUAL(int_test_case.int_val, static_cast<int64_t>(the_int));
+    }
+    auto large_int = from_bytes<integer>({0x7f,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff});
+    FUNTLS_ASSERT_EQUAL(10, large_int.octet_count());
+    FUNTLS_ASSERT_THROWS(static_cast<int64_t>(large_int), std::runtime_error);
+
+    //
+    // OBJECT IDENTIFER
+    //
+
+    // { 1 2 840 113549 } RSA Data Security, Inc.
+    auto oid_1 = from_bytes<object_id>({0x2a,0x86,0x48,0x86,0xf7,0x0d});
+    FUNTLS_ASSERT_EQUAL(4, oid_1.size());
+    FUNTLS_ASSERT_EQUAL(1, oid_1[0]);
+    FUNTLS_ASSERT_EQUAL(2, oid_1[1]);
+    FUNTLS_ASSERT_EQUAL(840, oid_1[2]);
+    FUNTLS_ASSERT_EQUAL(113549, oid_1[3]);
+    FUNTLS_ASSERT_EQUAL((funtls::asn1::object_id{1,2,840,113549}), oid_1);
+
+    // Check some illegal oids
+    FUNTLS_ASSERT_THROWS(from_bytes<object_id>({}), std::runtime_error);
+    FUNTLS_ASSERT_THROWS(from_bytes<object_id>({3*40}), std::runtime_error);
+    FUNTLS_ASSERT_THROWS(from_bytes<object_id>({0x2a,0xff,0xff,0xff,0xff}), std::runtime_error);
 }
 
 int main()
