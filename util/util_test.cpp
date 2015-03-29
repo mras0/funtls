@@ -1,4 +1,5 @@
 #include "base_conversion.h"
+#include "buffer.h"
 #include "test.h"
 #include <stdexcept>
 
@@ -96,8 +97,64 @@ void base64_test()
     // TODO: Test throws
 }
 
+void buffer_test()
+{
+    const uint8_t source[] = { 0, 1, 2, 3, 4, 5 };
+
+    using namespace funtls::util;
+
+    buffer_view buf{source, sizeof(source)};
+    FUNTLS_ASSERT_EQUAL(6, buf.size());
+    FUNTLS_ASSERT_EQUAL(6, buf.remaining());
+    FUNTLS_ASSERT_EQUAL(0, buf.index());
+
+    buffer_view cpy = buf;
+    FUNTLS_ASSERT_EQUAL(6, cpy.size());
+    FUNTLS_ASSERT_EQUAL(6, cpy.remaining());
+    FUNTLS_ASSERT_EQUAL(0, cpy.index());
+
+    FUNTLS_ASSERT_EQUAL(0, cpy.get());
+    FUNTLS_ASSERT_EQUAL(5, cpy.remaining());
+    FUNTLS_ASSERT_EQUAL(1, cpy.index());
+    FUNTLS_ASSERT_EQUAL(6, cpy.size());
+    FUNTLS_ASSERT_EQUAL(6, buf.remaining()); // We didn't consume any bytes from the source
+
+    auto copy_of_copy = cpy;
+    FUNTLS_ASSERT_EQUAL(5, copy_of_copy.remaining());
+    FUNTLS_ASSERT_EQUAL(6, copy_of_copy.size());
+    FUNTLS_ASSERT_EQUAL(1, cpy.index());
+
+    FUNTLS_ASSERT_EQUAL(1, cpy.get());
+    FUNTLS_ASSERT_EQUAL(2, cpy.get());
+    FUNTLS_ASSERT_EQUAL(3, cpy.get());
+    FUNTLS_ASSERT_EQUAL(4, cpy.get());
+    FUNTLS_ASSERT_EQUAL(5, cpy.get());
+    FUNTLS_ASSERT_EQUAL(0, cpy.remaining());
+    FUNTLS_ASSERT_EQUAL(6, cpy.index());
+    FUNTLS_ASSERT_EQUAL(6, cpy.size());
+    FUNTLS_ASSERT_THROWS(cpy.get(), std::runtime_error);
+
+    auto slice = buf.get_slice(3);
+    FUNTLS_ASSERT_EQUAL(3, slice.size());
+    FUNTLS_ASSERT_EQUAL(3, slice.remaining());
+    FUNTLS_ASSERT_EQUAL(3, buf.remaining());
+    FUNTLS_ASSERT_EQUAL(6, buf.size());
+    FUNTLS_ASSERT_EQUAL(3, buf.get());
+    uint8_t dest[2];
+    buf.read(dest, sizeof(dest));
+    FUNTLS_ASSERT_EQUAL(4, dest[0]);
+    FUNTLS_ASSERT_EQUAL(5, dest[1]);
+    FUNTLS_ASSERT_THROWS(buf.read(dest, sizeof(dest)), std::runtime_error);
+
+    buffer_view empty{source, 0};
+    FUNTLS_ASSERT_EQUAL(0, empty.size());
+    FUNTLS_ASSERT_EQUAL(0, empty.remaining());
+    FUNTLS_ASSERT_THROWS(empty.get(), std::runtime_error);
+}
+
 int main()
 {
     base16_test();
     base64_test();
+    buffer_test();
 }

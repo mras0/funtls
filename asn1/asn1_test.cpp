@@ -9,137 +9,27 @@
 #include <array>
 
 #include <hash/sha.h>
+#include <util/base_conversion.h>
+#include <util/buffer.h>
+#include <util/test.h>
+#include <asn1/asn1.h>
 
 #include <boost/multiprecision/cpp_int.hpp>
 using int_type = boost::multiprecision::cpp_int;
 
-std::string hexstring(const void* buffer, size_t len)
-{
-    const uint8_t* bytes = static_cast<const uint8_t*>(buffer);
-    assert(len <= len*2);
-    std::string result;
-    result.reserve(len * 2);
-    for (size_t i = 0; i < len; ++i) {
-        static const char* const hexchars = "0123456789abcdef";
-        result += hexchars[bytes[i] >> 4];
-        result += hexchars[bytes[i] & 0xf];
-    }
-    return result;
-}
+using namespace funtls;
 
-struct buffer_view {
-    buffer_view(const uint8_t* buffer, size_t size) : buffer_(buffer), size_(size), index_(0) {
-    }
-
-    size_t size() const {
-        return size_;
-    }
-
-    size_t remaining() const {
-        assert(index_ <= size_);
-        return size_ - index_;
-    }
-
-    void skip(size_t num_bytes) {
-        if (index_ + num_bytes > size_) throw std::runtime_error("Out of data in " + std::string(__PRETTY_FUNCTION__));
-        index_ += num_bytes;
-    }
-
-    uint8_t get() {
-        if (index_ + 1 > size_) throw std::runtime_error("Out of data in " + std::string(__PRETTY_FUNCTION__));
-    //    std::cout << "<<" << hexstring(&buffer_[index_], 1) << ">>";
-        return buffer_[index_++];
-    }
-
-    void get_many(void* dest, size_t num_bytes) {
-        if (index_ + num_bytes > size_) throw std::runtime_error("Out of data in " + std::string(__PRETTY_FUNCTION__));
-        memcpy(dest, &buffer_[index_], num_bytes);
-        index_ += num_bytes;
-    }
-
-    buffer_view get_slice(size_t slice_size) {
-        if (index_ + slice_size > size_) throw std::runtime_error("Out of data in " + std::string(__PRETTY_FUNCTION__));
-        const uint8_t* slice_buffer = buffer_ + index_;
-        index_ += slice_size;
-        return buffer_view(slice_buffer, slice_size);
-    }
-
-private:
-    const uint8_t* buffer_;
-    size_t         size_;
-    size_t         index_;
-};
-
-class asn1_identifier {
-public:
-    static constexpr uint8_t constructed_bit = 0x20;
-    enum asn1_tag : uint8_t {
-        integer              = 0x02,
-        bit_string           = 0x03,
-        octet_string         = 0x04,
-        null                 = 0x05,
-        object_id            = 0x06,
-        utf8_string          = 0x0C,
-        sequence             = 0x10,
-        set                  = 0x11,
-        printable_string     = 0x13,
-        utc_time             = 0x17,
-        constructed_sequence = sequence | constructed_bit,
-        constructed_set      = set      | constructed_bit,
-    };
-
-    asn1_identifier(uint8_t value) : repr_(value) {
-    }
-
-    explicit operator uint8_t() const {
-        return repr_;
-    }
-
-    bool operator==(const asn1_identifier& rhs) const {
-        return repr_ == rhs.repr_;
-    }
-
-    bool operator!=(const asn1_identifier& rhs) const {
-        return !(*this == rhs);
-    }
-
-    asn1_identifier operator|(uint8_t mask) const {
-        assert(!(mask&0x1f));
-        return asn1_identifier{static_cast<uint8_t>(repr_ | mask)};
-    }
-
-    static asn1_identifier tagged(uint8_t tag) {
-        return tag | (2<<6); // context specific
-    }
-
-    friend std::ostream& operator<<(std::ostream& os, const asn1_identifier& ident) {
-        uint8_t id = ident.repr_;
-        uint8_t clazz = (id >> 6) & 3;
-        bool    constructed = (id & asn1_identifier::constructed_bit) != 0;
-        uint8_t tag = id & 0x1f;
-        static const char* const clazz_name[] = { "universal", "application", "context-specific", "private" };
-        os << "<identifier 0x" <<  hexstring(&id, 1);
-        os << " " << clazz_name[clazz];
-        os << " " << (constructed ? "constructed" : "primitive");
-        os << " " << static_cast<unsigned>(tag);
-        os << ">";
-        return os;
-    }
-private:
-    uint8_t repr_;
-};
-
-asn1_identifier read_asn1_identifier(buffer_view& buf)
+asn1::identifier read_asn1_identifier(util::buffer_view& buf)
 {
     uint8_t id = buf.get();
     // If the identifier is not universal, its tag may be a number that is greater than 30. 
     // In that case, the tag does not fit in the 5-bit tag field, and must be encoded in subsequent octets. 
     // The value 11111 is reserved for identifying such encodings.
     assert((id&0x1f)!=31);
-    return asn1_identifier{id};
+    return asn1::identifier{static_cast<asn1::identifier::tag>(id)};
 }
 
-size_t read_asn1_length(buffer_view& buf)
+size_t read_asn1_length(util::buffer_view& buf)
 {
     const uint8_t first_size_byte = buf.get();
     if (first_size_byte & 0x80) {
@@ -157,7 +47,7 @@ size_t read_asn1_length(buffer_view& buf)
     }
 }
 
-buffer_view asn1_expect_id(buffer_view& buf, asn1_identifier expected_id)
+util::buffer_view asn1_expect_id(util::buffer_view& buf, asn1::identifier expected_id)
 {
     const auto id = read_asn1_identifier(buf);
     if (id != expected_id) {
@@ -168,9 +58,9 @@ buffer_view asn1_expect_id(buffer_view& buf, asn1_identifier expected_id)
     return buf.get_slice(len);
 }
 
-int_type asn1_read_integer(buffer_view& buf)
+int_type asn1_read_integer(util::buffer_view& buf)
 {
-    auto int_buf = asn1_expect_id(buf, asn1_identifier::integer);
+    auto int_buf = asn1_expect_id(buf, asn1::identifier::integer);
     if (int_buf.size() < 1 || int_buf.size() > 1000) {
         throw std::runtime_error("Invalid integer size " + std::to_string(int_buf.size()) + " in " + __PRETTY_FUNCTION__);
     }
@@ -182,11 +72,11 @@ int_type asn1_read_integer(buffer_view& buf)
     return val;
 }
 
-std::vector<uint8_t> asn1_read_octet_string(buffer_view& buf)
+std::vector<uint8_t> asn1_read_octet_string(util::buffer_view& buf)
 {
-    auto os_buf = asn1_expect_id(buf, asn1_identifier::octet_string);
+    auto os_buf = asn1_expect_id(buf, asn1::identifier::octet_string);
     std::vector<uint8_t> os(os_buf.remaining());
-    if (!os.empty()) os_buf.get_many(&os[0], os.size());
+    if (!os.empty()) os_buf.read(&os[0], os.size());
     return os;
 }
 
@@ -201,50 +91,9 @@ bool asn1_is_valid_printable_character(char c)
     return false;
 }
 
-class asn1_object_id {
-public:
-    asn1_object_id() : components_() {
-    }
-
-    asn1_object_id(std::vector<uint32_t> components) : components_(components) {
-    }
-
-    asn1_object_id(std::initializer_list<uint32_t> components) : components_(components) {
-    }
-
-    size_t size() const {
-        return components_.size();
-    }
-
-    uint32_t operator[](size_t index) const {
-        assert(index < size());
-        return components_[index];
-    }
-
-    bool operator==(const asn1_object_id& rhs) const {
-        return components_ == rhs.components_;
-    }
-
-    bool operator!=(const asn1_object_id& rhs) const {
-        return !(*this == rhs);
-    }
-
-    friend std::ostream& operator<<(std::ostream& os, const asn1_object_id& oid) {
-        assert(!oid.components_.empty());
-        os << oid.components_[0];
-        for (unsigned i = 1; i < oid.components_.size(); ++i) {
-            os << "." << oid.components_[i];
-        }
-        return os;
-    }
-
-private:
-    std::vector<uint32_t> components_;
-};
-
-asn1_object_id asn1_read_object_id(buffer_view& buf)
+asn1::object_id asn1_read_object_id(util::buffer_view& buf)
 {
-    auto oid_buf = asn1_expect_id(buf, asn1_identifier::object_id);
+    auto oid_buf = asn1_expect_id(buf, asn1::identifier::object_id);
     if (oid_buf.size() < 1 || oid_buf.size() > 20) { // What are common sizes?
         throw std::runtime_error("Invalid oid size " + std::to_string(oid_buf.size()) + " in " + __PRETTY_FUNCTION__);
     }
@@ -284,7 +133,7 @@ asn1_object_id asn1_read_object_id(buffer_view& buf)
     return res;
 }
 
-void print_all(buffer_view& buf, const char* name)
+void print_all(util::buffer_view& buf, const char* name)
 {
     while (buf.remaining()) {
         // identifer, length, content, end-of-content
@@ -377,7 +226,7 @@ std::ostream& operator<<(std::ostream& os, const x500_attribute_type& attr) {
     return os;
 }
 
-void parse_Name(buffer_view& buf)
+void parse_Name(util::buffer_view& buf)
 {
 
     // Name ::= CHOICE { RDNSequence }
@@ -385,11 +234,11 @@ void parse_Name(buffer_view& buf)
     // RelativeDistinguishedName ::= SET OF AttributeValueAssertion
     // AttributeValueAssertion ::= SEQUENCE { AttributeType, AttributeValue }
     // AttributeType ::= OBJECT IDENTIFIER
-    auto name_buf = asn1_expect_id(buf, asn1_identifier::constructed_sequence); // RDNSequence
+    auto name_buf = asn1_expect_id(buf, asn1::identifier::constructed_sequence); // RDNSequence
     while (name_buf.remaining()) {
-        auto rdn_buf = asn1_expect_id(name_buf, asn1_identifier::constructed_set);
+        auto rdn_buf = asn1_expect_id(name_buf, asn1::identifier::constructed_set);
         while (rdn_buf.remaining()) {
-            auto av_pair_buf = asn1_expect_id(rdn_buf, asn1_identifier::constructed_sequence);
+            auto av_pair_buf = asn1_expect_id(rdn_buf, asn1::identifier::constructed_sequence);
             auto attribute_type = asn1_read_object_id(av_pair_buf);
 
             // 2.5.4 - X.500 attribute types
@@ -406,9 +255,9 @@ void parse_Name(buffer_view& buf)
             if (len < 1 || len > name_max_length) {
                 throw std::runtime_error("Invalid length found in " + std::string(__PRETTY_FUNCTION__) + " id=" + std::to_string((uint8_t)id) + " len=" + std::to_string(len));
             }
-            if (id == asn1_identifier::printable_string || id == asn1_identifier::utf8_string) {
+            if (id == asn1::identifier::printable_string || id == asn1::identifier::utf8_string) {
                 std::string s(len, '\0');
-                if (len) av_pair_buf.get_many(&s[0], len);
+                if (len) av_pair_buf.read(&s[0], len);
                 // TODO: check that the string is valid
                 std::cout << " " << x500_attr_type << ": '" << s << "'" << std::endl;
             } else {
@@ -421,90 +270,22 @@ void parse_Name(buffer_view& buf)
     }
 }
 
-class asn1_utc_time {
-public:
-    asn1_utc_time(const std::string& s) {
-        // Valid formats:
-        // 0123456789012345678
-        // YYMMDDhhmmZ
-        // YYMMDDhhmm+hh'mm'
-        // YYMMDDhhmm-hh'mm'
-        // YYMMDDhhmmssZ
-        // YYMMDDhhmmss+hh'mm'
-        // YYMMDDhhmmss-hh'mm'
-        if (s.length() < 11 || s.length() > 19) {
-            throw std::runtime_error("Invalid length of UTCTime '" + s + "'");
-        }
-        year   = 2000 + get_2digit_int(&s[0]);
-        month  = get_2digit_int_checked(&s[2], 1, 12, "month");
-        date   = get_2digit_int_checked(&s[4], 1, 31, "date");
-        hour   = get_2digit_int_checked(&s[6], 0, 23, "hour");
-        minute = get_2digit_int_checked(&s[8], 0, 59, "minute");
-        if (isdigit(s[10])) {
-            if (s.length() < 13) {
-                throw std::runtime_error("Invalid length of UTCTime '" + s + "'");
-            }
-            second = get_2digit_int_checked(&s[10], 0, 59, "second");
-            tz = std::string(&s[12]);
-        } else {
-            second = 0;
-            tz = std::string(&s[10]);
-        }
-        // TODO: Check that the date is legal (e.g. no february 31th)
-        // TODO: Check that the time zone is valid
-    }
-
-    friend std::ostream& operator<<(std::ostream& os, const asn1_utc_time& t) {
-        auto fill = os.fill();
-        os.fill('0');
-        os << std::setw(4) << t.year << "-" << std::setw(2) << t.month << "-" << std::setw(2) << t.date << " ";
-        os << std::setw(2) << t.hour << ":" << std::setw(2) << t.minute << ":" << std::setw(2) << t.second << t.tz;
-        os.fill(fill);
-        return os;
-    }
-
-private:
-    int year;
-    int month;
-    int date;
-    int hour;
-    int minute;
-    int second;
-    std::string tz;
-
-    static int get_digit(char d) {
-        if (d < '0' || d > '9') throw std::runtime_error("Invalid digit found in UTC time: " + std::string(1, d));
-        return d - '0';
-    }
-
-    static int get_2digit_int(const char* src) {
-        return 10 * get_digit(src[0]) + get_digit(src[1]);
-    }
-
-    static int get_2digit_int_checked(const char* src, int min, int max, const char* name) {
-        int n = get_2digit_int(src);
-        if (n < min) throw std::runtime_error(std::string(name) + " is too small " + std::to_string(n) + " < " + std::to_string(min));
-        if (n > max) throw std::runtime_error(std::string(name) + " is too large " + std::to_string(n) + " > " + std::to_string(max));
-        return n;
-    }
-};
-
-asn1_utc_time parse_UTCTime(buffer_view& parent_buf)
+asn1::utc_time parse_UTCTime(util::buffer_view& parent_buf)
 {
-    auto time_buf = asn1_expect_id(parent_buf, asn1_identifier::utc_time);
+    auto time_buf = asn1_expect_id(parent_buf, asn1::identifier::utc_time);
     std::string s(time_buf.remaining(), '\0');
-    if (!s.empty()) time_buf.get_many(&s[0], s.length());
+    if (!s.empty()) time_buf.read(&s[0], s.length());
     return s;
 }
 
-asn1_object_id asn1_read_algorithm_identifer(buffer_view& parent_buf)
+asn1::object_id asn1_read_algorithm_identifer(util::buffer_view& parent_buf)
 {
-    auto algo_buf = asn1_expect_id(parent_buf, asn1_identifier::constructed_sequence);
+    auto algo_buf = asn1_expect_id(parent_buf, asn1::identifier::constructed_sequence);
     auto algo_id = asn1_read_object_id(algo_buf); // algorithm OBJECT IDENTIFIER,
     //parameters  ANY DEFINED BY algorithm OPTIONA
     auto param_id = read_asn1_identifier(algo_buf);
     auto param_len = read_asn1_length(algo_buf);
-    if (param_id != asn1_identifier::null || param_len != 0) { // parameters MUST be null for rsaEncryption at least
+    if (param_id != asn1::identifier::null || param_len != 0) { // parameters MUST be null for rsaEncryption at least
         std::ostringstream oss;
         oss << "Expected NULL parameter of length 0 in " << __PRETTY_FUNCTION__ << " got " << param_id << " of length " << param_len;
         throw std::runtime_error(oss.str());
@@ -530,7 +311,7 @@ public:
         return size_;
     }
     friend std::ostream& operator<<(std::ostream& os, const asn1_bit_string& bs) {
-        os << hexstring(&bs.repr_[0], bs.repr_.size());
+        os << util::base16_encode(&bs.repr_[0], bs.repr_.size());
         return os;
     }
 
@@ -543,9 +324,9 @@ private:
     size_t               size_;
 };
 
-asn1_bit_string asn1_read_bit_string(buffer_view& parent_buf)
+asn1_bit_string asn1_read_bit_string(util::buffer_view& parent_buf)
 {
-    auto data_buf = asn1_expect_id(parent_buf, asn1_identifier::bit_string);
+    auto data_buf = asn1_expect_id(parent_buf, asn1::identifier::bit_string);
     if (data_buf.remaining() < 2) {
         throw std::runtime_error("Too little data in bit string len="+std::to_string(data_buf.remaining()));
     }
@@ -554,7 +335,7 @@ asn1_bit_string asn1_read_bit_string(buffer_view& parent_buf)
         throw std::runtime_error("Invalid number of bits in bit string: "+std::to_string((int)unused_bits));
     }
     std::vector<uint8_t> data(data_buf.remaining());
-    data_buf.get_many(&data[0], data.size());
+    data_buf.read(&data[0], data.size());
     return {data, data.size()*8-unused_bits};
 }
 
@@ -563,9 +344,9 @@ struct rsa_public_key {
     int_type public_exponent;   // e
 };
 
-rsa_public_key asn1_read_rsa_public_key(buffer_view& parent_buf)
+rsa_public_key asn1_read_rsa_public_key(util::buffer_view& parent_buf)
 {
-    auto elem_buf = asn1_expect_id(parent_buf, asn1_identifier::constructed_sequence);
+    auto elem_buf = asn1_expect_id(parent_buf, asn1::identifier::constructed_sequence);
     const auto modolus         = asn1_read_integer(elem_buf);
     const auto public_exponent = asn1_read_integer(elem_buf);
     assert(elem_buf.remaining() == 0);
@@ -574,21 +355,21 @@ rsa_public_key asn1_read_rsa_public_key(buffer_view& parent_buf)
 
 class algorithm_info {
 public:
-    algorithm_info(const std::string& name, const asn1_object_id& algorithm_identifier)
+    algorithm_info(const std::string& name, const asn1::object_id& algorithm_identifier)
         : name_(name)
         , algorithm_identifier_(algorithm_identifier) {
     }
 
     std::string    name() const { return name_; }
-    asn1_object_id algorithm_identifier() const { return algorithm_identifier_; }
+    asn1::object_id algorithm_identifier() const { return algorithm_identifier_; }
 
 private:
     std::string     name_;
-    asn1_object_id  algorithm_identifier_;
+    asn1::object_id  algorithm_identifier_;
 };
 
-static const asn1_object_id x509_rsaEncryption{ 1,2,840,113549,1,1,1 };
-static const asn1_object_id x509_sha256WithRSAEncryption{ 1,2,840,113549,1,1,11 };
+static const asn1::object_id x509_rsaEncryption{ 1,2,840,113549,1,1,1 };
+static const asn1::object_id x509_sha256WithRSAEncryption{ 1,2,840,113549,1,1,11 };
 
 static const algorithm_info x509_algorithms[] = {
     // 1.2.840.113549.1.1 - PKCS-1
@@ -596,7 +377,7 @@ static const algorithm_info x509_algorithms[] = {
     { "sha256WithRSAEncryption" , x509_sha256WithRSAEncryption  },
 };
 
-const algorithm_info& info_from_algorithm_id(const asn1_object_id& oid)
+const algorithm_info& info_from_algorithm_id(const asn1::object_id& oid)
 {
     for (const auto& algo : x509_algorithms) {
         if (algo.algorithm_identifier() == oid) {
@@ -615,9 +396,9 @@ std::ostream& operator<<(std::ostream& os, const algorithm_info& ai)
 }
 
 // https://tools.ietf.org/html/rfc4055
-rsa_public_key parse_RSAPublicKey(buffer_view& buf)
+rsa_public_key parse_RSAPublicKey(util::buffer_view& buf)
 {
-    auto public_key_buf = asn1_expect_id(buf, asn1_identifier::constructed_sequence);
+    auto public_key_buf = asn1_expect_id(buf, asn1::identifier::constructed_sequence);
     const auto pk_algo_id = asn1_read_algorithm_identifer(public_key_buf);
     if (pk_algo_id != x509_rsaEncryption) {
         std::ostringstream oss;
@@ -626,15 +407,15 @@ rsa_public_key parse_RSAPublicKey(buffer_view& buf)
     }
     // The public key is DER-encoded inside a bit string
     auto bs = asn1_read_bit_string(public_key_buf);
-    buffer_view pk_buf{bs.data(),bs.size()/8};
+    util::buffer_view pk_buf{bs.data(),bs.size()/8};
     const auto public_key = asn1_read_rsa_public_key(pk_buf);
     assert(public_key_buf.remaining() == 0);
     return public_key;
 }
 
-rsa_public_key parse_TBSCertificate(buffer_view& elem_buf)
+rsa_public_key parse_TBSCertificate(util::buffer_view& elem_buf)
 {
-    auto version_buf = asn1_expect_id(elem_buf, asn1_identifier::tagged(0) | asn1_identifier::constructed_bit);
+    auto version_buf = asn1_expect_id(elem_buf, asn1::identifier::context_specific_tag_0);
     auto version = asn1_read_integer(version_buf);
     assert(version_buf.remaining() == 0);
     std::cout << "Version " << (version+1) << std::endl;
@@ -644,7 +425,7 @@ rsa_public_key parse_TBSCertificate(buffer_view& elem_buf)
     std::cout << "Serial number: 0x" << std::hex << serial_number << std::dec << std::endl;
 
     auto algo_id = asn1_read_algorithm_identifer(elem_buf);
-    const asn1_object_id sha256WithRSAEncryption{1,2,840,113549,1,1,11};
+    const asn1::object_id sha256WithRSAEncryption{1,2,840,113549,1,1,11};
     std::cout << "Algorithm: " << algo_id;
     std::cout << "  - Expecting " << sha256WithRSAEncryption << " (sha256WithRSAEncryption)" << std::endl;
     assert(algo_id == sha256WithRSAEncryption);
@@ -652,7 +433,7 @@ rsa_public_key parse_TBSCertificate(buffer_view& elem_buf)
     std::cout << "Issuer:\n";
     parse_Name(elem_buf);
 
-    auto validity_buf = asn1_expect_id(elem_buf, asn1_identifier::constructed_sequence);
+    auto validity_buf = asn1_expect_id(elem_buf, asn1::identifier::constructed_sequence);
     auto notbefore    = parse_UTCTime(validity_buf);
     auto notafter     = parse_UTCTime(validity_buf);
     assert(validity_buf.remaining() == 0);
@@ -672,13 +453,13 @@ rsa_public_key parse_TBSCertificate(buffer_view& elem_buf)
     while (elem_buf.remaining()) {
         auto id = read_asn1_identifier(elem_buf);
         auto len = read_asn1_length(elem_buf);
-        if (id == (asn1_identifier::tagged(1) | asn1_identifier::constructed_bit)) {
+        if (id == asn1::identifier::context_specific_tag_1) {
             assert(version == 1 || version == 2); // Must be v2 or v3
             elem_buf.skip(len); // Skip issuerUniqueID
-        } else if (id == (asn1_identifier::tagged(2) | asn1_identifier::constructed_bit)) {
+        } else if (id == asn1::identifier::context_specific_tag_2) {
             assert(version == 1 || version == 2); // Must be v2 or v3
             elem_buf.skip(len); // Skip subjectUniqueID
-        } else if (id == (asn1_identifier::tagged(3) | asn1_identifier::constructed_bit)) {
+        } else if (id == asn1::identifier::context_specific_tag_3) {
             assert(version == 2); // Must be v3
             elem_buf.skip(len); // Skip extensions
         } else {
@@ -727,21 +508,21 @@ std::vector<uint8_t> int_to_octets(int_type i, size_t byte_count)
     return result;
 }
 
-std::vector<uint8_t> buffer_copy(const buffer_view& buf)
+std::vector<uint8_t> buffer_copy(const util::buffer_view& buf)
 {
     auto mut_buf = buf;
     std::vector<uint8_t> data(mut_buf.remaining());
-    if (!data.empty()) mut_buf.get_many(&data[0], data.size());
+    if (!data.empty()) mut_buf.read(&data[0], data.size());
     return data;
 }
 
-void parse_x509_v3(buffer_view& buf) // in ASN.1 DER encoding (X.690)
+void parse_x509_v3(util::buffer_view& buf) // in ASN.1 DER encoding (X.690)
 {
-    auto elem_buf = asn1_expect_id(buf, asn1_identifier::constructed_sequence);
+    auto elem_buf = asn1_expect_id(buf, asn1::identifier::constructed_sequence);
     // Save certificate data for verification against the signature
     const auto tbsCertificate = buffer_copy(elem_buf);
 
-    auto cert_buf = asn1_expect_id(elem_buf, asn1_identifier::constructed_sequence);
+    auto cert_buf = asn1_expect_id(elem_buf, asn1::identifier::constructed_sequence);
     if (!cert_buf.remaining()) {
         throw std::runtime_error("Empty certificate in " + std::string(__PRETTY_FUNCTION__));
     }
@@ -771,14 +552,14 @@ void parse_x509_v3(buffer_view& buf) // in ASN.1 DER encoding (X.690)
     // Decode the signature using the issuers public key (here using the subjects PK since the cert is selfsigned)
     const auto issuer_pk = subject_public_key;
     const auto decoded = int_to_octets(powm(sig_int, issuer_pk.public_exponent, issuer_pk.modolus), em_len);
-    std::cout << "Decoded signature:\n" << hexstring(&decoded[0], decoded.size()) << std::endl;
+    std::cout << "Decoded signature:\n" << util::base16_encode(&decoded[0], decoded.size()) << std::endl;
 
     // EM = 0x00 || 0x01 || PS || 0x00 || T (T=DER encoded DigestInfo)
-    auto digest_buf = buffer_view{&decoded[0], decoded.size()};
+    auto digest_buf = util::buffer_view{&decoded[0], decoded.size()};
     const auto sig0 = digest_buf.get();
     const auto sig1 = digest_buf.get();
     if (sig0 != 0x00 || sig1 != 0x01) {
-        throw std::runtime_error("Invalid PKCS#1 1.5 signature. Expected 0x00 0x01 Got: 0x" + hexstring(&sig0, 1) + " 0x" + hexstring(&sig1, 1));
+        throw std::runtime_error("Invalid PKCS#1 1.5 signature. Expected 0x00 0x01 Got: 0x" + util::base16_encode(&sig0, 1) + " 0x" + util::base16_encode(&sig1, 1));
     }
     // Skip padding
     for (;;) {
@@ -788,19 +569,19 @@ void parse_x509_v3(buffer_view& buf) // in ASN.1 DER encoding (X.690)
         } else if (b == 0x00) { // End of padding
             break;
         } else {
-            throw std::runtime_error("Invalid byte in PKCS#1 1.5 padding: 0x" + hexstring(&b, 1));
+            throw std::runtime_error("Invalid byte in PKCS#1 1.5 padding: 0x" + util::base16_encode(&b, 1));
         }
     }
     // DigestInfo ::= SEQUENCE {
     //   digestAlgorithm AlgorithmIdentifier,
     //   digest OCTET STRING }
 
-    auto digest_info_buf = asn1_expect_id(digest_buf, asn1_identifier::constructed_sequence);
+    auto digest_info_buf = asn1_expect_id(digest_buf, asn1::identifier::constructed_sequence);
     assert(digest_buf.remaining() == 0);
 
     auto digest_algo = asn1_read_algorithm_identifer(digest_info_buf);
     std::cout << "Digest algorithm: " << digest_algo << std::endl;
-    static const asn1_object_id id_sha256{2,16,840,1,101,3,4,2,1};
+    static const asn1::object_id id_sha256{2,16,840,1,101,3,4,2,1};
     assert(digest_algo == id_sha256);
     auto digest = asn1_read_octet_string(digest_info_buf);
     assert(digest_info_buf.remaining() == 0);
@@ -809,23 +590,23 @@ void parse_x509_v3(buffer_view& buf) // in ASN.1 DER encoding (X.690)
         throw std::runtime_error("Invalid digest size expected " + std::to_string(SHA256HashSize) + " got " + std::to_string(digest.size()) + " in " + __PRETTY_FUNCTION__);
     }
 
-    std::cout << "Digest: " << hexstring(&digest[0], digest.size()) << std::endl;
+    std::cout << "Digest: " << util::base16_encode(&digest[0], digest.size()) << std::endl;
 
     // The below is very ugly, but basically we need to check
     // all of the DER encoded data in tbsCertificate (including the id and length octets)
-    buffer_view temp_buf(&tbsCertificate[0], tbsCertificate.size());
+    util::buffer_view temp_buf(&tbsCertificate[0], tbsCertificate.size());
     auto cert_id = read_asn1_identifier(temp_buf);
     auto cert_len = read_asn1_length(temp_buf);
     cert_len += tbsCertificate.size() - temp_buf.remaining();
-    assert(cert_id == asn1_identifier::constructed_sequence);
+    assert(cert_id == asn1::identifier::constructed_sequence);
     assert(cert_len < tbsCertificate.size());
 
     const auto calced_digest = sha256(&tbsCertificate[0], cert_len);
-    std::cout << "Calculated digest: " << hexstring(&calced_digest[0], calced_digest.size()) << std::endl;
+    std::cout << "Calculated digest: " << util::base16_encode(&calced_digest[0], calced_digest.size()) << std::endl;
     if (!std::equal(calced_digest.begin(), calced_digest.end(), digest.begin())) {
         throw std::runtime_error("Digest mismatch in " + std::string(__PRETTY_FUNCTION__) + " Calculated: " +
-                hexstring(&calced_digest[0], calced_digest.size()) + " Expected: " +
-                hexstring(&digest[0], digest.size()));
+                util::base16_encode(&calced_digest[0], calced_digest.size()) + " Expected: " +
+                util::base16_encode(&digest[0], digest.size()));
     }
 }
 
@@ -845,10 +626,40 @@ std::vector<uint8_t> read_file(const std::string& filename)
     return buffer;
 }
 
+funtls::asn1::der_encoded_value value_from_bytes(const std::vector<uint8_t>& data)
+{
+    assert(data.size());
+    funtls::util::buffer_view buf(&data[0], data.size());
+    auto value = funtls::asn1::read_der_encoded_value(buf);
+    FUNTLS_ASSERT_EQUAL(0, buf.remaining());
+    return value;
+}
+
+void test_der_encoded_value()
+{
+    using namespace funtls::util;
+    using namespace funtls::asn1;
+
+    const auto null_value_bytes = std::vector<uint8_t>{static_cast<uint8_t>(identifier::null), 0};
+    auto null_value = value_from_bytes(null_value_bytes);
+    FUNTLS_ASSERT_EQUAL(identifier::null, null_value.id());
+    FUNTLS_ASSERT_EQUAL(0, null_value.length());
+    FUNTLS_ASSERT_EQUAL(0, null_value.content_view().size());
+
+    const auto int_value_1_bytes = std::vector<uint8_t>{static_cast<uint8_t>(identifier::integer), 1, 42};
+    auto int_value_1 = value_from_bytes(int_value_1_bytes);
+    FUNTLS_ASSERT_EQUAL(identifier::integer, int_value_1.id());
+    FUNTLS_ASSERT_EQUAL(1, int_value_1.length());
+    FUNTLS_ASSERT_EQUAL(1, int_value_1.content_view().size());
+    FUNTLS_ASSERT_EQUAL(42, int_value_1.content_view().get());
+}
+
 int main()
 {
+    test_der_encoded_value();
+
     auto cert = read_file("server.crt");
     assert(cert.size());
-    buffer_view cert_buf(&cert[0], cert.size());
+    util::buffer_view cert_buf(&cert[0], cert.size());
     parse_x509_v3(cert_buf);
 }
