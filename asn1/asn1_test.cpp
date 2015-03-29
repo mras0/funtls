@@ -84,6 +84,7 @@ int main()
         { -129, { 0xFF, 0x7F } },
     };
 
+    using int_type = boost::multiprecision::cpp_int;
     for (const auto& int_test_case : int_test_cases) {
         auto the_int = from_bytes<integer>(int_test_case.bytes);
         FUNTLS_ASSERT_EQUAL(int_test_case.bytes.size(), the_int.octet_count());
@@ -91,6 +92,7 @@ int main()
             FUNTLS_ASSERT_EQUAL(int_test_case.bytes[i], the_int.octet(i));
         }
         FUNTLS_ASSERT_EQUAL(int_test_case.int_val, the_int.as<int64_t>());
+        FUNTLS_ASSERT_EQUAL(int_type(int_test_case.int_val), the_int.as<int_type>());
         if (int_test_case.bytes.size() == 1) {
             FUNTLS_ASSERT_EQUAL(static_cast<int8_t>(int_test_case.int_val), the_int.as<int8_t>());
         } else if (int_test_case.bytes.size() == 2) {
@@ -102,7 +104,6 @@ int main()
     auto large_int = from_bytes<integer>({0x7f,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff});
     FUNTLS_ASSERT_EQUAL(10, large_int.octet_count());
     FUNTLS_ASSERT_THROWS(large_int.as<int64_t>(), std::runtime_error);
-    using int_type = boost::multiprecision::cpp_int;
     FUNTLS_ASSERT_EQUAL(int_type("0x7fffffffffffffffffff"), large_int.as<int_type>());
 
     //
@@ -122,4 +123,29 @@ int main()
     FUNTLS_ASSERT_THROWS(from_bytes<object_id>({}), std::runtime_error);
     FUNTLS_ASSERT_THROWS(from_bytes<object_id>({3*40}), std::runtime_error);
     FUNTLS_ASSERT_THROWS(from_bytes<object_id>({0x2a,0xff,0xff,0xff,0xff}), std::runtime_error);
+
+    //
+    // SEQUENCE
+    //
+    {
+        std::vector<uint8_t> s_bytes = make_vec(identifier::constructed_sequence, make_vec(identifier::null, {}));
+        auto s = sequence_view{value_from_bytes(s_bytes)};
+        FUNTLS_ASSERT_EQUAL(true, s.has_next());
+        auto x = s.next();
+        FUNTLS_ASSERT_EQUAL(false, s.has_next());
+        FUNTLS_ASSERT_EQUAL(identifier::null, x.id());
+        FUNTLS_ASSERT_EQUAL(0, x.content_view().size());
+    }
+
+    //
+    // SET
+    //
+    {
+        std::vector<uint8_t> s_bytes = make_vec(identifier::constructed_set, make_vec(identifier::integer, {22}));
+        auto s = set_view{value_from_bytes(s_bytes)};
+        FUNTLS_ASSERT_EQUAL(true, s.has_next());
+        auto x = s.next();
+        FUNTLS_ASSERT_EQUAL(false, s.has_next());
+        FUNTLS_ASSERT_EQUAL(22, integer{x}.as<int8_t>());
+    }
 }

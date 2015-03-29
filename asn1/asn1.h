@@ -66,7 +66,7 @@ identifier read_identifier(util::buffer_view& buffer);
 std::ostream& operator<<(std::ostream& os, const identifier& ident);
 
 //
-// ASN.1 DER encoded value
+// View of ASN.1 DER encoded value
 //
 
 class der_encoded_value {
@@ -89,6 +89,39 @@ private:
 
 der_encoded_value read_der_encoded_value(util::buffer_view& buffer);
 std::ostream& operator<<(std::ostream& os, const der_encoded_value& t);
+
+//
+// Containter views
+//
+
+namespace detail {
+void type_check(identifier expected, identifier actual);
+}
+
+template<identifier::tag tag>
+class container_view {
+public:
+    static constexpr auto id = tag;
+
+    container_view(const der_encoded_value& repr)
+        : buffer_(repr.content_view()) {
+            detail::type_check(id, repr.id());
+    }
+
+    bool has_next() const {
+        return buffer_.remaining() != 0;
+    }
+
+    der_encoded_value next() {
+        return read_der_encoded_value(buffer_);
+    }
+
+private:
+    util::buffer_view buffer_;
+};
+
+using sequence_view = container_view<identifier::constructed_sequence>;
+using set_view = container_view<identifier::constructed_set>;
 
 //
 // ASN.1 INTEGER (tag = 0x02)
@@ -123,6 +156,11 @@ public:
     }
 private:
     std::vector<uint8_t> repr_;
+
+
+    //
+    // Attemp to catch boost::multiprecision types. Only really tested with cpp_int
+    //
 
     template<typename IntType>
     static void check(size_t octet_count, typename std::enable_if<std::numeric_limits<IntType>::is_bounded, IntType>::type* = 0) {
@@ -178,6 +216,8 @@ public:
     bool operator!=(const object_id& rhs) const {
         return !(*this == rhs);
     }
+
+    std::string as_string() const;
 
 private:
     std::vector<uint32_t> components_;

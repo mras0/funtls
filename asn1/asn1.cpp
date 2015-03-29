@@ -55,6 +55,13 @@ std::vector<uint8_t> copy_of(const funtls::util::buffer_view& buf)
 
 namespace funtls { namespace asn1 {
 
+namespace detail {
+void type_check(identifier expected, identifier actual)
+{
+    FUNTLS_CHECK_BINARY(expected, ==, actual, "Invalid container tag");
+}
+} // namespace detail
+
 identifier read_identifier(util::buffer_view& buffer)
 {
     const uint8_t id = buffer.get();
@@ -170,6 +177,13 @@ object_id::object_id(const der_encoded_value& repr)
     }
 
     assert(oid_buf.remaining() == 0);
+}
+
+std::string object_id::as_string() const
+{
+    std::ostringstream oss;
+    oss << *this;
+    return oss.str();
 }
 
 std::ostream& operator<<(std::ostream& os, const object_id& oid)

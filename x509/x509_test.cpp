@@ -8,14 +8,17 @@
 #include <iomanip>
 #include <array>
 
-#include <boost/multiprecision/cpp_int.hpp>
-using int_type = boost::multiprecision::cpp_int;
-
-#include <hash/sha.h>
 #include <util/base_conversion.h>
 #include <util/buffer.h>
-#include <util/test.h>
 #include <asn1/asn1.h>
+
+#include <x509/x509.h>
+
+#include <util/test.h>
+#include <hash/sha.h>
+
+#include <boost/multiprecision/cpp_int.hpp>
+using int_type = boost::multiprecision::cpp_int;
 
 using namespace funtls;
 
@@ -53,98 +56,12 @@ bool asn1_is_valid_printable_character(char c)
     return false;
 }
 
-asn1::object_id asn1_read_object_id(util::buffer_view& buf)
-{
-    return asn1::read_der_encoded_value(buf);
-}
-
 void print_all(util::buffer_view& buf, const std::string& name)
 {
     while (buf.remaining()) {
         auto value = funtls::asn1::read_der_encoded_value(buf);
         std::cout << name << " " << value << std::endl;
     }
-}
-
-enum class x500_attribute_type : uint32_t {
-    objectClass = 0,
-    aliasedEntryName = 1,
-    knowldgeinformation = 2,
-    commonName = 3,
-    surname = 4,
-    serialNumber = 5,
-    countryName = 6,
-    localityName = 7,
-    stateOrProvinceName = 8,
-    streetAddress = 9,
-    organizationName = 10,
-    organizationalUnitName = 11,
-    title = 12,
-    description = 13,
-    searchGuide = 14,
-    businessCategory = 15,
-    postalAddress = 16,
-    postalCode = 17,
-    postOfficeBox = 18,
-    physicalDeliveryOfficeName = 19,
-    telephoneNumber = 20,
-    telexNumber = 21,
-    teletexTerminalIdentifier = 22,
-    facsimileTelephoneNumber = 23,
-    x121Address = 24,
-    internationalISDNNumber = 25,
-    registeredAddress = 26,
-    destinationIndicator = 27,
-    preferredDeliveryMethod = 28,
-    presentationAddress = 29,
-    supportedApplicationContext = 30,
-    member = 31,
-    owner = 32,
-    roleOccupant = 33,
-    seeAlso = 34,
-    userPassword = 35,
-    userCertificate = 36,
-    cACertificate = 37,
-    authorityRevocationList = 38,
-    certificateRevocationList = 39,
-    crossCertificatePair = 40,
-    name = 41,
-    givenName = 42,
-    initials = 43,
-    generationQualifier = 44,
-    uniqueIdentifier = 45,
-    dnQualifier = 46,
-    enhancedSearchGuide = 47,
-    protocolInformation = 48,
-    distinguishedName = 49,
-    uniqueMember = 50,
-    houseIdentifier = 51,
-    supportedAlgorithms = 52,
-    deltaRevocationList = 53,
-    //    Attribute Certificate attribute (attributeCertificate) = 58
-    pseudonym = 65,
-};
-
-std::ostream& operator<<(std::ostream& os, const x500_attribute_type& attr) {
-    switch (attr) {
-
-    case x500_attribute_type::commonName:
-        os << "Common name";
-        break;
-    case x500_attribute_type::countryName:
-        os << "Country";
-        break;
-    case x500_attribute_type::stateOrProvinceName:
-        os << "State/Province";
-        break;
-    case x500_attribute_type::organizationName:
-        os << "Organization";
-        break;
-    default:
-        os << "Unknown " << static_cast<uint32_t>(attr);
-        break;
-    }
-    return os;
 }
 
 void parse_Name(util::buffer_view& buf)
@@ -155,22 +72,14 @@ void parse_Name(util::buffer_view& buf)
     // RelativeDistinguishedName ::= SET OF AttributeValueAssertion
     // AttributeValueAssertion ::= SEQUENCE { AttributeType, AttributeValue }
     // AttributeType ::= OBJECT IDENTIFIER
-    auto name_buf = asn1_expect_id(buf, asn1::identifier::constructed_sequence); // RDNSequence
-    while (name_buf.remaining()) {
-        auto rdn_buf = asn1_expect_id(name_buf, asn1::identifier::constructed_set);
-        while (rdn_buf.remaining()) {
-            auto av_pair_buf = asn1_expect_id(rdn_buf, asn1::identifier::constructed_sequence);
-            auto attribute_type = asn1_read_object_id(av_pair_buf);
-
-            // 2.5.4 - X.500 attribute types
-            // http://www.alvestrand.no/objectid/2.5.4.html
-            if (attribute_type.size() != 4 || attribute_type[0] != 2 || attribute_type[1] != 5 || attribute_type[2] != 4) {
-                std::ostringstream oss;
-                oss << "Invalid attribute found in " << __PRETTY_FUNCTION__ << ": " << attribute_type;
-                throw std::runtime_error(oss.str());
-            }
-            const auto x500_attr_type = static_cast<x500_attribute_type>(attribute_type[3]);
-            const auto value = funtls::asn1::read_der_encoded_value(av_pair_buf);
+    auto name_seq = asn1::sequence_view{asn1::read_der_encoded_value(buf)}; // RDNSequence
+    while (name_seq.has_next()) {
+        auto rdn_seq = asn1::set_view{name_seq.next()};
+        while (rdn_seq.has_next()) {
+            //auto av_pair_buf = asn1_expect_id(rdn_buf, asn1::identifier::constructed_sequence);
+            auto av_pair = asn1::sequence_view{rdn_seq.next()};
+            auto attribute_type = x509::attribute_type{av_pair.next()};
+            const auto value = av_pair.next();
             const size_t name_max_length = 200;
             if (value.content_view().size() < 1 || value.content_view().size() > name_max_length) {
                 throw std::runtime_error("Invalid length found in " + std::string(__PRETTY_FUNCTION__) + " id=" + std::to_string((uint8_t)value.id()) + " len=" + std::to_string(value.content_view().size()));
@@ -179,12 +88,12 @@ void parse_Name(util::buffer_view& buf)
                 std::string s(value.content_view().size(), '\0');
                 if (value.content_view().size()) value.content_view().read(&s[0], value.content_view().size());
                 // TODO: check that the string is valid
-                std::cout << " " << x500_attr_type << ": '" << s << "'" << std::endl;
+                std::cout << " " << attribute_type << ": '" << s << "'" << std::endl;
             } else {
                 // Only TeletexString, UniversalString or BMPString allowed here
                 throw std::runtime_error("Unknown type found in " + std::string(__PRETTY_FUNCTION__) + " id=" + std::to_string((uint8_t)value.id()) + " len=" + std::to_string(value.content_view().size()));
             }
-            assert(av_pair_buf.remaining() == 0);
+            assert(!av_pair.has_next());
         }
         // end of RelativeDistinguishedName
     }
@@ -192,16 +101,16 @@ void parse_Name(util::buffer_view& buf)
 
 asn1::object_id asn1_read_algorithm_identifer(util::buffer_view& parent_buf)
 {
-    auto algo_buf = asn1_expect_id(parent_buf, asn1::identifier::constructed_sequence);
-    auto algo_id = asn1_read_object_id(algo_buf); // algorithm OBJECT IDENTIFIER,
+    auto algo_seq = asn1::sequence_view{asn1::read_der_encoded_value(parent_buf)};
+    auto algo_id = asn1::object_id{algo_seq.next()}; // algorithm OBJECT IDENTIFIER,
     //parameters  ANY DEFINED BY algorithm OPTIONA
-    auto param_value = funtls::asn1::read_der_encoded_value(algo_buf);
+    auto param_value = algo_seq.next();
     if (param_value.id() != asn1::identifier::null || param_value.content_view().size() != 0) { // parameters MUST be null for rsaEncryption at least
         std::ostringstream oss;
         oss << "Expected NULL parameter of length 0 in " << __PRETTY_FUNCTION__ << " got " << param_value;
         throw std::runtime_error(oss.str());
     }
-    assert(algo_buf.remaining() == 0);
+    assert(!algo_seq.has_next());
     return algo_id;
 }
 
@@ -257,10 +166,10 @@ struct rsa_public_key {
 
 rsa_public_key asn1_read_rsa_public_key(util::buffer_view& parent_buf)
 {
-    auto elem_buf = asn1_expect_id(parent_buf, asn1::identifier::constructed_sequence);
-    const auto modolus         = asn1_read_integer(elem_buf);
-    const auto public_exponent = asn1_read_integer(elem_buf);
-    assert(elem_buf.remaining() == 0);
+    auto elem_seq = asn1::sequence_view{asn1::read_der_encoded_value(parent_buf)};
+    const auto modolus         = asn1::integer(elem_seq.next()).as<int_type>();
+    const auto public_exponent = asn1::integer(elem_seq.next()).as<int_type>();
+    assert(!elem_seq.has_next());
     return rsa_public_key{modolus, public_exponent};
 }
 
