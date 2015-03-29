@@ -1,6 +1,8 @@
 #include <hash/sha.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <assert.h>
 
 void printhex(const void* data, size_t len)
 {
@@ -12,6 +14,7 @@ void printhex(const void* data, size_t len)
 
 void sha256_test(const char* expected, const char* test_data, size_t test_data_len)
 {
+    assert(strlen(expected) == 2*SHA256HashSize);
     SHA256Context context;
     SHA256Reset(&context);
     SHA256Input(&context, (const uint8_t*)test_data, test_data_len);
@@ -20,6 +23,18 @@ void sha256_test(const char* expected, const char* test_data, size_t test_data_l
     printf("Expecting %s\n", expected);
     printf("Result    ");
     printhex(digest, SHA256HashSize);
+
+    for (unsigned i = 0; i < SHA256HashSize; ++i) {
+        uint8_t n;
+        if (sscanf(&expected[i*2], "%2hhx", &n) != 1) {
+            printf("Internal error at %s:%d\n", __FILE__, __LINE__);
+            abort();
+        }
+        if (n != digest[i]) {
+            printf("Mismatch at position %u %hhx != %hhx\n", i, n, digest[i]);
+            abort();
+        }
+    }
 }
 
 int main()

@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 2.8)
 project(funtls)
 
+enable_testing()
+# http://stackoverflow.com/questions/16158091/cmake-setting-an-environmental-variable-for-ctest-or-otherwise-getting-failed
+add_custom_target(check COMMAND ${CMAKE_CTEST_COMMAND} --force-new-ctest-process --output-on-failure)
+
 set(common_flags "-Wall -Wextra -fsanitize=address -pthread")
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c99 ${common_flags}")
