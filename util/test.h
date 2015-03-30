@@ -1,5 +1,6 @@
 #include <sstream>
 #include <string>
+#include <cstdlib>
 
 namespace funtls { namespace test {
 
@@ -8,9 +9,11 @@ void assert_failed(const char* func, const char* file, int line, const std::stri
 
 } } // namespace funtls::test
 
-#define FUNTLS_CHECK_FAILURE(msg) \
+#define FUNTLS_CHECK_FAILURE(msg) do {                                  \
     funtls::test::check_failed(__PRETTY_FUNCTION__, __FILE__,           \
-                    __LINE__, msg)
+                    __LINE__, msg);                                     \
+    std::abort();                                                       \
+    } while (0)
 
 #define FUNTLS_ASSERT_THROWS_MESSAGE(expr, exception_type, message)     \
     do {                                                                \

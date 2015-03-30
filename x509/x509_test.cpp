@@ -22,162 +22,6 @@ using int_type = boost::multiprecision::cpp_int;
 
 using namespace funtls;
 
-util::buffer_view asn1_expect_id(util::buffer_view& buf, asn1::identifier expected_id)
-{
-    auto value = asn1::read_der_encoded_value(buf);
-    if (value.id() != expected_id) {
-        throw std::runtime_error(std::string(__PRETTY_FUNCTION__) + ": " + std::to_string(uint8_t(value.id())) + " is not expected id " + std::to_string(uint8_t(expected_id)));
-    }
-
-    return value.content_view();
-}
-
-void print_all(util::buffer_view& buf, const std::string& name)
-{
-    while (buf.remaining()) {
-        auto value = asn1::read_der_encoded_value(buf);
-        std::cout << name << " " << value << std::endl;
-    }
-}
-
-void parse_Name(const asn1::der_encoded_value& repr)
-{
-
-    // Name ::= CHOICE { RDNSequence }
-    // RDNSequence ::= SEQUENCE OF RelativeDistinguishedName 
-    // RelativeDistinguishedName ::= SET OF AttributeValueAssertion
-    // AttributeValueAssertion ::= SEQUENCE { AttributeType, AttributeValue }
-    // AttributeType ::= OBJECT IDENTIFIER
-    auto name_seq = asn1::sequence_view{repr}; // RDNSequence
-    while (name_seq.has_next()) {
-        auto rdn_seq = asn1::set_view{name_seq.next()};
-        while (rdn_seq.has_next()) {
-            //auto av_pair_buf = asn1_expect_id(rdn_buf, asn1::identifier::constructed_sequence);
-            auto av_pair = asn1::sequence_view{rdn_seq.next()};
-            auto attribute_type = x509::attribute_type{av_pair.next()};
-            const auto value = av_pair.next();
-            std::string text;
-            if (value.id() == asn1::identifier::printable_string) {
-                text = asn1::printable_string{value}.as_string();
-            } else if (value.id() == asn1::identifier::utf8_string) {
-                text = asn1::utf8_string{value}.as_string();
-            } else {
-                // Only TeletexString, UniversalString or BMPString allowed here
-                throw std::runtime_error("Unknown type found in " + std::string(__PRETTY_FUNCTION__) + " id=" + std::to_string((uint8_t)value.id()) + " len=" + std::to_string(value.content_view().size()));
-            }
-            std::cout << " " << attribute_type << ": '" << text << "'" << std::endl;
-            assert(!av_pair.has_next());
-        }
-        // end of RelativeDistinguishedName
-    }
-}
-
-asn1::object_id asn1_read_algorithm_identifer(const asn1::der_encoded_value& value)
-{
-    auto algo_seq = asn1::sequence_view{value};
-    auto algo_id = asn1::object_id{algo_seq.next()}; // algorithm OBJECT IDENTIFIER,
-    //parameters  ANY DEFINED BY algorithm OPTIONAL
-    auto param_value = algo_seq.next();
-    if (param_value.id() != asn1::identifier::null || param_value.content_view().size() != 0) { // parameters MUST be null for rsaEncryption at least
-        std::ostringstream oss;
-        oss << "Expected NULL parameter of length 0 in " << __PRETTY_FUNCTION__ << " got " << param_value;
-        throw std::runtime_error(oss.str());
-    }
-    assert(!algo_seq.has_next());
-    return algo_id;
-}
-
-struct rsa_public_key {
-    int_type modolus;           // n
-    int_type public_exponent;   // e
-};
-
-rsa_public_key asn1_read_rsa_public_key(util::buffer_view& parent_buf)
-{
-    auto elem_seq = asn1::sequence_view{asn1::read_der_encoded_value(parent_buf)};
-    const auto modolus         = asn1::integer(elem_seq.next()).as<int_type>();
-    const auto public_exponent = asn1::integer(elem_seq.next()).as<int_type>();
-    assert(!elem_seq.has_next());
-    return rsa_public_key{modolus, public_exponent};
-}
-
-static const asn1::object_id x509_rsaEncryption{ 1,2,840,113549,1,1,1 };
-static const asn1::object_id x509_sha256WithRSAEncryption{ 1,2,840,113549,1,1,11 };
-
-// https://tools.ietf.org/html/rfc4055
-rsa_public_key parse_RSAPublicKey(util::buffer_view& buf)
-{
-    auto pk_seq = asn1::sequence_view{asn1::read_der_encoded_value(buf)};
-    const auto pk_algo_id = asn1_read_algorithm_identifer(pk_seq.next());
-    if (pk_algo_id != x509_rsaEncryption) {
-        std::ostringstream oss;
-        oss << "Unknown key algorithm id " << pk_algo_id << " expected rsaEncryption (" << x509_rsaEncryption << ") in " << __PRETTY_FUNCTION__;
-        throw std::runtime_error(oss.str());
-    }
-    // The public key is DER-encoded inside a bit string
-    auto bs = asn1::bit_string{pk_seq.next()}.as_vector();
-    util::buffer_view pk_buf{&bs[0], bs.size()};
-    const auto public_key = asn1_read_rsa_public_key(pk_buf);
-    assert(!pk_seq.has_next());
-    return public_key;
-}
-
-rsa_public_key parse_TBSCertificate(const asn1::der_encoded_value& repr)
-{
-    auto cert_seq = asn1::sequence_view{repr};
-
-    auto version = x509::version{cert_seq.next()};
-    std::cout << "Version " << version << std::endl;
-    assert(version == x509::version::v3);
-
-    auto serial_number = asn1::integer{cert_seq.next()}.as<int_type>();
-    std::cout << "Serial number: 0x" << std::hex << serial_number << std::dec << std::endl;
-
-    auto algo_id = asn1_read_algorithm_identifer(cert_seq.next());
-    const asn1::object_id sha256WithRSAEncryption{1,2,840,113549,1,1,11};
-    std::cout << "Algorithm: " << algo_id;
-    std::cout << "  - Expecting " << sha256WithRSAEncryption << " (sha256WithRSAEncryption)" << std::endl;
-    assert(algo_id == sha256WithRSAEncryption);
-
-    std::cout << "Issuer:\n";
-    parse_Name(cert_seq.next());
-
-    auto validity  = asn1::sequence_view{cert_seq.next()};
-    auto notbefore = asn1::utc_time{validity.next()};
-    auto notafter  = asn1::utc_time{validity.next()};
-    assert(!validity.has_next());
-    std::cout << "Validity: Between " << notbefore << " and " << notafter << std::endl;
-
-    std::cout << "Subject:\n";
-    parse_Name(cert_seq.next());
-
-    // SubjectPublicKeyInfo  ::=  SEQUENCE  {
-    //    algorithm            AlgorithmIdentifier,
-    //    subjectPublicKey     BIT STRING  }
-    auto s_pk_buf = cert_seq.next().complete_view();
-    auto subject_public_key = parse_RSAPublicKey(s_pk_buf);
-    std::cout << std::hex;
-    std::cout << "Subject public key: n=0x" << subject_public_key.modolus << " e=0x" << subject_public_key.public_exponent << std::endl;
-    std::cout << std::dec;
-
-    while (cert_seq.has_next()) {
-        auto value = cert_seq.next();
-        if (value.id() == asn1::identifier::context_specific_tag_1) {
-            assert(version == 1 || version == 2); // Must be v2 or v3
-        } else if (value.id() == asn1::identifier::context_specific_tag_2) {
-            assert(version == 1 || version == 2); // Must be v2 or v3
-        } else if (value.id() == asn1::identifier::context_specific_tag_3) {
-            assert(version == 2); // Must be v3
-        } else {
-            std::ostringstream oss;
-            oss << "Unknown tag found in " << __PRETTY_FUNCTION__ << ": " << value;
-            throw std::runtime_error(oss.str());
-        }
-    }
-
-    return subject_public_key;
-}
-
 std::array<uint8_t, SHA256HashSize> sha256(const void* data, size_t len)
 {
     SHA256Context context;
@@ -226,11 +70,21 @@ void parse_x509_v3(util::buffer_view& buf) // in ASN.1 DER encoding (X.690)
     // Save certificate data for verification against the signature
     const auto tbsCertificate = buffer_copy(tbs_cert.complete_view());
 
-    auto subject_public_key = parse_TBSCertificate(tbs_cert);
+    auto c = x509::parse_v3_cert(tbs_cert);
+    std::cout << "Certificate:" << std::endl;
+    std::cout << " Serial number: 0x" << std::hex << c.serial_number.as<int_type>() << std::dec << std::endl;
+    std::cout << " ignature algorithm: " << c.signature_algorithm <<  std::endl;
+    std::cout << " Issuer: " << c.issuer << std::endl;
+    std::cout << " Validity: Between " << c.validity_not_before << " and " << c.validity_not_after << std::endl;
+    std::cout << " Subject: " << c.subject << std::endl;
+    std::cout << " Subject public key: n=0x" << std::hex << c.subject_public_key.modolus.as<int_type>()
+              << " e=0x" << c.subject_public_key.public_exponent.as<int_type>() << std::dec << std::endl;
 
-    auto sig_algo = asn1_read_algorithm_identifer(cert_seq.next());
+    assert(c.signature_algorithm == x509::sha256WithRSAEncryption);
+
+    auto sig_algo = x509::read_algorithm_identifer(cert_seq.next());
     std::cout << "Signature algorithm: " << sig_algo << std::endl;
-    assert(sig_algo == x509_sha256WithRSAEncryption);
+    assert(sig_algo == x509::sha256WithRSAEncryption);
     auto sig_value = asn1::bit_string{cert_seq.next()}.as_vector();
     std::cout << " " << sig_value.size() << " bits" << std::endl;
     std::cout << " " << util::base16_encode(sig_value) << std::endl;
@@ -247,8 +101,8 @@ void parse_x509_v3(util::buffer_view& buf) // in ASN.1 DER encoding (X.690)
     const size_t em_len = sig_value.size(); // encrypted message length
 
     // Decode the signature using the issuers public key (here using the subjects PK since the cert is selfsigned)
-    const auto issuer_pk = subject_public_key;
-    const auto decoded = int_to_octets(powm(sig_int, issuer_pk.public_exponent, issuer_pk.modolus), em_len);
+    const auto issuer_pk = c.subject_public_key;
+    const auto decoded = int_to_octets(powm(sig_int, issuer_pk.public_exponent.as<int_type>(), issuer_pk.modolus.as<int_type>()), em_len);
     std::cout << "Decoded signature:\n" << util::base16_encode(&decoded[0], decoded.size()) << std::endl;
 
     // EM = 0x00 || 0x01 || PS || 0x00 || T (T=DER encoded DigestInfo)
@@ -276,7 +130,7 @@ void parse_x509_v3(util::buffer_view& buf) // in ASN.1 DER encoding (X.690)
     auto digest_info = asn1::sequence_view{asn1::read_der_encoded_value(digest_buf)};
     assert(digest_buf.remaining() == 0);
 
-    auto digest_algo = asn1_read_algorithm_identifer(digest_info.next());
+    auto digest_algo = x509::read_algorithm_identifer(digest_info.next());
     std::cout << "Digest algorithm: " << digest_algo << std::endl;
     static const asn1::object_id id_sha256{2,16,840,1,101,3,4,2,1};
     assert(digest_algo == id_sha256);

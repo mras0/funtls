@@ -1,9 +1,13 @@
 #include <iosfwd>
 #include <cassert>
+#include <map>
 
 #include <asn1/asn1.h>
 
 namespace funtls { namespace x509 {
+
+static const asn1::object_id rsaEncryption{ 1,2,840,113549,1,1,1 };
+static const asn1::object_id sha256WithRSAEncryption{ 1,2,840,113549,1,1,11 };
 
 // Defined in https://tools.ietf.org/html/rfc5280 A.1
 // joint-iso-ccitt(2) ds(5) 4 
@@ -97,5 +101,38 @@ private:
 };
 
 std::ostream& operator<<(std::ostream& os, const version& attr);
+
+class name {
+public:
+    typedef std::vector<std::pair<attribute_type, std::string>> attr_type;
+
+    name(const asn1::der_encoded_value& repr);
+
+    attr_type attributes() const { return attributes_; }
+
+private:
+    attr_type attributes_;
+};
+
+std::ostream& operator<<(std::ostream& os, const name& n);
+
+struct rsa_public_key {
+    asn1::integer modolus;           // n
+    asn1::integer public_exponent;   // e
+};
+
+struct v3_certificate {
+    asn1::integer   serial_number;
+    asn1::object_id signature_algorithm;
+    name            issuer;
+    asn1::utc_time  validity_not_before;
+    asn1::utc_time  validity_not_after;
+    name            subject;
+    rsa_public_key  subject_public_key;
+};
+
+v3_certificate parse_v3_cert(const asn1::der_encoded_value& repr);
+
+asn1::object_id read_algorithm_identifer(const asn1::der_encoded_value& value);
 
 } } // namespace funtls::x509
