@@ -80,6 +80,15 @@ funtls::x509::name::attr_type parse_name_attributes(const funtls::asn1::der_enco
     return res;
 }
 
+std::vector<uint8_t> buffer_copy(const funtls::util::buffer_view& buf)
+{
+    auto mut_buf = buf;
+    std::vector<uint8_t> data(mut_buf.remaining());
+    if (!data.empty()) mut_buf.read(&data[0], data.size());
+    return data;
+}
+
+
 } // unnamed namespace
 
 namespace funtls { namespace x509 {
@@ -156,7 +165,7 @@ std::ostream& operator<<(std::ostream& os, const name& n)
     return os;
 }
 
-v3_certificate parse_v3_cert(const asn1::der_encoded_value& repr)
+tbs_certificate parse_tbs_certificate(const asn1::der_encoded_value& repr)
 {
     auto cert_seq = asn1::sequence_view{repr};
 
@@ -200,7 +209,7 @@ v3_certificate parse_v3_cert(const asn1::der_encoded_value& repr)
         }
     }
 
-    return v3_certificate{
+    return tbs_certificate{
         serial_number,
         algo_id,
         issuer,
@@ -211,6 +220,19 @@ v3_certificate parse_v3_cert(const asn1::der_encoded_value& repr)
         subject_public_key
     };
 }
+
+v3_certificate v3_certificate::parse(const asn1::der_encoded_value& repr)
+{
+    auto cert_seq       = asn1::sequence_view{repr};
+    auto tbs_cert_val   = cert_seq.next();
+    // Save certificate data for verification against the signature
+    auto tbsCertificate = buffer_copy(tbs_cert_val.complete_view());
+    auto tbs_cert       = x509::parse_tbs_certificate(tbs_cert_val);
+    auto sig_algo       = x509::read_algorithm_identifer(cert_seq.next());
+    auto sig_value      = asn1::bit_string{cert_seq.next()};
+    FUNTLS_CHECK_BINARY(cert_seq.has_next(), ==, false, "Extra data found at end of X509v3 certificate");
+    return v3_certificate{std::move(tbs_cert), std::move(tbsCertificate), std::move(sig_algo), std::move(sig_value)};
+ }
 
 // TODO: Remove
 asn1::object_id read_algorithm_identifer(const asn1::der_encoded_value& value)

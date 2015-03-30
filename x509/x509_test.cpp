@@ -71,22 +71,11 @@ std::vector<uint8_t> int_to_octets(int_type i, size_t byte_count)
     return result;
 }
 
-std::vector<uint8_t> buffer_copy(const util::buffer_view& buf)
+void parse_and_check_x509_v3(util::buffer_view& buf) // in ASN.1 DER encoding (X.690)
 {
-    auto mut_buf = buf;
-    std::vector<uint8_t> data(mut_buf.remaining());
-    if (!data.empty()) mut_buf.read(&data[0], data.size());
-    return data;
-}
+    auto cert = x509::v3_certificate::parse(asn1::read_der_encoded_value(buf));
 
-void parse_x509_v3(util::buffer_view& buf) // in ASN.1 DER encoding (X.690)
-{
-    auto cert_seq = asn1::sequence_view{asn1::read_der_encoded_value(buf)};
-    auto tbs_cert = cert_seq.next();
-    // Save certificate data for verification against the signature
-    const auto tbsCertificate = buffer_copy(tbs_cert.complete_view());
-
-    auto c = x509::parse_v3_cert(tbs_cert);
+    auto c = cert.certificate();
     std::cout << "Certificate:" << std::endl;
     std::cout << " Serial number: 0x" << std::hex << c.serial_number.as<int_type>() << std::dec << std::endl;
     std::cout << " Signature algorithm: " << c.signature_algorithm <<  std::endl;
@@ -100,13 +89,11 @@ void parse_x509_v3(util::buffer_view& buf) // in ASN.1 DER encoding (X.690)
     std::cout << " Subject public key: n=0x" << std::hex << s_pk.modolus.as<int_type>()
         << " e=0x" << s_pk.public_exponent.as<int_type>() << std::dec << std::endl;
 
-    auto sig_algo = x509::read_algorithm_identifer(cert_seq.next());
-    std::cout << "Signature algorithm: " << sig_algo << std::endl;
-    assert(sig_algo == x509::sha256WithRSAEncryption);
-    auto sig_value = asn1::bit_string{cert_seq.next()}.as_vector();
+    std::cout << "Signature algorithm: " << cert.signature_algorithm() << std::endl;
+    assert(cert.signature_algorithm() == x509::sha256WithRSAEncryption);
+    auto sig_value = cert.signature().as_vector();
     std::cout << " " << sig_value.size() << " bits" << std::endl;
     std::cout << " " << util::base16_encode(sig_value) << std::endl;
-    assert(!cert_seq.has_next());
 
     // The signatureValue field contains a digital signature computed upon
     // the ASN.1 DER encoded tbsCertificate.  The ASN.1 DER encoded
@@ -161,13 +148,8 @@ void parse_x509_v3(util::buffer_view& buf) // in ASN.1 DER encoding (X.690)
 
     std::cout << "Digest: " << util::base16_encode(&digest[0], digest.size()) << std::endl;
 
-    // The below is very ugly, but basically we need to check
-    // all of the DER encoded data in tbsCertificate (including the id and length octets)
-    util::buffer_view temp_buf(&tbsCertificate[0], tbsCertificate.size());
-    auto cert_value = asn1::read_der_encoded_value(temp_buf);
-    assert(cert_value.id() == asn1::identifier::constructed_sequence);
-
-    const auto calced_digest = sha256(&tbsCertificate[0], cert_value.complete_view().size());
+    const auto& cert_buf = cert.certificate_der_encoded();
+    const auto calced_digest = sha256(&cert_buf[0], cert_buf.size());
     std::cout << "Calculated digest: " << util::base16_encode(&calced_digest[0], calced_digest.size()) << std::endl;
     if (!std::equal(calced_digest.begin(), calced_digest.end(), digest.begin())) {
         throw std::runtime_error("Digest mismatch in " + std::string(__PRETTY_FUNCTION__) + " Calculated: " +
@@ -197,5 +179,5 @@ int main()
     auto cert = read_file("server.crt");
     assert(cert.size());
     util::buffer_view cert_buf(&cert[0], cert.size());
-    parse_x509_v3(cert_buf);
+    parse_and_check_x509_v3(cert_buf);
 }

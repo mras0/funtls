@@ -116,7 +116,7 @@ private:
 
 std::ostream& operator<<(std::ostream& os, const name& n);
 
-struct v3_certificate {
+struct tbs_certificate {
     asn1::integer    serial_number;
     asn1::object_id  signature_algorithm;
     name             issuer;
@@ -127,7 +127,39 @@ struct v3_certificate {
     asn1::bit_string subject_public_key;
 };
 
-v3_certificate parse_v3_cert(const asn1::der_encoded_value& repr);
+struct v3_certificate {
+public:
+    static v3_certificate parse(const asn1::der_encoded_value&);
+
+    const tbs_certificate& certificate() const {
+        return tbs_certificate_;
+    }
+
+    const std::vector<uint8_t>& certificate_der_encoded() const {
+        return tbs_certificate_der_encoded_;
+    }
+
+    const asn1::object_id& signature_algorithm() const {
+        return signature_algorithm_;
+    }
+
+    const asn1::bit_string signature() const {
+        return signature_;
+    }
+
+private:
+    v3_certificate(tbs_certificate&& tbs_cert, std::vector<uint8_t>&& encoded_cert, asn1::object_id&& sig_alg, asn1::bit_string&& sig)
+        : tbs_certificate_(std::move(tbs_cert))
+        , tbs_certificate_der_encoded_(std::move(encoded_cert))
+        , signature_algorithm_(sig_alg)
+        , signature_(sig) {
+    }
+
+    tbs_certificate         tbs_certificate_;
+    std::vector<uint8_t>    tbs_certificate_der_encoded_;
+    asn1::object_id         signature_algorithm_;
+    asn1::bit_string        signature_;
+};
 
 asn1::object_id read_algorithm_identifer(const asn1::der_encoded_value& value);
 
