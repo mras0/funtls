@@ -188,18 +188,36 @@ private:
         auto cert_buf = util::buffer_view{&their_certificate[0], their_certificate.size()};
         const auto cert = x509::v3_certificate::parse(asn1::read_der_encoded_value(cert_buf));
         const auto s_pk = rsa_public_key_from_certificate(cert);
-        std::cout << "Bitcount (sizeof n): " << s_pk.modolus.octet_count()*8 << std::endl;
         const auto n = s_pk.modolus.as<int_type>();
         const auto e = s_pk.public_exponent.as<int_type>();
         std::cout << "n:\n" << n << "\ne:\n" << e << std::endl;
 
-        const auto m = x509::base256_decode<int_type>(pre_master_secret);
-        std::cout << "m:\n" << m << std::endl;
+        // Perform RSAES-PKCS1-V1_5-ENCRYPT (http://tools.ietf.org/html/rfc3447 7.2.1)
 
-        const auto em = powm(m, e, n);
-        std::cout << "em:\n" << em << std::endl;
+        // Build message to encrypt: EM = 0x00 || 0x02 || PS || 0x00 || M
+        std::vector<uint8_t> EM(11);
+        EM[0] = 0x00;
+        EM[1] = 0x02;
+        // PS = at least 8 pseudo random characters
+        tls::get_random_bytes(&EM[2], 8);
+        EM[10] = 0x00;
+        // M = message to encrypt
+        EM.insert(EM.end(), std::begin(pre_master_secret), std::end(pre_master_secret));
 
-        tls::client_key_exchange client_key_exchange{tls::vector<tls::uint8,0,(1<<16)-1>{pre_master_secret}};
+        // 3.a
+        const auto m = x509::base256_decode<int_type>(EM); // m = OS2IP (EM)
+        assert(m < n); // Is the message too long?
+
+        // 3.b
+        const int_type c = powm(m, e, n); // c = RSAEP ((n, e), m)
+        std::cout << "c:\n" << c << std::endl;
+
+        // 3.c Convert the ciphertext representative c to a ciphertext C of length k octets
+        // C = I2OSP (c, k)
+        const auto C = x509::base256_encode(c, s_pk.modolus.octet_count());
+        std::cout << "C:\n" << util::base16_encode(C) << std::endl;
+
+        tls::client_key_exchange client_key_exchange{tls::vector<tls::uint8,0,(1<<16)-1>{C}};
         send_record(tls::handshake{client_key_exchange});
     }
 

@@ -8,6 +8,9 @@
 #include <iomanip>
 #include <array>
 
+#include <boost/multiprecision/cpp_int.hpp>
+using int_type = boost::multiprecision::cpp_int;
+
 #include <util/base_conversion.h>
 #include <util/buffer.h>
 #include <asn1/asn1.h>
@@ -17,9 +20,6 @@
 
 #include <util/test.h>
 #include <hash/sha.h>
-
-#include <boost/multiprecision/cpp_int.hpp>
-using int_type = boost::multiprecision::cpp_int;
 
 using namespace funtls;
 
@@ -31,19 +31,6 @@ std::array<uint8_t, SHA256HashSize> sha256(const void* data, size_t len)
     std::array<uint8_t, SHA256HashSize> digest;
     SHA256Result(&context, &digest[0]);
     return digest;
-}
-
-std::vector<uint8_t> int_to_octets(int_type i, size_t byte_count)
-{
-    std::vector<uint8_t> result(byte_count);
-    while (byte_count--) {
-        result[byte_count] = static_cast<uint8_t>(i);
-        i >>= 8;
-    }
-    if (i) {
-        throw std::logic_error("Number too large in " + std::string(__PRETTY_FUNCTION__));
-    }
-    return result;
 }
 
 void print_x509_v3(const x509::v3_certificate& cert)
@@ -87,7 +74,8 @@ void check_x509_v3(const x509::v3_certificate& cert)
 
     // Decode the signature using the issuers public key (here using the subjects PK since the cert is selfsigned)
     const auto issuer_pk = s_pk;
-    const auto decoded = int_to_octets(powm(sig_int, issuer_pk.public_exponent.as<int_type>(), issuer_pk.modolus.as<int_type>()), em_len);
+    int_type d = powm(sig_int, issuer_pk.public_exponent.as<int_type>(), issuer_pk.modolus.as<int_type>());
+    const auto decoded = x509::base256_encode(d, em_len);
     std::cout << "Decoded signature:\n" << util::base16_encode(&decoded[0], decoded.size()) << std::endl;
 
     // EM = 0x00 || 0x01 || PS || 0x00 || T (T=DER encoded DigestInfo)

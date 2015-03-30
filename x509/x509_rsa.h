@@ -19,6 +19,8 @@ struct rsa_public_key {
 
 rsa_public_key rsa_public_key_from_certificate(const v3_certificate& cert);
 
+// Actually PKCS#1 RFC3447 stuff:
+
 // TODO: Figure out something less ugly
 template<typename IntType, typename Iterator>
 IntType base256_decode(Iterator first, Iterator last)
@@ -48,6 +50,19 @@ IntType base256_decode(const asn1::raw_string& r)
 {
     return base256_decode<IntType>(r.as_vector());
 }
+
+template<typename IntType>
+std::vector<uint8_t> base256_encode(IntType i, size_t byte_count)
+{
+    std::vector<uint8_t> result(byte_count);
+    while (byte_count--) {
+        result[byte_count] = static_cast<uint8_t>(i);
+        i >>= 8;
+    }
+    assert(!i);
+    return result;
+}
+
 
 } } // namespace funtls::x509
 
