@@ -22,6 +22,22 @@ using int_type = boost::multiprecision::cpp_int;
 
 using namespace funtls;
 
+// TODO: Move to RSA specific file
+struct rsa_public_key {
+    asn1::integer modolus;           // n
+    asn1::integer public_exponent;   // e
+};
+
+rsa_public_key rsa_public_key_from_bs(const std::vector<uint8_t>& bs)
+{
+    funtls::util::buffer_view pk_buf{&bs[0], bs.size()};
+    auto elem_seq = funtls::asn1::sequence_view{funtls::asn1::read_der_encoded_value(pk_buf)};
+    const auto modolus         = funtls::asn1::integer(elem_seq.next());
+    const auto public_exponent = funtls::asn1::integer(elem_seq.next());
+    assert(!elem_seq.has_next());
+    return rsa_public_key{modolus, public_exponent};
+}
+
 std::array<uint8_t, SHA256HashSize> sha256(const void* data, size_t len)
 {
     SHA256Context context;
@@ -73,14 +89,16 @@ void parse_x509_v3(util::buffer_view& buf) // in ASN.1 DER encoding (X.690)
     auto c = x509::parse_v3_cert(tbs_cert);
     std::cout << "Certificate:" << std::endl;
     std::cout << " Serial number: 0x" << std::hex << c.serial_number.as<int_type>() << std::dec << std::endl;
-    std::cout << " ignature algorithm: " << c.signature_algorithm <<  std::endl;
+    std::cout << " Signature algorithm: " << c.signature_algorithm <<  std::endl;
     std::cout << " Issuer: " << c.issuer << std::endl;
     std::cout << " Validity: Between " << c.validity_not_before << " and " << c.validity_not_after << std::endl;
     std::cout << " Subject: " << c.subject << std::endl;
-    std::cout << " Subject public key: n=0x" << std::hex << c.subject_public_key.modolus.as<int_type>()
-              << " e=0x" << c.subject_public_key.public_exponent.as<int_type>() << std::dec << std::endl;
-
     assert(c.signature_algorithm == x509::sha256WithRSAEncryption);
+    assert(c.subject_public_key_algo == x509::rsaEncryption);
+
+    auto s_pk = rsa_public_key_from_bs(c.subject_public_key.as_vector());
+    std::cout << " Subject public key: n=0x" << std::hex << s_pk.modolus.as<int_type>()
+        << " e=0x" << s_pk.public_exponent.as<int_type>() << std::dec << std::endl;
 
     auto sig_algo = x509::read_algorithm_identifer(cert_seq.next());
     std::cout << "Signature algorithm: " << sig_algo << std::endl;
@@ -101,7 +119,7 @@ void parse_x509_v3(util::buffer_view& buf) // in ASN.1 DER encoding (X.690)
     const size_t em_len = sig_value.size(); // encrypted message length
 
     // Decode the signature using the issuers public key (here using the subjects PK since the cert is selfsigned)
-    const auto issuer_pk = c.subject_public_key;
+    const auto issuer_pk = s_pk;
     const auto decoded = int_to_octets(powm(sig_int, issuer_pk.public_exponent.as<int_type>(), issuer_pk.modolus.as<int_type>()), em_len);
     std::cout << "Decoded signature:\n" << util::base16_encode(&decoded[0], decoded.size()) << std::endl;
 

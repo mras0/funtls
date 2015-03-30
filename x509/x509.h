@@ -116,19 +116,15 @@ private:
 
 std::ostream& operator<<(std::ostream& os, const name& n);
 
-struct rsa_public_key {
-    asn1::integer modolus;           // n
-    asn1::integer public_exponent;   // e
-};
-
 struct v3_certificate {
-    asn1::integer   serial_number;
-    asn1::object_id signature_algorithm;
-    name            issuer;
-    asn1::utc_time  validity_not_before;
-    asn1::utc_time  validity_not_after;
-    name            subject;
-    rsa_public_key  subject_public_key;
+    asn1::integer    serial_number;
+    asn1::object_id  signature_algorithm;
+    name             issuer;
+    asn1::utc_time   validity_not_before;
+    asn1::utc_time   validity_not_after;
+    name             subject;
+    asn1::object_id  subject_public_key_algo;
+    asn1::bit_string subject_public_key;
 };
 
 v3_certificate parse_v3_cert(const asn1::der_encoded_value& repr);

@@ -80,34 +80,6 @@ funtls::x509::name::attr_type parse_name_attributes(const funtls::asn1::der_enco
     return res;
 }
 
-funtls::x509::rsa_public_key asn1_read_rsa_public_key(const funtls::asn1::der_encoded_value& repr)
-{
-    auto elem_seq = funtls::asn1::sequence_view{repr};
-    const auto modolus         = funtls::asn1::integer(elem_seq.next());
-    const auto public_exponent = funtls::asn1::integer(elem_seq.next());
-    assert(!elem_seq.has_next());
-    return funtls::x509::rsa_public_key{modolus, public_exponent};
-}
-
-funtls::x509::rsa_public_key parse_RSAPublicKey(const funtls::asn1::der_encoded_value& repr)
-{
-    using namespace funtls; using namespace funtls::x509;
-    auto pk_seq = asn1::sequence_view{repr};
-    const auto pk_algo_id = x509::read_algorithm_identifer(pk_seq.next());
-    if (pk_algo_id != rsaEncryption) {
-        std::ostringstream oss;
-        oss << "Unknown key algorithm id " << pk_algo_id << " expected rsaEncryption (" << rsaEncryption << ") in " << __PRETTY_FUNCTION__;
-        throw std::runtime_error(oss.str());
-    }
-    // The public key is DER-encoded inside a bit string
-    auto bs = asn1::bit_string{pk_seq.next()}.as_vector();
-    util::buffer_view pk_buf{&bs[0], bs.size()};
-    const auto public_key = asn1_read_rsa_public_key(asn1::read_der_encoded_value(pk_buf));
-    assert(!pk_seq.has_next());
-    return public_key;
-}
-
-
 } // unnamed namespace
 
 namespace funtls { namespace x509 {
@@ -207,7 +179,12 @@ v3_certificate parse_v3_cert(const asn1::der_encoded_value& repr)
     // SubjectPublicKeyInfo  ::=  SEQUENCE  {
     //    algorithm            AlgorithmIdentifier,
     //    subjectPublicKey     BIT STRING  }
-    auto subject_public_key = parse_RSAPublicKey(cert_seq.next());
+    auto pk_seq = asn1::sequence_view{cert_seq.next()};
+    const auto pk_algo_id = x509::read_algorithm_identifer(pk_seq.next());
+    // The public key is DER-encoded inside a bit string
+    const auto subject_public_key = asn1::bit_string{pk_seq.next()};
+    assert(!pk_seq.has_next());
+ 
     while (cert_seq.has_next()) {
         auto value = cert_seq.next();
         if (value.id() == asn1::identifier::context_specific_tag_1) {
@@ -230,10 +207,12 @@ v3_certificate parse_v3_cert(const asn1::der_encoded_value& repr)
         notbefore,
         notafter,
         subject,
+        pk_algo_id,
         subject_public_key
     };
 }
 
+// TODO: Remove
 asn1::object_id read_algorithm_identifer(const asn1::der_encoded_value& value)
 {
     auto algo_seq = asn1::sequence_view{value};
