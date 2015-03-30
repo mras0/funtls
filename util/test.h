@@ -8,6 +8,10 @@ void assert_failed(const char* func, const char* file, int line, const std::stri
 
 } } // namespace funtls::test
 
+#define FUNTLS_CHECK_FAILURE(msg) \
+    funtls::test::check_failed(__PRETTY_FUNCTION__, __FILE__,           \
+                    __LINE__, msg)
+
 #define FUNTLS_ASSERT_THROWS_MESSAGE(expr, exception_type, message)     \
     do {                                                                \
         try {                                                           \

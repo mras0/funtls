@@ -1,7 +1,6 @@
 #include <iosfwd>
+#include <cassert>
 
-#include <util/base_conversion.h>
-#include <util/buffer.h>
 #include <asn1/asn1.h>
 
 namespace funtls { namespace x509 {
@@ -72,12 +71,31 @@ public:
     attribute_type(const asn1::der_encoded_value& repr);
     attribute_type(tag t) : tag_(t) {}
 
-    tag type() const { return tag_; }
+    operator tag() const {
+        return tag_;
+    }
 
 private:
     tag tag_;
 };
 
 std::ostream& operator<<(std::ostream& os, const attribute_type& attr);
+
+class version {
+public:
+    enum tag { v1 = 0, v2 = 1, v3 = 2 };
+    version(const asn1::der_encoded_value& repr);
+    version(tag t) : tag_(t) {
+        assert(t == v1 || t == v2 || t == v3);
+    }
+
+    operator tag() const {
+        return tag_;
+    }
+private:
+    tag tag_;
+};
+
+std::ostream& operator<<(std::ostream& os, const version& attr);
 
 } } // namespace funtls::x509
