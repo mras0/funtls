@@ -34,16 +34,16 @@ void assert_failed(const char* func, const char* file, int line, const std::stri
 
 #define FUNTLS_CHECK_BINARY_(bin_op, expected, actual, message, fail)   \
     do {                                                                \
-        const auto a = (expected);                                      \
-        const auto b = (actual);                                        \
-        if (!(a bin_op b)) {                                            \
+        const auto _a_val = (expected);                                 \
+        const auto _b_val = (actual);                                   \
+        if (!(_a_val bin_op _b_val)) {                                  \
             std::ostringstream oss;                                     \
             oss << "Expected:\n" << #expected << " "                    \
                 << #bin_op << " " << #actual << "\n"                    \
                 << "Failure:\n"                                         \
-                << a << " " << #bin_op << " " << b << "\n" << message;  \
-            fail(__PRETTY_FUNCTION__, __FILE__,                         \
-                    __LINE__, oss.str());                               \
+                << _a_val << " " << #bin_op << " " << _b_val << "\n"    \
+                << message;                                             \
+            fail(__PRETTY_FUNCTION__, __FILE__, __LINE__, oss.str());   \
         }                                                               \
     } while (0)
 

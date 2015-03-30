@@ -71,10 +71,8 @@ std::vector<uint8_t> int_to_octets(int_type i, size_t byte_count)
     return result;
 }
 
-void parse_and_check_x509_v3(util::buffer_view& buf) // in ASN.1 DER encoding (X.690)
+void print_x509_v3(const x509::v3_certificate& cert)
 {
-    auto cert = x509::v3_certificate::parse(asn1::read_der_encoded_value(buf));
-
     auto c = cert.certificate();
     std::cout << "Certificate:" << std::endl;
     std::cout << " Serial number: 0x" << std::hex << c.serial_number.as<int_type>() << std::dec << std::endl;
@@ -82,14 +80,22 @@ void parse_and_check_x509_v3(util::buffer_view& buf) // in ASN.1 DER encoding (X
     std::cout << " Issuer: " << c.issuer << std::endl;
     std::cout << " Validity: Between " << c.validity_not_before << " and " << c.validity_not_after << std::endl;
     std::cout << " Subject: " << c.subject << std::endl;
-    assert(c.signature_algorithm == x509::sha256WithRSAEncryption);
-    assert(c.subject_public_key_algo == x509::rsaEncryption);
+    std::cout << " Subject public key algorithm: " << c.subject_public_key_algo << std::endl;
+    std::cout << "Signature algorithm: " << cert.signature_algorithm() << std::endl;
+ }
+
+void check_x509_v3(const x509::v3_certificate& cert)
+{
+    auto c = cert.certificate();
+    FUNTLS_CHECK_BINARY(c.signature_algorithm,     ==, x509::sha256WithRSAEncryption, "Unsupported signature algorithm");
+    FUNTLS_CHECK_BINARY(c.subject_public_key_algo, ==, x509::rsaEncryption,           "Unsupported public key algorithm");
+
+    // TODO: Check that it's self-signed
 
     auto s_pk = rsa_public_key_from_bs(c.subject_public_key.as_vector());
     std::cout << " Subject public key: n=0x" << std::hex << s_pk.modolus.as<int_type>()
         << " e=0x" << s_pk.public_exponent.as<int_type>() << std::dec << std::endl;
 
-    std::cout << "Signature algorithm: " << cert.signature_algorithm() << std::endl;
     assert(cert.signature_algorithm() == x509::sha256WithRSAEncryption);
     auto sig_value = cert.signature().as_vector();
     std::cout << " " << sig_value.size() << " bits" << std::endl;
@@ -217,11 +223,46 @@ std::ostream& operator<<(std::ostream& os, const std::vector<uint8_t>& a)  {
     return os << util::base16_encode(a);
 }
 
+x509::v3_certificate certificate_from_pem_string(const std::string& pem_data)
+{
+    std::istringstream cert_pem_data(pem_data);
+    auto cert_der_data = read_pem_cert(cert_pem_data);
+    assert(cert_der_data.size());
+    util::buffer_view cert_buf(&cert_der_data[0], cert_der_data.size());
+    return x509::v3_certificate::parse(asn1::read_der_encoded_value(cert_buf));
+ }
+
 int main()
 {
-    std::istringstream cert0_pem_data(test_cert0);
-    auto cert0 = read_pem_cert(cert0_pem_data);
-    assert(cert0.size());
-    util::buffer_view cert_buf(&cert0[0], cert0.size());
-    parse_and_check_x509_v3(cert_buf);
+    const auto cert0 = certificate_from_pem_string(test_cert0);
+    print_x509_v3(cert0);
+    check_x509_v3(cert0);
+    FUNTLS_ASSERT_EQUAL(int_type("11259235216357634699"), cert0.certificate().serial_number.as<int_type>());
+    FUNTLS_ASSERT_EQUAL(x509::sha256WithRSAEncryption, cert0.certificate().signature_algorithm);
+    auto a = cert0.certificate().issuer.attributes();
+    FUNTLS_ASSERT_EQUAL(4, a.size());
+    FUNTLS_ASSERT_EQUAL(x509::attribute_type::country_name, a[0].first);
+    FUNTLS_ASSERT_EQUAL("DK", a[0].second);
+    FUNTLS_ASSERT_EQUAL(x509::attribute_type::state_or_province_name, a[1].first);
+    FUNTLS_ASSERT_EQUAL("Some-State", a[1].second);
+    FUNTLS_ASSERT_EQUAL(x509::attribute_type::organization_name, a[2].first);
+    FUNTLS_ASSERT_EQUAL("Internet Widgits Pty Ltd", a[2].second);
+    FUNTLS_ASSERT_EQUAL(x509::attribute_type::common_name, a[3].first);
+    FUNTLS_ASSERT_EQUAL("localhost", a[3].second);
+    FUNTLS_ASSERT_EQUAL("150321135936Z", cert0.certificate().validity_not_before.as_string());
+    FUNTLS_ASSERT_EQUAL("160320135936Z", cert0.certificate().validity_not_after.as_string());
+    a = cert0.certificate().subject.attributes();
+    FUNTLS_ASSERT_EQUAL(4, a.size());
+    FUNTLS_ASSERT_EQUAL(x509::attribute_type::country_name, a[0].first);
+    FUNTLS_ASSERT_EQUAL("DK", a[0].second);
+    FUNTLS_ASSERT_EQUAL(x509::attribute_type::state_or_province_name, a[1].first);
+    FUNTLS_ASSERT_EQUAL("Some-State", a[1].second);
+    FUNTLS_ASSERT_EQUAL(x509::attribute_type::organization_name, a[2].first);
+    FUNTLS_ASSERT_EQUAL("Internet Widgits Pty Ltd", a[2].second);
+    FUNTLS_ASSERT_EQUAL(x509::attribute_type::common_name, a[3].first);
+    FUNTLS_ASSERT_EQUAL("localhost", a[3].second);
+    FUNTLS_ASSERT_EQUAL(x509::rsaEncryption, cert0.certificate().subject_public_key_algo);
+    // asn1::bit_string cert0.certificate().subject_public_key;
+    FUNTLS_ASSERT_EQUAL(x509::sha256WithRSAEncryption, cert0.signature_algorithm());
+    // asn1::bit_string cert0.signature
 }
