@@ -1,3 +1,6 @@
+#ifndef FUNTLS_X509_X509_H_INCLUDED
+#define FUNTLS_X509_X509_H_INCLUDED
+
 #include <iosfwd>
 #include <cassert>
 #include <map>
@@ -5,9 +8,6 @@
 #include <asn1/asn1.h>
 
 namespace funtls { namespace x509 {
-
-static const asn1::object_id rsaEncryption{ 1,2,840,113549,1,1,1 };
-static const asn1::object_id sha256WithRSAEncryption{ 1,2,840,113549,1,1,11 };
 
 // Defined in https://tools.ietf.org/html/rfc5280 A.1
 // joint-iso-ccitt(2) ds(5) 4 
@@ -164,3 +164,5 @@ private:
 asn1::object_id read_algorithm_identifer(const asn1::der_encoded_value& value);
 
 } } // namespace funtls::x509
+
+#endif

@@ -7,38 +7,19 @@
 #include "tls.h"
 #include "tls_ciphers.h"
 
+#include <x509/x509.h>
+#include <x509/x509_rsa.h>
+#include <util/base_conversion.h>
+
+#include <boost/multiprecision/cpp_int.hpp>
+using int_type = boost::multiprecision::cpp_int;
+
+using namespace funtls;
+
 // http://stackoverflow.com/questions/10175812/how-to-create-a-self-signed-certificate-with-openssl
 // openssl req -x509 -newkey rsa:2048 -keyout server_key.pem -out server_cert.pem -days 365 -nodes
 // cat server_key.pem server_cert.pem >server.pem
 // openssl s_server
-
-char hexchar(uint8_t d)
-{
-    assert(d < 16);
-    return d < 10 ? d + '0' : d + 'a' - 10;
-}
-
-std::string hexstring(const void* buffer, size_t len)
-{
-    const uint8_t* bytes = static_cast<const uint8_t*>(buffer);
-    assert(len <= len*2);
-    std::string result;
-    result.reserve(len * 2);
-    for (size_t i = 0; i < len; ++i) {
-        result += hexchar(bytes[i] >> 4);
-        result += hexchar(bytes[i] & 0xf);
-    }
-    return result;
-}
-
-template<typename T>
-std::string hexstring(const T& x)
-{
-    if (x.empty()) return "";
-    return hexstring(&x[0], x.size() * sizeof(x[0]));
-}
-
-
 
 class tls_socket {
 public:
@@ -76,7 +57,7 @@ public:
         read_change_cipher_spec();
         read_finished();
 
-        std::cout << "Session " << hexstring(sesion_id.as_vector()) << " in progress\n";
+        std::cout << "Session " << util::base16_encode(sesion_id.as_vector()) << " in progress\n";
     }
 
 private:
@@ -114,7 +95,7 @@ private:
         assert(index == buffer.size());
 
         if (protocol_version != current_protocol_version) {
-            throw std::runtime_error("Invalid record protocol version " + hexstring(&protocol_version, sizeof(protocol_version)) + " in " + __func__);
+            throw std::runtime_error("Invalid record protocol version " + util::base16_encode(&protocol_version, sizeof(protocol_version)) + " in " + __func__);
         }
         if (length < 1 || length > tls::record::max_length) {
             throw std::runtime_error("Invalid record length " + std::to_string(length) + " in " + __func__);
@@ -153,7 +134,7 @@ private:
         auto record = read_record();
         auto& server_hello = record.payload.get<tls::handshake>().body.get<tls::server_hello>();
         if (server_hello.cipher_suite != wanted_cipher) {
-            throw std::runtime_error("Invalid cipher suite " + hexstring(&server_hello.cipher_suite, 2));
+            throw std::runtime_error("Invalid cipher suite " + util::base16_encode(&server_hello.cipher_suite, 2));
         }
         if (server_hello.compression_method != tls::compression_method::null) {
             throw std::runtime_error("Invalid compression method " + std::to_string((int)server_hello.compression_method));
@@ -187,8 +168,7 @@ private:
 
         their_certificate = certificate_lists[0].certificate_list[0].as_vector();
 
-        //std::ofstream of("/tmp/server.crt");
-        //of.write((const char*)&their_certificate[0], their_certificate.size());
+        // TODO: Verify certificate(s)
     }
 
     void send_client_key_exchange() {
@@ -203,6 +183,21 @@ private:
 
         // TODO: Encrypt pre_master_secret using the public key from the server's certificate
         std::cout << "Not encrypting pre-master secret in " << __PRETTY_FUNCTION__ << std::endl;
+
+        // TODO: Make sure the certificate is correct etc.
+        auto cert_buf = util::buffer_view{&their_certificate[0], their_certificate.size()};
+        const auto cert = x509::v3_certificate::parse(asn1::read_der_encoded_value(cert_buf));
+        const auto s_pk = rsa_public_key_from_certificate(cert);
+        std::cout << "Bitcount (sizeof n): " << s_pk.modolus.octet_count()*8 << std::endl;
+        const auto n = s_pk.modolus.as<int_type>();
+        const auto e = s_pk.public_exponent.as<int_type>();
+        std::cout << "n:\n" << n << "\ne:\n" << e << std::endl;
+
+        const auto m = x509::base256_decode<int_type>(pre_master_secret);
+        std::cout << "m:\n" << m << std::endl;
+
+        const auto em = powm(m, e, n);
+        std::cout << "em:\n" << em << std::endl;
 
         tls::client_key_exchange client_key_exchange{tls::vector<tls::uint8,0,(1<<16)-1>{pre_master_secret}};
         send_record(tls::handshake{client_key_exchange});
@@ -228,7 +223,7 @@ private:
     void read_finished() {
         auto record = read_record();
         auto& finished = record.payload.get<tls::handshake>().body.get<tls::finished>();
-        std::cout << "Got finished from server: " << hexstring(finished.verify_data.data, tls::finished::verify_data_length) << std::endl;
+        std::cout << "Got finished from server: " << util::base16_encode(finished.verify_data.data, tls::finished::verify_data_length) << std::endl;
     }
 };
 

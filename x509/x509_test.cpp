@@ -13,6 +13,7 @@
 #include <asn1/asn1.h>
 
 #include <x509/x509.h>
+#include <x509/x509_rsa.h>
 
 #include <util/test.h>
 #include <hash/sha.h>
@@ -22,22 +23,6 @@ using int_type = boost::multiprecision::cpp_int;
 
 using namespace funtls;
 
-// TODO: Move to RSA specific file
-struct rsa_public_key {
-    asn1::integer modolus;           // n
-    asn1::integer public_exponent;   // e
-};
-
-rsa_public_key rsa_public_key_from_bs(const std::vector<uint8_t>& bs)
-{
-    funtls::util::buffer_view pk_buf{&bs[0], bs.size()};
-    auto elem_seq = funtls::asn1::sequence_view{funtls::asn1::read_der_encoded_value(pk_buf)};
-    const auto modolus         = funtls::asn1::integer(elem_seq.next());
-    const auto public_exponent = funtls::asn1::integer(elem_seq.next());
-    assert(!elem_seq.has_next());
-    return rsa_public_key{modolus, public_exponent};
-}
-
 std::array<uint8_t, SHA256HashSize> sha256(const void* data, size_t len)
 {
     SHA256Context context;
@@ -46,16 +31,6 @@ std::array<uint8_t, SHA256HashSize> sha256(const void* data, size_t len)
     std::array<uint8_t, SHA256HashSize> digest;
     SHA256Result(&context, &digest[0]);
     return digest;
-}
-
-int_type octets_to_int(const std::vector<uint8_t>& bs)
-{
-    int_type res = 0;
-    for (const auto& elem : bs) {
-        res <<= 8;
-        res |= elem;
-    }
-    return res;
 }
 
 std::vector<uint8_t> int_to_octets(int_type i, size_t byte_count)
@@ -82,17 +57,16 @@ void print_x509_v3(const x509::v3_certificate& cert)
     std::cout << " Subject: " << c.subject << std::endl;
     std::cout << " Subject public key algorithm: " << c.subject_public_key_algo << std::endl;
     std::cout << "Signature algorithm: " << cert.signature_algorithm() << std::endl;
- }
+}
 
 void check_x509_v3(const x509::v3_certificate& cert)
 {
     auto c = cert.certificate();
-    FUNTLS_CHECK_BINARY(c.signature_algorithm,     ==, x509::sha256WithRSAEncryption, "Unsupported signature algorithm");
-    FUNTLS_CHECK_BINARY(c.subject_public_key_algo, ==, x509::rsaEncryption,           "Unsupported public key algorithm");
+    FUNTLS_CHECK_BINARY(c.signature_algorithm, ==, x509::sha256WithRSAEncryption, "Unsupported signature algorithm");
 
     // TODO: Check that it's self-signed
 
-    auto s_pk = rsa_public_key_from_bs(c.subject_public_key.as_vector());
+    auto s_pk = rsa_public_key_from_certificate(cert);
     std::cout << " Subject public key: n=0x" << std::hex << s_pk.modolus.as<int_type>()
         << " e=0x" << s_pk.public_exponent.as<int_type>() << std::dec << std::endl;
 
@@ -108,7 +82,7 @@ void check_x509_v3(const x509::v3_certificate& cert)
     // See 9.2 EMSA-PKCS1-v1_5 in RFC3447
 
     // The encrypted signature is stored as a base-256 encoded number in the bitstring
-    const auto sig_int  = octets_to_int(sig_value);
+    const auto sig_int  = x509::base256_decode<int_type>(cert.signature());
     const size_t em_len = sig_value.size(); // encrypted message length
 
     // Decode the signature using the issuers public key (here using the subjects PK since the cert is selfsigned)
