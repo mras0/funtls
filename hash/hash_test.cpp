@@ -41,4 +41,6 @@ int main()
 {
     sha256_test("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "", 0);
     sha256_test("936a185caaa266bb9cbe981e9e05cb78cd732b0b3280eb944412bb6f8f8f07af", "helloworld", strlen("helloworld"));
+    // TODO: test other variants
+    // TODO: test hmac
 }

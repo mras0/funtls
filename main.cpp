@@ -2,11 +2,14 @@
 #include <cstdint>
 #include <vector>
 #include <string>
+#include <array>
+
 #include <boost/asio.hpp>
 
 #include "tls.h"
 #include "tls_ciphers.h"
 
+#include <hash/sha.h>
 #include <x509/x509.h>
 #include <x509/x509_rsa.h>
 #include <util/base_conversion.h>
@@ -20,6 +23,67 @@ using namespace funtls;
 // openssl req -x509 -newkey rsa:2048 -keyout server_key.pem -out server_cert.pem -days 365 -nodes
 // cat server_key.pem server_cert.pem >server.pem
 // openssl s_server
+
+
+namespace {
+
+std::vector<uint8_t> vec_concat(const std::vector<uint8_t>& a, const std::vector<uint8_t>& b) {
+    std::vector<uint8_t> combined;
+    combined.insert(combined.end(), a.begin(), a.end());
+    combined.insert(combined.end(), b.begin(), b.end());
+    return combined;
+}
+
+std::vector<uint8_t> HMAC_hash(const std::vector<uint8_t>& secret, const std::vector<uint8_t>& data) {
+    // Assumes HMAC is SHA256 based
+    assert(!secret.empty());
+    assert(!data.empty());
+    HMACContext context;
+    hmacReset(&context, SHA256, &secret[0], secret.size());
+    hmacInput(&context, &data[0], data.size());
+    uint8_t digest[USHAMaxHashSizeBits];
+    hmacResult(&context, digest);
+    return {digest, digest+SHA256HashSize};
+}
+
+
+std::vector<uint8_t> P_hash(const std::vector<uint8_t>& secret, const std::vector<uint8_t>& seed, size_t wanted_size) {
+    assert(!secret.empty());
+    assert(!seed.empty());
+    assert(wanted_size != 0);
+    // P_hash(secret, seed) = HMAC_hash(secret, A(1) + seed) +
+    //                        HMAC_hash(secret, A(2) + seed) +
+    //                        HMAC_hash(secret, A(3) + seed) + ...
+    // A() is defined as:
+    //    A(0) = seed
+    //    A(i) = HMAC_hash(secret, A(i-1))
+
+    std::vector<uint8_t> a = seed; // A(0) = seed
+
+    // P_hash can be iterated as many times as necessary to produce the
+    // required quantity of data.  For example, if P_SHA256 is being used to
+    // create 80 bytes of data, it will have to be iterated three times
+    // (through A(3)), creating 96 bytes of output data; the last 16 bytes
+    // of the final iteration will then be discarded, leaving 80 bytes of
+    // output data.
+
+    std::vector<uint8_t> result;
+    while (result.size() < wanted_size) {
+        a = HMAC_hash(secret, a); // A(i) = HMAC_hash(secret, A(i-1))
+        auto digest = HMAC_hash(secret, vec_concat(a, seed));
+        result.insert(result.end(), digest.begin(), digest.end());
+    }
+
+    assert(result.size() >= wanted_size);
+    return {result.begin(), result.begin() + wanted_size};
+}
+
+std::vector<uint8_t> PRF(const std::vector<uint8_t>& secret, const std::string& label, const std::vector<uint8_t>& seed, size_t wanted_size) {
+    // PRF(secret, label, seed) = P_<hash>(secret, label + seed)
+    return P_hash(secret, vec_concat(std::vector<uint8_t>{label.begin(), label.end()}, seed), wanted_size);
+}
+
+} // unnamed namespace
 
 class tls_socket {
 public:
@@ -52,8 +116,7 @@ public:
         read_server_hello();
         read_until_server_hello_done();
         send_client_key_exchange();
-        send_change_cipher_spec();
-        send_finished();
+        send_change_cipher_spec(); // calls send_finished();
         read_change_cipher_spec();
         read_finished();
 
@@ -61,14 +124,17 @@ public:
     }
 
 private:
-    const tls::protocol_version current_protocol_version = tls::protocol_version_tls_1_2;
-    const tls::cipher_suite     wanted_cipher            = tls::rsa_with_aes_256_cbc_sha256;
+    static constexpr size_t         master_secret_size = 48;
 
-    boost::asio::ip::tcp::socket& socket;
-    const tls::random             our_random;
-    tls::random                   their_random;
-    std::vector<uint8_t>          their_certificate;
-    tls::session_id               sesion_id;
+    const tls::protocol_version     current_protocol_version = tls::protocol_version_tls_1_2;
+    const tls::cipher_suite         wanted_cipher            = tls::rsa_with_aes_256_cbc_sha256;
+
+    boost::asio::ip::tcp::socket&   socket;
+    const tls::random               our_random;
+    tls::random                     their_random;
+    std::vector<uint8_t>            their_certificate;
+    tls::session_id                 sesion_id;
+    std::vector<uint8_t>            master_secret;
 
     template<typename Payload>
     void send_record(Payload&& payload) {
@@ -176,7 +242,7 @@ private:
         // Since we're doing RSA, we'll be sending the EncryptedPreMasterSecret
 
         // Prepare pre-master secret (version + 46 random bytes)
-        uint8_t pre_master_secret[48];
+        std::vector<uint8_t> pre_master_secret(master_secret_size);
         pre_master_secret[0] = current_protocol_version.major;
         pre_master_secret[1] = current_protocol_version.minor;
         tls::get_random_bytes(&pre_master_secret[2], 46);
@@ -219,17 +285,41 @@ private:
 
         tls::client_key_exchange client_key_exchange{tls::vector<tls::uint8,0,(1<<16)-1>{C}};
         send_record(tls::handshake{client_key_exchange});
+
+
+        // We can now compute the master_secret as specified in rfc5246 8.1
+        // master_secret = PRF(pre_master_secret, "master secret", ClientHello.random + ServerHello.random)[0..47]
+
+        std::vector<uint8_t> rand_buf;
+        tls::append_to_buffer(rand_buf, our_random);
+        tls::append_to_buffer(rand_buf, their_random);
+        master_secret = PRF(pre_master_secret, "master secret", rand_buf, master_secret_size);
+        assert(master_secret.size() == master_secret_size);
+        std::cout << "Master secret: " << util::base16_encode(master_secret) << std::endl;
     }
 
-    void send_change_cipher_spec()
-    {
+    void send_change_cipher_spec() {
         send_record(tls::change_cipher_spec{});
+        // A Finished message is always sent immediately after a change
+        // cipher spec message to verify that the key exchange and
+        // authentication processes were successful
+        send_finished();
     }
 
     void send_finished() {
-//      verify_data = PRF(master_secret, finished_label, Hash(handshake_messages))[0..verify_data_length-1]
-        std::cout << "Not encrypting data in " << __PRETTY_FUNCTION__ << std::endl;
+        // verify_data = PRF(master_secret, finished_label, Hash(handshake_messages))[0..verify_data_length-1]
+        // finished_label: 
+        //      For Finished messages sent by the client, the string "client finished".
+        //      For Finished messages sent by the server, the string "server finished".
+        // handshake_messages:
+        //      All of the data from all messages in this handshake (not
+        //      including any HelloRequest messages) up to, but not including,
+        //      this message
+        std::cerr << "\n****************\nNot sending real encrypting data in " << __PRETTY_FUNCTION__ << "\n****************\n\n";
+        // TODO: actual has of handshake_messages
+        auto data = PRF(master_secret, "client finished", {0}, tls::finished::verify_data_length);
         tls::opaque<tls::finished::verify_data_length> verify_data;
+        memcpy(&verify_data.data[0], &data[0], data.size());
         send_record(tls::handshake{tls::finished{verify_data}});
     }
 
