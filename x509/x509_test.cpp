@@ -160,7 +160,7 @@ void parse_and_check_x509_v3(util::buffer_view& buf) // in ASN.1 DER encoding (X
 
 std::vector<uint8_t> read_file(const std::string& filename)
 {
-    std::ifstream in(filename);
+    std::ifstream in(filename, std::ios::binary);
     if (!in || !in.is_open()) {
         throw std::runtime_error("Could not open " + filename);
     }
@@ -174,10 +174,54 @@ std::vector<uint8_t> read_file(const std::string& filename)
     return buffer;
 }
 
+#include "test_cert0.h"
+
+std::vector<uint8_t> read_pem_cert(std::istream& is)
+{
+    static const char* const begin_line = "-----BEGIN CERTIFICATE-----";
+    static const char* const end_line   = "-----END CERTIFICATE-----";
+
+    enum { before_first_line, reading_content } state = before_first_line;
+
+    std::string content;
+    for (std::string line; std::getline(is, line);) {
+        if (line == begin_line) {
+            if (state == before_first_line) {
+                state = reading_content;
+            } else if (state == reading_content) {
+                FUNTLS_CHECK_FAILURE("Two beginning markers found");
+            } else {
+                assert(false);
+            }
+         } else if (line == end_line) {
+            if (state == before_first_line) {
+                FUNTLS_CHECK_FAILURE("End marker reached before finding the beginning");
+            } else if (state == reading_content) {
+                return util::base64_decode(content);
+            }
+            assert(false);
+        } else {
+            if (state == before_first_line) {
+                // skip
+            } else if (state == reading_content) {
+                content += line;
+            } else {
+                assert(false);
+            }
+        }
+    }
+    FUNTLS_CHECK_FAILURE("End reached without finishing content");
+}
+
+std::ostream& operator<<(std::ostream& os, const std::vector<uint8_t>& a)  {
+    return os << util::base16_encode(a);
+}
+
 int main()
 {
-    auto cert = read_file("server.crt");
-    assert(cert.size());
-    util::buffer_view cert_buf(&cert[0], cert.size());
+    std::istringstream cert0_pem_data(test_cert0);
+    auto cert0 = read_pem_cert(cert0_pem_data);
+    assert(cert0.size());
+    util::buffer_view cert_buf(&cert0[0], cert0.size());
     parse_and_check_x509_v3(cert_buf);
 }
