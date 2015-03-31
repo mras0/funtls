@@ -19,19 +19,9 @@ using int_type = boost::multiprecision::cpp_int;
 #include <x509/x509_rsa.h>
 
 #include <util/test.h>
-#include <hash/sha.h>
+#include <hash/hash.h>
 
 using namespace funtls;
-
-std::array<uint8_t, SHA256HashSize> sha256(const void* data, size_t len)
-{
-    SHA256Context context;
-    SHA256Reset(&context);
-    SHA256Input(&context, static_cast<const uint8_t*>(data), len);
-    std::array<uint8_t, SHA256HashSize> digest;
-    SHA256Result(&context, &digest[0]);
-    return digest;
-}
 
 void print_x509_v3(const x509::v3_certificate& cert)
 {
@@ -109,16 +99,16 @@ void check_x509_v3(const x509::v3_certificate& cert)
     assert(digest_algo == id_sha256);
     auto digest = asn1::octet_string{digest_info.next()}.as_vector();
     assert(!digest_info.has_next());
-
-    if (digest.size() != SHA256HashSize) {
-        throw std::runtime_error("Invalid digest size expected " + std::to_string(SHA256HashSize) + " got " + std::to_string(digest.size()) + " in " + __PRETTY_FUNCTION__);
-    }
-
     std::cout << "Digest: " << util::base16_encode(&digest[0], digest.size()) << std::endl;
 
     const auto& cert_buf = cert.certificate_der_encoded();
-    const auto calced_digest = sha256(&cert_buf[0], cert_buf.size());
+    const auto calced_digest = hash::sha256{}.input(cert_buf).result();
     std::cout << "Calculated digest: " << util::base16_encode(&calced_digest[0], calced_digest.size()) << std::endl;
+
+    if (digest.size() != calced_digest.size()) {
+        throw std::runtime_error("Invalid digest size expected " + std::to_string(calced_digest.size()) + " got " + std::to_string(digest.size()) + " in " + __PRETTY_FUNCTION__);
+    }
+
     if (!std::equal(calced_digest.begin(), calced_digest.end(), digest.begin())) {
         throw std::runtime_error("Digest mismatch in " + std::string(__PRETTY_FUNCTION__) + " Calculated: " +
                 util::base16_encode(&calced_digest[0], calced_digest.size()) + " Expected: " +

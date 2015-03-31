@@ -1,5 +1,5 @@
 #include "hash.h"
-#include "sha.h"
+#include <sha/sha.h>
 #include <util/test.h>
 
 namespace {
