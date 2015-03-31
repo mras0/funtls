@@ -2,14 +2,13 @@
 #include <cstdint>
 #include <vector>
 #include <string>
-#include <array>
 
 #include <boost/asio.hpp>
 
 #include "tls.h"
 #include "tls_ciphers.h"
 
-#include <hash/sha.h>
+#include <hash/hash.h>
 #include <x509/x509.h>
 #include <x509/x509_rsa.h>
 #include <util/base_conversion.h>
@@ -38,14 +37,8 @@ std::vector<uint8_t> HMAC_hash(const std::vector<uint8_t>& secret, const std::ve
     // Assumes HMAC is SHA256 based
     assert(!secret.empty());
     assert(!data.empty());
-    HMACContext context;
-    hmacReset(&context, SHA256, &secret[0], secret.size());
-    hmacInput(&context, &data[0], data.size());
-    uint8_t digest[USHAMaxHashSizeBits];
-    hmacResult(&context, digest);
-    return {digest, digest+SHA256HashSize};
+    return hash::hmac_sha256{secret}.input(data).result();
 }
-
 
 std::vector<uint8_t> P_hash(const std::vector<uint8_t>& secret, const std::vector<uint8_t>& seed, size_t wanted_size) {
     assert(!secret.empty());
@@ -78,6 +71,7 @@ std::vector<uint8_t> P_hash(const std::vector<uint8_t>& secret, const std::vecto
     return {result.begin(), result.begin() + wanted_size};
 }
 
+// Pseudo Random Function rfc5246 section 5
 std::vector<uint8_t> PRF(const std::vector<uint8_t>& secret, const std::string& label, const std::vector<uint8_t>& seed, size_t wanted_size) {
     // PRF(secret, label, seed) = P_<hash>(secret, label + seed)
     return P_hash(secret, vec_concat(std::vector<uint8_t>{label.begin(), label.end()}, seed), wanted_size);
@@ -135,6 +129,7 @@ private:
     std::vector<uint8_t>            their_certificate;
     tls::session_id                 sesion_id;
     std::vector<uint8_t>            master_secret;
+    hash::sha256                    handshake_message_digest;
 
     template<typename Payload>
     void send_record(Payload&& payload) {
@@ -144,12 +139,14 @@ private:
                 current_protocol_version,
                 std::forward<Payload>(payload)
             });
+        handshake_message_digest.input(buffer);
         boost::asio::write(socket, boost::asio::buffer(buffer));
     }
 
     tls::record read_record() {
         std::vector<uint8_t> buffer(5);
         boost::asio::read(socket, boost::asio::buffer(buffer));
+        handshake_message_digest.input(buffer);
 
         size_t index = 0;
         tls::content_type     content_type;
@@ -168,6 +165,7 @@ private:
         }
         buffer.resize(length);
         boost::asio::read(socket, boost::asio::buffer(buffer));
+        handshake_message_digest.input(buffer);
         index = 0;
 
         switch (content_type) {
@@ -316,10 +314,44 @@ private:
         //      including any HelloRequest messages) up to, but not including,
         //      this message
         std::cerr << "\n****************\nNot sending real encrypting data in " << __PRETTY_FUNCTION__ << "\n****************\n\n";
-        // TODO: actual has of handshake_messages
-        auto data = PRF(master_secret, "client finished", {0}, tls::finished::verify_data_length);
+        // TODO: use aes blokck cipher http://tools.ietf.org/html/rfc5246#section-6.2.3.2
+        auto data = PRF(master_secret, "client finished", handshake_message_digest.result(), tls::finished::verify_data_length);
+        std::cout << "Sending: " << util::base16_encode(data) << std::endl;
         tls::opaque<tls::finished::verify_data_length> verify_data;
         memcpy(&verify_data.data[0], &data[0], data.size());
+
+        // 6.2.3.2.  CBC Block Cipher
+        // struct {
+        //     opaque IV[SecurityParameters.record_iv_length];
+        //     block-ciphered struct {
+        //         opaque content[TLSCompressed.length];
+        //         opaque MAC[SecurityParameters.mac_length];
+        //         uint8 padding[GenericBlockCipher.padding_length];
+        //         uint8 padding_length;
+        //     };
+        // } GenericBlockCipher;
+
+        // IV = Initialization Vector - SHOULD be chosen at random
+        // For block ciphers, the IV length is of length SecurityParameters.record_iv_length, 
+        // which is equal to the SecurityParameters.block_size.
+
+
+        // The MAC is generated as:
+        // MAC(MAC_write_key, seq_num +
+        //                  TLSCompressed.type +
+        //                  TLSCompressed.version +
+        //                  TLSCompressed.length +
+        //                  TLSCompressed.fragment);
+        //
+        // padding:
+        //    Padding that is added to force the length of the plaintext to be
+        //    an integral multiple of the block cipher's block length.
+        // padding_length:
+        //    The padding length MUST be such that the total size of the
+        //    GenericBlockCipher structure is a multiple of the cipher's block
+        //    length.  Legal values range from zero to 255, inclusive.  This
+        //    length specifies the length of the padding field exclusive of the
+        //    padding_length field itself.
         send_record(tls::handshake{tls::finished{verify_data}});
     }
 
