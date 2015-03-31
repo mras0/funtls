@@ -41,8 +41,8 @@ void assert_failed(const char* func, const char* file, int line, const std::stri
             oss << "Expected:\n" << #expected << " "                    \
                 << #bin_op << " " << #actual << "\n"                    \
                 << "Failure:\n"                                         \
-                << _a_val << " " << #bin_op << " " << _b_val << "\n"    \
-                << message;                                             \
+                << "\"" << _a_val << "\" " << #bin_op << " \""          \
+                << _b_val << "\"\n" << message;                         \
             fail(__PRETTY_FUNCTION__, __FILE__, __LINE__, oss.str());   \
         }                                                               \
     } while (0)
