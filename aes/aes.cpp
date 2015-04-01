@@ -56,7 +56,24 @@ constexpr unsigned Nr_from_Nk(unsigned Nk) {
 // multiplication of polynomials modulo an irreducible polynomial of degree 8. A polynomial is
 // irreducible if its only divisors are one and itself. For the AES algorithm, this irreducible
 // polynomial is m(x) = x^8 + x^4 + x^3 + x + 1 or [0x11b] in hexadecimal notation
+
+
 static constexpr uint16_t mx = 0x11b;
+uint8_t xtime(uint8_t a)
+{
+    return a & 0x80 ? (a<<1) ^ mx : (a<<1);
+}
+
+uint8_t multiply(uint8_t a, uint8_t b) {
+    uint8_t x = 0;
+    uint8_t a_exp = a;
+    while (b) {
+        if (b & 1) x ^= a_exp;
+        a_exp = xtime(a_exp);
+        b >>= 1;
+    }
+    return x;
+}
 
 //
 // Bytes to state:
@@ -154,8 +171,13 @@ void InvSubBytes() {
 // State and mixes their data (independently of one another) to
 // produce new columns
 void MixColumns(state& s) {
-    std::cout << s << " NOT IMPLEMENTED: " << __PRETTY_FUNCTION__ << std::endl;
-    assert(!"Not implemented");
+    const auto i = s; // Copy input
+    for (unsigned c = 0; c < Nb; ++c) {
+        s(0,c) = multiply(i(0,c),2) ^ multiply(i(1,c),3) ^ i(2,c) ^ i(3,c);
+        s(1,c) = i(0,c) ^ multiply(i(1,c),2) ^ multiply(i(2,c),3) ^ i(3,c);
+        s(1,c) = i(0,c) ^ i(1,c) ^ multiply(i(2,c),2) ^ multiply(i(3,c),3);
+        s(0,c) = multiply(i(0,c),3) ^ i(1,c) ^ i(2,c) ^ multiply(i(3,c),2);
+    }
 }
 
 // Function used in the Key Expansion routine takes a word [a0,a1,a2,a3] as input,
@@ -254,10 +276,7 @@ std::vector<uint8_t> KeyExpansion(const std::vector<uint8_t>& key) // KeyExpansi
             assert(i/Nk < 32);
             assert(x <= 0xff);
             uint8_t rcon[4] = { static_cast<uint8_t>(x), 0x00, 0x00, 0x00 }; // Rcon[i/Nk]
-            x <<=1;
-            if (x >= 0x100) {
-                x ^= mx;
-            }
+            x = multiply(x, 2);
             P("Rcon[i/Nk]", rcon);
             for (int j=0;j<4;++j) temp[j] = temp[j] ^ rcon[j];
             P("After XOR", temp);
@@ -297,6 +316,25 @@ std::vector<uint8_t> aes_128_ecb(const std::vector<uint8_t>& K, const std::vecto
         "B58DBAD2312BF5607F8D292FAC7766F319FADC2128D12941575C006ED014F9A8C9"
         "EE2589E13F0CC8B6630CA6";
     FUNTLS_ASSERT_EQUAL(expanded_k, util::base16_encode(KeyExpansion(util::base16_decode(my_k))));
+
+    FUNTLS_ASSERT_EQUAL(0xb4, multiply(0x5A, 2));
+    FUNTLS_ASSERT_EQUAL(0x9d, multiply(0xC3, 2));
+    FUNTLS_ASSERT_EQUAL(0xff, multiply(0xF2, 2));
+
+    FUNTLS_ASSERT_EQUAL(0xAE, xtime(0x57));
+    FUNTLS_ASSERT_EQUAL(0x47, xtime(0xAE));
+    FUNTLS_ASSERT_EQUAL(0x8E, xtime(0x47));
+    FUNTLS_ASSERT_EQUAL(0x07, xtime(0x8E));
+    FUNTLS_ASSERT_EQUAL(0xFE, multiply(0x57, 0x13));
+
+    FUNTLS_ASSERT_EQUAL(0x63, (unsigned)multiply(0x21, 3));
+    FUNTLS_ASSERT_EQUAL(0xff, (unsigned)multiply(0x55, 3));
+    FUNTLS_ASSERT_EQUAL(0xfa, (unsigned)multiply(0x56, 3));
+    FUNTLS_ASSERT_EQUAL(0xee, (unsigned)multiply(0x5A, 3));
+    FUNTLS_ASSERT_EQUAL(0x5e, (unsigned)multiply(0xC3, 3));
+    FUNTLS_ASSERT_EQUAL(0x0d, (unsigned)multiply(0xF2, 3));
+
+    FUNTLS_ASSERT_EQUAL(0xfe, multiply(0x57, 0x13));
 
     std::cout << "input = " << util::base16_encode(input) << std::endl;
     std::cout << "key = " << util::base16_encode(K) << std::endl;
