@@ -23,8 +23,7 @@ int main()
     // Output Block 3ad77bb40d7a3660a89ecaf32466ef97
     // Ciphertext 3ad77bb40d7a3660a89ecaf32466ef97
     const auto input = util::base16_decode("6bc1bee22e409f96e93d7e117393172a");
-(void) key; (void) input;
-    //    FUNTLS_ASSERT_EQUAL(util::base16_decode("3ad77bb40d7a3660a89ecaf32466ef97"), aes::aes_128_ecb(key, input));
+    FUNTLS_ASSERT_EQUAL(util::base16_decode("3ad77bb40d7a3660a89ecaf32466ef97"), aes::aes_128_ecb(key, input));
     // Block #2
     // Plaintext ae2d8a571e03ac9c9eb76fac45af8e51
     // Input Block ae2d8a571e03ac9c9eb76fac45af8e51
