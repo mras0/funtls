@@ -6,7 +6,7 @@ namespace {
 template<typename T>
 void get_random_bytes(T& t) {
     static_assert(std::is_pod<T>::value && !std::is_pointer<T>::value, "");
-    tls::get_random_bytes(&t, sizeof(T));
+    funtls::tls::get_random_bytes(&t, sizeof(T));
 }
 
 uint32_t get_gmt_unix_time()
@@ -18,7 +18,7 @@ uint32_t get_gmt_unix_time()
 
 } // unnamed namespace
 
-namespace tls {
+namespace funtls { namespace tls {
 
 // "random"
 void get_random_bytes(void* dest, size_t count) {
@@ -39,7 +39,7 @@ random make_random() {
 handshake handshake_from_bytes(const std::vector<uint8_t>& buffer, size_t& index)
 {
     tls::handshake_type handshake_type;
-    tls::uint<24> body_size;
+    tls::uint24 body_size;
     tls::from_bytes(handshake_type, buffer, index);
     tls::from_bytes(body_size, buffer, index);
     if (index + body_size > buffer.size()) {
@@ -66,4 +66,4 @@ handshake handshake_from_bytes(const std::vector<uint8_t>& buffer, size_t& index
 }
 
 
-} // namespace tls
+} } // namespace funtls::tls

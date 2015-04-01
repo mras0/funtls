@@ -3,7 +3,7 @@
 
 #include "tls.h"
 
-namespace tls {
+namespace funtls { namespace tls {
 
 constexpr cipher_suite null_with_null_null             = { { 0x00, 0x00 } };
 
@@ -46,6 +46,6 @@ constexpr cipher_suite dh_anon_with_aes_256_cbc_sha    = { { 0x00, 0x3A } };
 constexpr cipher_suite dh_anon_with_aes_128_cbc_sha256 = { { 0x00, 0x6C } };
 constexpr cipher_suite dh_anon_with_aes_256_cbc_sha256 = { { 0x00, 0x6D } };
 
-} // namespace tls
+} } // namespace funtls::tls
 
 #endif

@@ -11,6 +11,7 @@
 #include <hash/hash.h>
 #include <x509/x509.h>
 #include <x509/x509_rsa.h>
+#include <aes/aes.h>
 #include <util/base_conversion.h>
 
 #include <boost/multiprecision/cpp_int.hpp>
@@ -131,6 +132,7 @@ private:
     std::vector<uint8_t>            master_secret;
     hash::sha256                    handshake_message_digest;
 
+    // TODO: This only works when the payload isn't encrypted/compressed
     template<typename Payload>
     void send_record(Payload&& payload) {
         std::vector<uint8_t> buffer;
@@ -140,6 +142,8 @@ private:
                 std::forward<Payload>(payload)
             });
         handshake_message_digest.input(buffer);
+
+        std::cout << "Sending record: " << util::base16_encode(buffer) << std::endl;
         boost::asio::write(socket, boost::asio::buffer(buffer));
     }
 
@@ -151,7 +155,7 @@ private:
         size_t index = 0;
         tls::content_type     content_type;
         tls::protocol_version protocol_version;
-        tls::uint<16>         length;
+        tls::uint16           length;
         tls::from_bytes(content_type, buffer, index);
         tls::from_bytes(protocol_version, buffer, index);
         tls::from_bytes(length, buffer, index);
@@ -305,6 +309,9 @@ private:
     }
 
     void send_finished() {
+        //
+        // The data to include in the finished handshake is "verify_data":
+        //
         // verify_data = PRF(master_secret, finished_label, Hash(handshake_messages))[0..verify_data_length-1]
         // finished_label: 
         //      For Finished messages sent by the client, the string "client finished".
@@ -313,13 +320,17 @@ private:
         //      All of the data from all messages in this handshake (not
         //      including any HelloRequest messages) up to, but not including,
         //      this message
-        std::cerr << "\n****************\nNot sending real encrypting data in " << __PRETTY_FUNCTION__ << "\n****************\n\n";
-        // TODO: use aes blokck cipher http://tools.ietf.org/html/rfc5246#section-6.2.3.2
-        auto data = PRF(master_secret, "client finished", handshake_message_digest.result(), tls::finished::verify_data_length);
-        std::cout << "Sending: " << util::base16_encode(data) << std::endl;
-        tls::opaque<tls::finished::verify_data_length> verify_data;
-        memcpy(&verify_data.data[0], &data[0], data.size());
+        auto verify_data = PRF(master_secret, "client finished", handshake_message_digest.result(), tls::finished::verify_data_length);
+        std::cout << "Verify data: " << util::base16_encode(verify_data) << std::endl;
+        assert(verify_data.size() == tls::finished::verify_data_length);
 
+        auto content = verify_data;
+        std::cout << "****\nNot sending real data in " << __PRETTY_FUNCTION__ << "\n***\n";
+
+        //
+        // Compress (trivial for CompressionMethod.null) and secure the content
+        // in a TLSCiphertext structure.
+        //
         // 6.2.3.2.  CBC Block Cipher
         // struct {
         //     opaque IV[SecurityParameters.record_iv_length];
@@ -330,6 +341,9 @@ private:
         //         uint8 padding_length;
         //     };
         // } GenericBlockCipher;
+        std::vector<uint8_t> payload_buffer(aes::block_size_bytes);
+        tls::get_random_bytes(&payload_buffer[0], aes::block_size_bytes); // Construct Initialization Vector
+        tls::append_to_buffer(payload_buffer, content);
 
         // IV = Initialization Vector - SHOULD be chosen at random
         // For block ciphers, the IV length is of length SecurityParameters.record_iv_length, 
@@ -352,7 +366,24 @@ private:
         //    length.  Legal values range from zero to 255, inclusive.  This
         //    length specifies the length of the padding field exclusive of the
         //    padding_length field itself.
-        send_record(tls::handshake{tls::finished{verify_data}});
+
+
+        constexpr auto handshake_type = tls::handshake_type::finished;
+        std::vector<uint8_t> fragment;
+        tls::append_to_buffer(fragment, handshake_type);
+        tls::append_to_buffer(fragment, current_protocol_version);
+        tls::append_to_buffer(fragment, tls::uint24(payload_buffer.size()));
+        tls::append_to_buffer(fragment, payload_buffer);
+
+        constexpr auto content_type = tls::content_type::handshake;
+        std::vector<uint8_t> record_buffer;
+        tls::append_to_buffer(record_buffer, content_type);
+        tls::append_to_buffer(record_buffer, current_protocol_version);
+        assert(fragment.size() < ((1<<14)+2048) && "Payload of TLSCiphertext MUST NOT exceed 2^14 + 2048");
+        tls::append_to_buffer(record_buffer, tls::uint16(fragment.size()));
+        tls::append_to_buffer(record_buffer, fragment);
+
+        boost::asio::write(socket, boost::asio::buffer(record_buffer));
     }
 
     void read_change_cipher_spec(){

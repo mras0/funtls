@@ -13,30 +13,93 @@
 
 #include "variant.h"
 
-namespace tls {
+namespace funtls { namespace tls {
 
-void get_random_bytes(void* dest, size_t count);
-
-using uint8  = std::uint8_t;
-
-template<unsigned BitCount>
+template<unsigned BitCount, typename Underlying>
 struct uint {
     static_assert(BitCount >= 8, "");
     static_assert(BitCount % 8 == 0, "");
+    static_assert(sizeof(Underlying) * 8 > BitCount, "");
 
-    uint(uint64_t value = 0) : value(value) {
+    static constexpr Underlying max_size = Underlying{1} << BitCount;
+
+    uint(Underlying value = 0) : value(value) {
         if (value >> BitCount) {
             throw std::logic_error(std::to_string(value) + " is out of range for uint<" + std::to_string(BitCount) + ">");
         }
     }
 
-    operator uint64_t() const {
+    operator Underlying() const {
+        assert(value < max_size);
         return value;
     }
 
 private:
-    uint64_t value;
+    Underlying value;
 };
+
+using uint8  = uint8_t;
+using uint16 = uint16_t;
+using uint24 = uint<24, uint32_t>;
+using uint32 = uint32_t;
+
+template<unsigned BitCount>
+struct smallest_possible_uint;
+
+template<> struct smallest_possible_uint<8> { using type = uint8; };
+template<> struct smallest_possible_uint<16> { using type = uint16; };
+template<> struct smallest_possible_uint<24> { using type = uint24; };
+template<> struct smallest_possible_uint<32> { using type = uint32; };
+
+enum class content_type : uint8_t {
+    change_cipher_spec = 20,
+    alert = 21,
+    handshake = 22,
+    application_data = 23,
+};
+
+enum class handshake_type : uint8 {
+    hello_request = 0,
+    client_hello = 1,
+    server_hello = 2,
+    certificate = 11,
+    server_key_exchange  = 12,
+    certificate_request = 13,
+    server_hello_done = 14,
+    certificate_verify = 15,
+    client_key_exchange = 16,
+    finished = 20
+};
+
+struct protocol_version {
+    uint8 major;
+    uint8 minor;
+};
+
+constexpr bool operator==(const protocol_version& a, const protocol_version& b)
+{
+    return a.major == b.major && a.minor == b.minor;
+}
+
+constexpr bool operator!=(const protocol_version& a, const protocol_version& b)
+{
+    return !(a == b);
+}
+
+static constexpr protocol_version protocol_version_tls_1_2{3, 3};
+
+// The record layer fragments information blocks into TLSPlaintext
+// records carrying data in chunks of 2^14 bytes or less.
+struct plaintext {
+    static constexpr size_t max_length = (1<<14);
+
+    content_type          type;
+    protocol_version      version;
+    uint16                length;
+    std::vector<uint8_t>  fragment;
+};
+
+void get_random_bytes(void* dest, size_t count);
 
 template<unsigned ByteCount>
 struct opaque {
@@ -49,7 +112,7 @@ constexpr size_t log256(size_t n) {
 
 template<typename T, size_t LowerBoundInBytes, size_t UpperBoundInBytes>
 struct vector {
-    using serialized_size_type = uint<8*log256(UpperBoundInBytes)>;
+    using serialized_size_type = typename smallest_possible_uint<8*log256(UpperBoundInBytes)>::type;
 
     static_assert(LowerBoundInBytes < UpperBoundInBytes, "");
     static_assert(LowerBoundInBytes % sizeof(T) == 0, "");
@@ -99,45 +162,8 @@ private:
     std::vector<T>  data;
 };
 
-enum class content_type : uint8_t {
-    change_cipher_spec = 20,
-    alert = 21,
-    handshake = 22,
-    application_data = 23,
-};
-
-enum class handshake_type : uint8 {
-    hello_request = 0,
-    client_hello = 1,
-    server_hello = 2,
-    certificate = 11,
-    server_key_exchange  = 12,
-    certificate_request = 13,
-    server_hello_done = 14,
-    certificate_verify = 15,
-    client_key_exchange = 16,
-    finished = 20
-};
-
-struct protocol_version {
-    uint8 major;
-    uint8 minor;
-};
-
-constexpr bool operator==(const protocol_version& a, const protocol_version& b)
-{
-    return a.major == b.major && a.minor == b.minor;
-}
-
-constexpr bool operator!=(const protocol_version& a, const protocol_version& b)
-{
-    return !(a == b);
-}
-
-constexpr protocol_version protocol_version_tls_1_2{3, 3};
-
 struct random {
-    uint<32>   gmt_unix_time;
+    uint32   gmt_unix_time;
     opaque<28> random_bytes;
 };
 random make_random();
@@ -274,6 +300,18 @@ inline void append_to_buffer(std::vector<uint8_t>& buffer, uint8 item) {
     buffer.push_back(item);
 }
 
+inline void append_to_buffer(std::vector<uint8_t>& buffer, uint16 item) {
+    buffer.push_back(item>>8);
+    buffer.push_back(item);
+}
+
+inline void append_to_buffer(std::vector<uint8_t>& buffer, uint32 item) {
+    buffer.push_back(item>>24);
+    buffer.push_back(item>>16);
+    buffer.push_back(item>>8);
+    buffer.push_back(item);
+}
+
 inline void append_to_buffer(std::vector<uint8_t>& buffer, handshake_type item) {
     buffer.push_back(static_cast<uint8_t>(item));
 }
@@ -286,9 +324,9 @@ inline void append_to_buffer(std::vector<uint8_t>& buffer, compression_method it
     buffer.push_back(static_cast<uint8_t>(item));
 }
 
-template<unsigned BitCount>
-inline void append_to_buffer(std::vector<uint8_t>& buffer, const uint<BitCount>& item) {
-    const auto x = static_cast<uint64_t>(item);
+template<unsigned BitCount, typename Underlying>
+inline void append_to_buffer(std::vector<uint8_t>& buffer, const uint<BitCount, Underlying>& item) {
+    const auto x = static_cast<Underlying>(item);
     for (unsigned i = 0; i < BitCount/8; ++i) {
         buffer.push_back(x >> ((BitCount/8-1-i)*8));
     }
@@ -324,6 +362,10 @@ struct append_helper {
 template<typename... Ts>
 void append_to_buffer(std::vector<uint8_t>& buffer, const tls::variant<Ts...>& item) {
     item.invoke(detail::append_helper{buffer});
+}
+
+inline void append_to_buffer(std::vector<uint8_t>& buffer, const std::vector<uint8_t>& item) {
+    buffer.insert(buffer.end(), item.begin(), item.end());
 }
 
 inline void append_to_buffer(std::vector<uint8_t>& buffer, const protocol_version& item) {
@@ -376,7 +418,7 @@ inline void append_to_buffer(std::vector<uint8_t>& buffer, const handshake& item
     append_to_buffer(body_buffer, item.body);
 
     append_to_buffer(buffer, item.type());
-    append_to_buffer(buffer, tls::uint<24>{body_buffer.size()});
+    append_to_buffer(buffer, uint24(body_buffer.size()));
     buffer.insert(buffer.end(), body_buffer.begin(), body_buffer.end());
 }
 
@@ -388,24 +430,36 @@ inline void append_to_buffer(std::vector<uint8_t>& buffer, const record& item) {
 
     append_to_buffer(buffer, item.type());
     append_to_buffer(buffer, item.protocol_version);
-    append_to_buffer(buffer, tls::uint<16>{payload_buffer.size()});
+    append_to_buffer(buffer, tls::uint16(payload_buffer.size()));
     buffer.insert(buffer.end(), payload_buffer.begin(), payload_buffer.end());
 }
 
-template<unsigned BitCount>
-inline void from_bytes(uint<BitCount>& item, const std::vector<uint8_t>& buffer, size_t& index) {
-    if (index + BitCount/8 > buffer.size()) throw std::runtime_error("Out of data in " + std::string(__func__));
-    uint64_t result = 0;
+template<unsigned BitCount, typename Underlying>
+inline void from_bytes(uint<BitCount, Underlying>& item, const std::vector<uint8_t>& buffer, size_t& index) {
+    Underlying result = 0;
     for (unsigned i = 0; i < BitCount/8; ++i) {
-        result |= static_cast<uint64_t>(buffer[index+i]) << ((BitCount/8-1-i)*8);
+        result |= static_cast<Underlying>(buffer[index+i]) << ((BitCount/8-1-i)*8);
     }
     index += BitCount/8;
-    item = uint<BitCount>(result);
+    item = uint<BitCount, Underlying>(result);
 }
 inline void from_bytes(uint8_t& item, const std::vector<uint8_t>& buffer, size_t& index) {
     if (index + 1 > buffer.size()) throw std::runtime_error("Out of data in " + std::string(__func__));
     item = buffer[index++];
 }
+inline void from_bytes(uint16_t& item, const std::vector<uint8_t>& buffer, size_t& index) {
+    if (index + 2 > buffer.size()) throw std::runtime_error("Out of data in " + std::string(__func__));
+    item  = uint16_t(buffer[index++])<<8;
+    item |= buffer[index++];
+}
+inline void from_bytes(uint32_t& item, const std::vector<uint8_t>& buffer, size_t& index) {
+    if (index + 4 > buffer.size()) throw std::runtime_error("Out of data in " + std::string(__func__));
+    item  = uint32_t(buffer[index++])<<24;
+    item |= uint32_t(buffer[index++])<<16;
+    item |= uint32_t(buffer[index++])<<8;
+    item |= buffer[index++];
+}
+
 inline void from_bytes(handshake_type& item, const std::vector<uint8_t>& buffer, size_t& index) {
     if (index + 1 > buffer.size()) throw std::runtime_error("Out of data in " + std::string(__func__));
     item = static_cast<handshake_type>(buffer[index++]);
@@ -428,7 +482,7 @@ inline void from_bytes(opaque<ByteCount>& item, const std::vector<uint8_t>& buff
 
 template<typename T, size_t LowerBoundInBytes, size_t UpperBoundInBytes>
 inline void from_bytes(vector<T, LowerBoundInBytes, UpperBoundInBytes>& item, const std::vector<uint8_t>& buffer, size_t& index) {
-    uint<8*log256(UpperBoundInBytes)> byte_count;
+    typename smallest_possible_uint<8*log256(UpperBoundInBytes)>::type byte_count;
     from_bytes(byte_count, buffer, index);
     if (byte_count < LowerBoundInBytes) throw std::runtime_error("Byte count " + std::to_string(byte_count) + " < " + std::to_string(LowerBoundInBytes));
     if (byte_count > UpperBoundInBytes) throw std::runtime_error("Byte count " + std::to_string(byte_count) + " > " + std::to_string(UpperBoundInBytes));
@@ -458,7 +512,7 @@ inline void from_bytes(server_hello& item, const std::vector<uint8_t>& buffer, s
 }
 inline void from_bytes(certificate& item, const std::vector<uint8_t>& buffer, size_t& index) {
     // TODO: XXX: This is ugly...
-    uint<24> length;
+    uint24 length;
     from_bytes(length, buffer, index);
     std::vector<tls::asn1cert> certificate_list;
     std::cout << "Reading " << length << " bytes of certificate data\n";
@@ -467,7 +521,7 @@ inline void from_bytes(certificate& item, const std::vector<uint8_t>& buffer, si
     }
     size_t bytes_used = 3;
     for (;;) {
-        uint<24> cert_length;
+        uint24 cert_length;
         from_bytes(cert_length, buffer, index);
         std::cout << " Found certificate of length " << cert_length << "\n";
         if (!cert_length) throw std::runtime_error("Empty certificate found");
@@ -486,7 +540,6 @@ inline void from_bytes(certificate& item, const std::vector<uint8_t>& buffer, si
 
 handshake handshake_from_bytes(const std::vector<uint8_t>& buffer, size_t& index);
 
-} // namespace tls
-
+} } // namespace funtls::tls
 
 #endif

@@ -4,7 +4,8 @@
 #include <cstddef>
 #include <stdexcept>
 
-namespace tls {
+namespace funtls { namespace tls {
+
 namespace detail {
 
 template<int count, typename Candidate, typename... Ts>
@@ -177,4 +178,4 @@ private:
 
 };
 
-} // namespace tls
+} } // namespace funtls::tls

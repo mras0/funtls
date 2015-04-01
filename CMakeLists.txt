@@ -26,4 +26,4 @@ add_subdirectory(x509)
 
 include_directories(${funtls_SOURCE_DIR})
 add_executable(funtls main.cpp tls.cpp variant.cpp)
-target_link_libraries(funtls boost util hash asn1 x509)
+target_link_libraries(funtls boost util hash asn1 x509 aes)
