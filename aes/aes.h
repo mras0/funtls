@@ -12,7 +12,11 @@
 
 namespace funtls { namespace aes {
 
-std::vector<uint8_t> aes_128_ecb(const std::vector<uint8_t>& key, const std::vector<uint8_t>& input);
+static constexpr unsigned block_size_bits  = 128;
+static constexpr unsigned block_size_bytes = block_size_bits / 8;
+
+std::vector<uint8_t> aes_ecb(const std::vector<uint8_t>& key, const std::vector<uint8_t>& input);
+std::vector<uint8_t> aes_cbc(const std::vector<uint8_t>& key, const std::vector<uint8_t>& iv, const std::vector<uint8_t>& input);
 
 } } // namespace funtls::aes
 
