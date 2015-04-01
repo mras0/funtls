@@ -58,18 +58,17 @@ constexpr unsigned Nr_from_Nk(unsigned Nk) {
 // polynomial is m(x) = x^8 + x^4 + x^3 + x + 1 or [0x11b] in hexadecimal notation
 
 
-static constexpr uint16_t mx = 0x11b;
 uint8_t xtime(uint8_t a)
 {
+    static constexpr uint16_t mx = 0x11b;
     return a & 0x80 ? (a<<1) ^ mx : (a<<1);
 }
 
 uint8_t multiply(uint8_t a, uint8_t b) {
     uint8_t x = 0;
-    uint8_t a_exp = a;
     while (b) {
-        if (b & 1) x ^= a_exp;
-        a_exp = xtime(a_exp);
+        if (b & 1) x ^= a;
+        a = xtime(a);
         b >>= 1;
     }
     return x;
@@ -175,8 +174,8 @@ void MixColumns(state& s) {
     for (unsigned c = 0; c < Nb; ++c) {
         s(0,c) = multiply(i(0,c),2) ^ multiply(i(1,c),3) ^ i(2,c) ^ i(3,c);
         s(1,c) = i(0,c) ^ multiply(i(1,c),2) ^ multiply(i(2,c),3) ^ i(3,c);
-        s(1,c) = i(0,c) ^ i(1,c) ^ multiply(i(2,c),2) ^ multiply(i(3,c),3);
-        s(0,c) = multiply(i(0,c),3) ^ i(1,c) ^ i(2,c) ^ multiply(i(3,c),2);
+        s(2,c) = i(0,c) ^ i(1,c) ^ multiply(i(2,c),2) ^ multiply(i(3,c),3);
+        s(3,c) = multiply(i(0,c),3) ^ i(1,c) ^ i(2,c) ^ multiply(i(3,c),2);
     }
 }
 
@@ -294,18 +293,8 @@ std::vector<uint8_t> KeyExpansion(const std::vector<uint8_t>& key) // KeyExpansi
     return w;
 } // end
 
-} // unnamed namespace
 
-namespace funtls { namespace aes {
-
-//For the AES algorithm, the length of the Cipher Key, K, is 128, 192, or 256 bits. The key
-//length is represented by Nk = 4, 6, or 8, which reflects the number of 32-bit words (number of
-//columns) in the Cipher Key.
-//For the AES algorithm, the number of rounds to be performed during the execution of the
-//algorithm is dependent on the key size. The number of rounds is represented by Nr, where Nr =
-//10 when Nk = 4, Nr = 12 when Nk = 6, and Nr = 14 when Nk = 8. 
-
-std::vector<uint8_t> aes_128_ecb(const std::vector<uint8_t>& K, const std::vector<uint8_t>& input)
+void run_tests()
 {
     const auto my_k = "2b7e151628aed2a6abf7158809cf4f3c";
     const auto expanded_k =
@@ -335,9 +324,34 @@ std::vector<uint8_t> aes_128_ecb(const std::vector<uint8_t>& K, const std::vecto
     FUNTLS_ASSERT_EQUAL(0x0d, (unsigned)multiply(0xF2, 3));
 
     FUNTLS_ASSERT_EQUAL(0xfe, multiply(0x57, 0x13));
+    const auto model_vec = util::base16_decode("00102030011121310212223203132333");
+    state q{model_vec};
+    ShiftRows(q);
+    FUNTLS_ASSERT_EQUAL("00112233011223300213203103102132", util::base16_encode(std::vector<uint8_t>{q.begin(),q.end()}));
 
-    std::cout << "input = " << util::base16_encode(input) << std::endl;
-    std::cout << "key = " << util::base16_encode(K) << std::endl;
+    {
+        const auto ss = util::base16_decode("D4BF5D30E0B452AEB84111F11E2798E5");
+        const auto ex = "046681E5E0CB199A48F8D37A2806264C";
+        auto s = state{ss};
+        MixColumns(s);
+        FUNTLS_ASSERT_EQUAL(ex, util::base16_encode(std::vector<uint8_t>(s.begin(), s.end())));
+    }
+}
+
+} // unnamed namespace
+
+namespace funtls { namespace aes {
+
+//For the AES algorithm, the length of the Cipher Key, K, is 128, 192, or 256 bits. The key
+//length is represented by Nk = 4, 6, or 8, which reflects the number of 32-bit words (number of
+//columns) in the Cipher Key.
+//For the AES algorithm, the number of rounds to be performed during the execution of the
+//algorithm is dependent on the key size. The number of rounds is represented by Nr, where Nr =
+//10 when Nk = 4, Nr = 12 when Nk = 6, and Nr = 14 when Nk = 8. 
+
+std::vector<uint8_t> aes_128_ecb(const std::vector<uint8_t>& K, const std::vector<uint8_t>& input)
+{
+    run_tests();
 
     FUNTLS_CHECK_BINARY(K.size() % 4, ==, 0, "Unexpected key size " + std::to_string(K.size()));
     const unsigned Nk = Nk_from_size(K.size());
@@ -350,38 +364,43 @@ std::vector<uint8_t> aes_128_ecb(const std::vector<uint8_t>& K, const std::vecto
     // w = KeyExpansion(K)
     // returns out
     const auto w = KeyExpansion(K);
-    std::cout << "key expanded to " << util::base16_encode(w) << std::endl;
     FUNTLS_ASSERT_EQUAL(Nb*(Nr+1)*4, w.size());
 
     // After an initial Round Key addition, the State array is transformed by implementing a
     // round function 10, 12, or 14 times (depending on the key length), with the final round differing
     // slightly from the first Nr-1 rounds.
 
-    const auto model_vec = util::base16_decode("00102030011121310212223203132333");
-    state q{model_vec};
-    ShiftRows(q);
-    FUNTLS_ASSERT_EQUAL("00112233011223300213203103102132", util::base16_encode(std::vector<uint8_t>{q.begin(),q.end()}));
-
     state s{input}; // state = in
+    //std::cout << "Start of round: " << s << std::endl;
 
-    AddRoundKey(s, &w[0*Nb]); // AddRoundKey(state, w[0, Nb-1]) // See Sec. 5.1.4
+    AddRoundKey(s, &w[0*Nb*4]); // AddRoundKey(state, w[0, Nb-1]) // See Sec. 5.1.4
+    //std::cout << "After AddRoundKey: " << s << std::endl;
 
     for (unsigned round = 1; round < Nr; ++round) { // for round = 1 step 1 to Nr–1
+        //std::cout << "\nRound " << round << std::endl;
         SubBytes(s); // SubBytes(state) // See Sec. 5.1.1
+        //std::cout << "After SubBytes: " << s << std::endl;
 
         ShiftRows(s); // ShiftRows(state) // See Sec. 5.1.2
+        //std::cout << "After ShiftRows: " << s << std::endl;
+
+        //std::cout << util::base16_encode(&s[0], 16) << std::endl;
 
         MixColumns(s); // MixColumns(state) // See Sec. 5.1.3
+        //std::cout << "After MixColumns: " << s << std::endl;
 
-        AddRoundKey(s, &w[round*Nb]);// AddRoundKey(state, w[round*Nb, (round+1)*Nb-1])
-
+        AddRoundKey(s, &w[round*Nb*4]);// AddRoundKey(state, w[round*Nb, (round+1)*Nb-1])
+        //std::cout << "After AddRoundKey: " << s << std::endl;
     } // end for
 
     SubBytes(s); // SubBytes(state)
+    //std::cout << "After SubBytes: " << s << std::endl;
 
     ShiftRows(s); // ShiftRows(state)
+    //std::cout << "After ShiftRows: " << s << std::endl;
 
-    AddRoundKey(s, &w[Nr*Nb]); // AddRoundKey(state, w[Nr*Nb, (Nr+1)*Nb-1])
+    AddRoundKey(s, &w[Nr*Nb*4]); // AddRoundKey(state, w[Nr*Nb, (Nr+1)*Nb-1])
+    //std::cout << "After AddRoundKey: " << s << std::endl;
 
     return std::vector<uint8_t>{s.begin(),s.end()}; // out = state
 }
