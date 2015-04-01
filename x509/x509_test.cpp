@@ -44,8 +44,8 @@ void check_x509_v3(const x509::v3_certificate& cert)
     // TODO: Check that it's self-signed
 
     auto s_pk = rsa_public_key_from_certificate(cert);
-    std::cout << " Subject public key: n=0x" << std::hex << s_pk.modolus.as<int_type>()
-        << " e=0x" << s_pk.public_exponent.as<int_type>() << std::dec << std::endl;
+    std::cout << " Subject public key: n=0x" << util::base16_encode(s_pk.modolus.as_vector())
+        << " e=0x" << util::base16_encode(s_pk.public_exponent.as_vector()) << std::endl;
 
     assert(cert.signature_algorithm() == x509::sha256WithRSAEncryption);
     auto sig_value = cert.signature().as_vector();

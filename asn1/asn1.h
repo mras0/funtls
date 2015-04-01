@@ -154,6 +154,11 @@ public:
         assert(index < octet_count());
         return repr_[index];
     }
+
+    std::vector<uint8_t> as_vector() const {
+        return repr_;
+    }
+
 private:
     std::vector<uint8_t> repr_;
 

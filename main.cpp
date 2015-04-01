@@ -161,7 +161,6 @@ private:
             });
         handshake_message_digest.input(buffer);
         ++client_seq;
-        std::cout << "Sending record: " << util::base16_encode(buffer) << std::endl;
         boost::asio::write(socket, boost::asio::buffer(buffer));
     }
 
@@ -266,10 +265,9 @@ private:
         std::vector<uint8_t> pre_master_secret(master_secret_size);
         pre_master_secret[0] = current_protocol_version.major;
         pre_master_secret[1] = current_protocol_version.minor;
-        tls::get_random_bytes(&pre_master_secret[2], 46);
+        tls::get_random_bytes(&pre_master_secret[2], pre_master_secret.size()-2);
 
-        // TODO: Encrypt pre_master_secret using the public key from the server's certificate
-        std::cout << "Not encrypting pre-master secret in " << __PRETTY_FUNCTION__ << std::endl;
+        std::cout << "Pre-master secret: " << util::base16_encode(&pre_master_secret[2], pre_master_secret.size()-2) << std::endl;
 
         // TODO: Make sure the certificate is correct etc.
         auto cert_buf = util::buffer_view{&their_certificate[0], their_certificate.size()};
@@ -277,23 +275,40 @@ private:
         const auto s_pk = rsa_public_key_from_certificate(cert);
         const auto n = s_pk.modolus.as<int_type>();
         const auto e = s_pk.public_exponent.as<int_type>();
-        std::cout << "n:\n" << n << "\ne:\n" << e << std::endl;
 
         // Perform RSAES-PKCS1-V1_5-ENCRYPT (http://tools.ietf.org/html/rfc3447 7.2.1)
 
+        // Get k=message length
+        size_t k = s_pk.modolus.octet_count(); // Length of modolus
+        assert(k!=0);
+        if (s_pk.modolus.octet(0) == 0) {
+            // The leading byte of the modulos was 0, discount it in calculating the
+            // bit length
+            k--;
+            assert(k && (s_pk.modolus.octet(1) & 0x80)); // The leading byte should only be 0 if the msb is set on the next byte
+        }
+
         // Build message to encrypt: EM = 0x00 || 0x02 || PS || 0x00 || M
-        std::vector<uint8_t> EM(11);
+        std::vector<uint8_t> EM(k-pre_master_secret.size());
         EM[0] = 0x00;
         EM[1] = 0x02;
-        // PS = at least 8 pseudo random characters
-        tls::get_random_bytes(&EM[2], 8);
-        EM[10] = 0x00;
+        // PS = at least 8 pseudo random characters (must be non-zero for type 0x02)
+        tls::get_random_bytes(&EM[2], EM.size()-3);
+        for (size_t i = 2; i < EM.size()-1; ++i) {
+            while (!EM[i]) {
+                tls::get_random_bytes(&EM[i], 1);
+            }
+        }
+        EM[EM.size()-1] = 0x00;
         // M = message to encrypt
         EM.insert(EM.end(), std::begin(pre_master_secret), std::end(pre_master_secret));
+        assert(EM.size()==k);
 
         // 3.a
         const auto m = x509::base256_decode<int_type>(EM); // m = OS2IP (EM)
         assert(m < n); // Is the message too long?
+
+        std::cout << "m (" << EM.size() << ") = " << util::base16_encode(EM) << std::dec << "\n";
 
         // 3.b
         const int_type c = powm(m, e, n); // c = RSAEP ((n, e), m)
@@ -301,7 +316,7 @@ private:
 
         // 3.c Convert the ciphertext representative c to a ciphertext C of length k octets
         // C = I2OSP (c, k)
-        const auto C = x509::base256_encode(c, s_pk.modolus.octet_count());
+        const auto C = x509::base256_encode(c, k);
         std::cout << "C:\n" << util::base16_encode(C) << std::endl;
 
         tls::client_key_exchange client_key_exchange{tls::vector<tls::uint8,0,(1<<16)-1>{C}};
@@ -417,21 +432,13 @@ private:
         }
         assert(content_and_mac.size() % block_length == 0);
 
-        // Construct initialization vector - SHOULD be chosen at random
-        // For block ciphers, the IV length is of length SecurityParameters.record_iv_length, 
-        // which is equal to the SecurityParameters.block_size.
-        std::vector<uint8_t> iv(fixed_iv_length);
-        assert(iv.size() == aes::block_size_bytes);
-        tls::get_random_bytes(&iv[0], iv.size());
-
         //
         // A GenericBlockCipher consist of the initialization vector and block-ciphered
         // content, mac and padding.
         //
-        std::vector<uint8_t> key(aes::block_size_bytes); // AES-256 key
         std::vector<uint8_t> fragment;
-        tls::append_to_buffer(fragment, iv);
-        tls::append_to_buffer(fragment, aes::aes_encrypt_cbc(key, iv, content_and_mac));
+        tls::append_to_buffer(fragment, client_iv);
+        tls::append_to_buffer(fragment, aes::aes_encrypt_cbc(client_enc_key, client_iv, content_and_mac));
 
 
         //
