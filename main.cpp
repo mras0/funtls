@@ -377,7 +377,6 @@ private:
         tls::append_to_buffer(content, tls::handshake_type::finished);
         tls::append_to_buffer(content, tls::uint24(verify_data.size()));
         tls::append_to_buffer(content, verify_data);
-        std::cout << "****\nNot sending real data in " << __PRETTY_FUNCTION__ << "\n***\n";
 
         constexpr auto content_type = tls::content_type::handshake;
 
@@ -394,8 +393,9 @@ private:
         //                  TLSCompressed.length +
         //                  TLSCompressed.fragment);
         auto hash_algo = hash::hmac_sha256(client_mac_key);
-        assert(client_seq < 256);
-        hash_algo.input(std::vector<uint8_t>{0,0,0,0,0,0,0,(uint8_t)client_seq});
+        // Expected header...
+        // "\000\000\000\000\000\000\000\000\026\003\003\000\020"
+        hash_algo.input(std::vector<uint8_t>{0,0,0,0,0,0,0,0}/*(uint8_t)client_seq*/);
         hash_algo.input(static_cast<const void*>(&content_type), 1);
         hash_algo.input(&current_protocol_version.major, 1);
         hash_algo.input(&current_protocol_version.minor, 1);
@@ -438,7 +438,16 @@ private:
         //
         std::vector<uint8_t> fragment;
         tls::append_to_buffer(fragment, client_iv);
+
+        std::cout << "client_enc_key=" << util::base16_encode(client_enc_key)  << std::endl;
+        std::cout << "client_iv=" << util::base16_encode(client_iv)  << std::endl;
+
         tls::append_to_buffer(fragment, aes::aes_encrypt_cbc(client_enc_key, client_iv, content_and_mac));
+
+        std::cout << "client_iv.size() = " << client_iv.size() << std::endl;
+        std::cout << "content_and_mac.size() = " << content_and_mac.size() << std::endl;
+        std::cout << "fragment=" << util::base16_encode(client_iv) << util::base16_encode(content_and_mac) << std::endl;
+        std::cout << "fragment(iv, encryped(fragment))=" << util::base16_encode(fragment) << std::endl;
 
 
         //
