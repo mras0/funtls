@@ -140,9 +140,6 @@ private:
     std::vector<uint8_t>            master_secret;
     hash::sha256                    handshake_message_digest;
 
-    uint64_t                        client_seq = 0;
-    uint64_t                        server_seq = 0;
-
     std::vector<uint8_t>            client_mac_key;
     std::vector<uint8_t>            server_mac_key;
     std::vector<uint8_t>            client_enc_key;
@@ -159,16 +156,16 @@ private:
                 current_protocol_version,
                 std::forward<Payload>(payload)
             });
-        handshake_message_digest.input(buffer);
-        ++client_seq;
+        if (buffer[0] == 22) {
+            std::cout << "HACK: Message included in digest: " << (int)buffer[0] << "\n";
+            handshake_message_digest.input(&buffer[5],buffer.size()-5);
+        }
         boost::asio::write(socket, boost::asio::buffer(buffer));
     }
 
     tls::record read_record() {
         std::vector<uint8_t> buffer(5);
         boost::asio::read(socket, boost::asio::buffer(buffer));
-        handshake_message_digest.input(buffer);
-        ++server_seq;
 
         size_t index = 0;
         tls::content_type     content_type;
@@ -369,6 +366,7 @@ private:
         //      All of the data from all messages in this handshake (not
         //      including any HelloRequest messages) up to, but not including,
         //      this message
+        std::cout << "Hash(handshake_messages) = " << util::base16_encode(handshake_message_digest.result()) << std::endl;
         auto verify_data = PRF(master_secret, "client finished", handshake_message_digest.result(), tls::finished::verify_data_length);
         std::cout << "Verify data: " << util::base16_encode(verify_data) << std::endl;
         assert(verify_data.size() == tls::finished::verify_data_length);
@@ -393,8 +391,6 @@ private:
         //                  TLSCompressed.length +
         //                  TLSCompressed.fragment);
         auto hash_algo = hash::hmac_sha256(client_mac_key);
-        // Expected header...
-        // "\000\000\000\000\000\000\000\000\026\003\003\000\020"
         hash_algo.input(std::vector<uint8_t>{0,0,0,0,0,0,0,0}/*(uint8_t)client_seq*/);
         hash_algo.input(static_cast<const void*>(&content_type), 1);
         hash_algo.input(&current_protocol_version.major, 1);
@@ -460,7 +456,6 @@ private:
         tls::append_to_buffer(ciphertext_buffer, tls::uint16(fragment.size()));
         tls::append_to_buffer(ciphertext_buffer, fragment);
         boost::asio::write(socket, boost::asio::buffer(ciphertext_buffer));
-        ++client_seq;
     }
 
     void read_change_cipher_spec(){
