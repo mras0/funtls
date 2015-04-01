@@ -18,7 +18,7 @@ static constexpr unsigned block_size_bytes = block_size_bits / 8;
 std::vector<uint8_t> aes_encrypt_ecb(const std::vector<uint8_t>& key, const std::vector<uint8_t>& input);
 std::vector<uint8_t> aes_encrypt_cbc(const std::vector<uint8_t>& key, const std::vector<uint8_t>& iv, const std::vector<uint8_t>& input);
 
-std::vector<uint8_t> aes_decrypt_ecb(const std::vector<uint8_t>& K, const std::vector<uint8_t>& input);
+std::vector<uint8_t> aes_decrypt_ecb(const std::vector<uint8_t>& key, const std::vector<uint8_t>& input);
 std::vector<uint8_t> aes_decrypt_cbc(const std::vector<uint8_t>& key, const std::vector<uint8_t>& iv, const std::vector<uint8_t>& input);
 } } // namespace funtls::aes
 

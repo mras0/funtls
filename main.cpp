@@ -84,7 +84,7 @@ class tls_socket {
 public:
     explicit tls_socket(boost::asio::ip::tcp::socket& socket)
         : socket(socket)
-        , our_random(tls::make_random()) {
+        , client_random(tls::make_random()) {
     }
 
     void perform_handshake() {
@@ -119,18 +119,36 @@ public:
     }
 
 private:
+    // HMAC-SHA256
+    static constexpr size_t         mac_length         = 256/8;
+    static constexpr size_t         mac_key_length     = 256/8;
+    // AES_256_CBC
+    static constexpr size_t         enc_key_length     = 256/8;
+    static constexpr size_t         fixed_iv_length    = 128/8;
+    static constexpr size_t         block_length       = 128/8;
+
     static constexpr size_t         master_secret_size = 48;
 
     const tls::protocol_version     current_protocol_version = tls::protocol_version_tls_1_2;
     const tls::cipher_suite         wanted_cipher            = tls::rsa_with_aes_256_cbc_sha256;
 
     boost::asio::ip::tcp::socket&   socket;
-    const tls::random               our_random;
-    tls::random                     their_random;
+    const tls::random               client_random;
+    tls::random                     server_random;
     std::vector<uint8_t>            their_certificate;
     tls::session_id                 sesion_id;
     std::vector<uint8_t>            master_secret;
     hash::sha256                    handshake_message_digest;
+
+    uint64_t                        client_seq = 0;
+    uint64_t                        server_seq = 0;
+
+    std::vector<uint8_t>            client_mac_key;
+    std::vector<uint8_t>            server_mac_key;
+    std::vector<uint8_t>            client_enc_key;
+    std::vector<uint8_t>            server_enc_key;
+    std::vector<uint8_t>            client_iv;
+    std::vector<uint8_t>            server_iv;
 
     // TODO: This only works when the payload isn't encrypted/compressed
     template<typename Payload>
@@ -142,7 +160,7 @@ private:
                 std::forward<Payload>(payload)
             });
         handshake_message_digest.input(buffer);
-
+        ++client_seq;
         std::cout << "Sending record: " << util::base16_encode(buffer) << std::endl;
         boost::asio::write(socket, boost::asio::buffer(buffer));
     }
@@ -151,6 +169,7 @@ private:
         std::vector<uint8_t> buffer(5);
         boost::asio::read(socket, boost::asio::buffer(buffer));
         handshake_message_digest.input(buffer);
+        ++server_seq;
 
         size_t index = 0;
         tls::content_type     content_type;
@@ -190,7 +209,7 @@ private:
         tls::handshake{
             tls::client_hello{
                 current_protocol_version,
-                our_random,
+                client_random,
                 sesion_id,
                 { wanted_cipher },
                 { tls::compression_method::null },
@@ -207,7 +226,7 @@ private:
         if (server_hello.compression_method != tls::compression_method::null) {
             throw std::runtime_error("Invalid compression method " + std::to_string((int)server_hello.compression_method));
         }
-        their_random = server_hello.random;
+        server_random = server_hello.random;
         sesion_id = server_hello.session_id;
     }
 
@@ -293,11 +312,26 @@ private:
         // master_secret = PRF(pre_master_secret, "master secret", ClientHello.random + ServerHello.random)[0..47]
 
         std::vector<uint8_t> rand_buf;
-        tls::append_to_buffer(rand_buf, our_random);
-        tls::append_to_buffer(rand_buf, their_random);
+        tls::append_to_buffer(rand_buf, client_random);
+        tls::append_to_buffer(rand_buf, server_random);
         master_secret = PRF(pre_master_secret, "master secret", rand_buf, master_secret_size);
         assert(master_secret.size() == master_secret_size);
         std::cout << "Master secret: " << util::base16_encode(master_secret) << std::endl;
+
+        // Now do Key Calculation http://tools.ietf.org/html/rfc5246#section-6.3
+        // key_block = PRF(SecurityParameters.master_secret, "key expansion",
+        // SecurityParameters.server_random + SecurityParameters.client_random)
+        const size_t key_block_length  = 2 * mac_key_length + 2 * enc_key_length + 2 * fixed_iv_length;
+        auto key_block = PRF(master_secret, "key expansion", vec_concat(server_random.as_vector(), client_random.as_vector()), key_block_length);
+
+        size_t i = 0;
+        client_mac_key = std::vector<uint8_t>{&key_block[i], &key_block[i+mac_key_length]}; i += mac_key_length;
+        server_mac_key = std::vector<uint8_t>{&key_block[i], &key_block[i+mac_key_length]}; i += mac_key_length;
+        client_enc_key = std::vector<uint8_t>{&key_block[i], &key_block[i+enc_key_length]}; i += enc_key_length;
+        server_enc_key = std::vector<uint8_t>{&key_block[i], &key_block[i+enc_key_length]}; i += enc_key_length;
+        client_iv      = std::vector<uint8_t>{&key_block[i], &key_block[i+fixed_iv_length]}; i += fixed_iv_length;
+        server_iv      = std::vector<uint8_t>{&key_block[i], &key_block[i+fixed_iv_length]}; i += fixed_iv_length;
+        assert(i == key_block.size());
     }
 
     void send_change_cipher_spec() {
@@ -310,7 +344,7 @@ private:
 
     void send_finished() {
         //
-        // The data to include in the finished handshake is "verify_data":
+        // The data to include in the "finished" handshake is "verify_data":
         //
         // verify_data = PRF(master_secret, finished_label, Hash(handshake_messages))[0..verify_data_length-1]
         // finished_label: 
@@ -324,31 +358,19 @@ private:
         std::cout << "Verify data: " << util::base16_encode(verify_data) << std::endl;
         assert(verify_data.size() == tls::finished::verify_data_length);
 
-        auto content = verify_data;
+        std::vector<uint8_t> content;
+        tls::append_to_buffer(content, tls::handshake_type::finished);
+        tls::append_to_buffer(content, tls::uint24(verify_data.size()));
+        tls::append_to_buffer(content, verify_data);
         std::cout << "****\nNot sending real data in " << __PRETTY_FUNCTION__ << "\n***\n";
 
-        //
-        // Compress (trivial for CompressionMethod.null) and secure the content
-        // in a TLSCiphertext structure.
-        //
-        // 6.2.3.2.  CBC Block Cipher
-        // struct {
-        //     opaque IV[SecurityParameters.record_iv_length];
-        //     block-ciphered struct {
-        //         opaque content[TLSCompressed.length];
-        //         opaque MAC[SecurityParameters.mac_length];
-        //         uint8 padding[GenericBlockCipher.padding_length];
-        //         uint8 padding_length;
-        //     };
-        // } GenericBlockCipher;
-        std::vector<uint8_t> payload_buffer(aes::block_size_bytes);
-        tls::get_random_bytes(&payload_buffer[0], aes::block_size_bytes); // Construct Initialization Vector
-        tls::append_to_buffer(payload_buffer, content);
+        constexpr auto content_type = tls::content_type::handshake;
 
-        // IV = Initialization Vector - SHOULD be chosen at random
-        // For block ciphers, the IV length is of length SecurityParameters.record_iv_length, 
-        // which is equal to the SecurityParameters.block_size.
-
+        //
+        // We now have our plaintext content to send (content).
+        // First apply compression (trivial for CompressionMethod.null)
+        // The next step is generating a MAC of the content
+        //
 
         // The MAC is generated as:
         // MAC(MAC_write_key, seq_num +
@@ -356,6 +378,28 @@ private:
         //                  TLSCompressed.version +
         //                  TLSCompressed.length +
         //                  TLSCompressed.fragment);
+        auto hash_algo = hash::hmac_sha256(client_mac_key);
+        assert(client_seq < 256);
+        hash_algo.input(std::vector<uint8_t>{0,0,0,0,0,0,0,(uint8_t)client_seq});
+        hash_algo.input(static_cast<const void*>(&content_type), 1);
+        hash_algo.input(&current_protocol_version.major, 1);
+        hash_algo.input(&current_protocol_version.minor, 1);
+        hash_algo.input(std::vector<uint8_t>{uint8_t(content.size()>>8),uint8_t(content.size())});
+        hash_algo.input(content);
+        const auto mac = hash_algo.result();
+        std::cout << "MAC: " << util::base16_encode(mac) << std::endl;
+
+        // 
+        // Assemble content, mac and padding
+        //
+        // opaque content[TLSCompressed.length];
+        // opaque MAC[SecurityParameters.mac_length];
+        // uint8 padding[GenericBlockCipher.padding_length];
+        // uint8 padding_length;
+        //
+        std::vector<uint8_t> content_and_mac;
+        tls::append_to_buffer(content_and_mac, content);
+        tls::append_to_buffer(content_and_mac, mac);
         //
         // padding:
         //    Padding that is added to force the length of the plaintext to be
@@ -366,24 +410,41 @@ private:
         //    length.  Legal values range from zero to 255, inclusive.  This
         //    length specifies the length of the padding field exclusive of the
         //    padding_length field itself.
+        //
+        uint8_t padding_length = block_length - (content_and_mac.size()+1) % block_length;
+        for (unsigned i = 0; i < padding_length + 1U; ++i) {
+            content_and_mac.push_back(padding_length);
+        }
+        assert(content_and_mac.size() % block_length == 0);
 
+        // Construct initialization vector - SHOULD be chosen at random
+        // For block ciphers, the IV length is of length SecurityParameters.record_iv_length, 
+        // which is equal to the SecurityParameters.block_size.
+        std::vector<uint8_t> iv(fixed_iv_length);
+        assert(iv.size() == aes::block_size_bytes);
+        tls::get_random_bytes(&iv[0], iv.size());
 
-        constexpr auto handshake_type = tls::handshake_type::finished;
+        //
+        // A GenericBlockCipher consist of the initialization vector and block-ciphered
+        // content, mac and padding.
+        //
+        std::vector<uint8_t> key(aes::block_size_bytes); // AES-256 key
         std::vector<uint8_t> fragment;
-        tls::append_to_buffer(fragment, handshake_type);
-        tls::append_to_buffer(fragment, current_protocol_version);
-        tls::append_to_buffer(fragment, tls::uint24(payload_buffer.size()));
-        tls::append_to_buffer(fragment, payload_buffer);
+        tls::append_to_buffer(fragment, iv);
+        tls::append_to_buffer(fragment, aes::aes_encrypt_cbc(key, iv, content_and_mac));
 
-        constexpr auto content_type = tls::content_type::handshake;
-        std::vector<uint8_t> record_buffer;
-        tls::append_to_buffer(record_buffer, content_type);
-        tls::append_to_buffer(record_buffer, current_protocol_version);
+
+        //
+        // Now create and send the actual TLSCiphertext structure
+        //
+        std::vector<uint8_t> ciphertext_buffer;
+        tls::append_to_buffer(ciphertext_buffer, content_type);
+        tls::append_to_buffer(ciphertext_buffer, current_protocol_version);
         assert(fragment.size() < ((1<<14)+2048) && "Payload of TLSCiphertext MUST NOT exceed 2^14 + 2048");
-        tls::append_to_buffer(record_buffer, tls::uint16(fragment.size()));
-        tls::append_to_buffer(record_buffer, fragment);
-
-        boost::asio::write(socket, boost::asio::buffer(record_buffer));
+        tls::append_to_buffer(ciphertext_buffer, tls::uint16(fragment.size()));
+        tls::append_to_buffer(ciphertext_buffer, fragment);
+        boost::asio::write(socket, boost::asio::buffer(ciphertext_buffer));
+        ++client_seq;
     }
 
     void read_change_cipher_spec(){

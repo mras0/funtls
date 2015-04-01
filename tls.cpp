@@ -36,6 +36,12 @@ random make_random() {
     return r;
 }
 
+std::vector<uint8_t> random::as_vector() const {
+    std::vector<uint8_t> buf;
+    append_to_buffer(buf, *this);
+    return buf;
+}
+
 handshake handshake_from_bytes(const std::vector<uint8_t>& buffer, size_t& index)
 {
     tls::handshake_type handshake_type;

@@ -42,6 +42,7 @@ using uint8  = uint8_t;
 using uint16 = uint16_t;
 using uint24 = uint<24, uint32_t>;
 using uint32 = uint32_t;
+using uint64 = uint64_t;
 
 template<unsigned BitCount>
 struct smallest_possible_uint;
@@ -50,6 +51,7 @@ template<> struct smallest_possible_uint<8> { using type = uint8; };
 template<> struct smallest_possible_uint<16> { using type = uint16; };
 template<> struct smallest_possible_uint<24> { using type = uint24; };
 template<> struct smallest_possible_uint<32> { using type = uint32; };
+template<> struct smallest_possible_uint<64> { using type = uint64; };
 
 enum class content_type : uint8_t {
     change_cipher_spec = 20,
@@ -87,17 +89,6 @@ constexpr bool operator!=(const protocol_version& a, const protocol_version& b)
 }
 
 static constexpr protocol_version protocol_version_tls_1_2{3, 3};
-
-// The record layer fragments information blocks into TLSPlaintext
-// records carrying data in chunks of 2^14 bytes or less.
-struct plaintext {
-    static constexpr size_t max_length = (1<<14);
-
-    content_type          type;
-    protocol_version      version;
-    uint16                length;
-    std::vector<uint8_t>  fragment;
-};
 
 void get_random_bytes(void* dest, size_t count);
 
@@ -165,6 +156,8 @@ private:
 struct random {
     uint32   gmt_unix_time;
     opaque<28> random_bytes;
+
+    std::vector<uint8_t> as_vector() const;
 };
 random make_random();
 
@@ -306,6 +299,17 @@ inline void append_to_buffer(std::vector<uint8_t>& buffer, uint16 item) {
 }
 
 inline void append_to_buffer(std::vector<uint8_t>& buffer, uint32 item) {
+    buffer.push_back(item>>24);
+    buffer.push_back(item>>16);
+    buffer.push_back(item>>8);
+    buffer.push_back(item);
+}
+
+inline void append_to_buffer(std::vector<uint8_t>& buffer, uint64 item) {
+    buffer.push_back(item>>56);
+    buffer.push_back(item>>48);
+    buffer.push_back(item>>40);
+    buffer.push_back(item>>32);
     buffer.push_back(item>>24);
     buffer.push_back(item>>16);
     buffer.push_back(item>>8);
@@ -457,6 +461,17 @@ inline void from_bytes(uint32_t& item, const std::vector<uint8_t>& buffer, size_
     item  = uint32_t(buffer[index++])<<24;
     item |= uint32_t(buffer[index++])<<16;
     item |= uint32_t(buffer[index++])<<8;
+    item |= buffer[index++];
+}
+inline void from_bytes(uint64_t& item, const std::vector<uint8_t>& buffer, size_t& index) {
+    if (index + 8 > buffer.size()) throw std::runtime_error("Out of data in " + std::string(__func__));
+    item |= uint64_t(buffer[index++])<<56;
+    item |= uint64_t(buffer[index++])<<48;
+    item |= uint64_t(buffer[index++])<<40;
+    item |= uint64_t(buffer[index++])<<32;
+    item |= uint64_t(buffer[index++])<<24;
+    item |= uint64_t(buffer[index++])<<16;
+    item |= uint64_t(buffer[index++])<<8;
     item |= buffer[index++];
 }
 
