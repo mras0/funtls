@@ -180,7 +180,7 @@ private:
             throw std::runtime_error("Invalid record protocol version " + util::base16_encode(&protocol_version, sizeof(protocol_version)) + " in " + __func__);
         }
         if (length < 1 || length > tls::record::max_length) {
-            throw std::runtime_error("Invalid record length " + std::to_string(length) + " in " + __func__);
+            throw std::runtime_error("Invalid record length " + std::to_string(length) + " in " + __func__ + "\nHeader: " + util::base16_encode(buffer));
         }
         buffer.resize(length);
         boost::asio::read(socket, boost::asio::buffer(buffer));
@@ -189,7 +189,9 @@ private:
 
         switch (content_type) {
         case tls::content_type::change_cipher_spec:
-            break;
+            assert(length == 1);
+            assert(buffer[0] == 1);
+            return tls::record{protocol_version, tls::change_cipher_spec{}};
         case tls::content_type::alert:
             break;
         case tls::content_type::handshake:
