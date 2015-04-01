@@ -184,7 +184,6 @@ private:
         }
         buffer.resize(length);
         boost::asio::read(socket, boost::asio::buffer(buffer));
-        handshake_message_digest.input(buffer);
         index = 0;
 
         switch (content_type) {
@@ -195,6 +194,7 @@ private:
         case tls::content_type::alert:
             break;
         case tls::content_type::handshake:
+            handshake_message_digest.input(buffer);
             return tls::record{protocol_version, tls::handshake_from_bytes(buffer, index)};
         case tls::content_type::application_data:
             break;
@@ -378,6 +378,8 @@ private:
         tls::append_to_buffer(content, tls::uint24(verify_data.size()));
         tls::append_to_buffer(content, verify_data);
 
+        handshake_message_digest.input(content); // Now safe to update since we've used 
+
         constexpr auto content_type = tls::content_type::handshake;
 
         //
@@ -466,9 +468,71 @@ private:
     }
 
     void read_finished() {
-        auto record = read_record();
-        auto& finished = record.payload.get<tls::handshake>().body.get<tls::finished>();
-        std::cout << "Got finished from server: " << util::base16_encode(finished.verify_data.data, tls::finished::verify_data_length) << std::endl;
+        // TODO: Don't duplicate code from read_record()
+        // TODO: improve really lazy parsing/validation
+        std::vector<uint8_t> buffer(5);
+        boost::asio::read(socket, boost::asio::buffer(buffer));
+
+        size_t index = 0;
+        tls::content_type     content_type;
+        tls::protocol_version protocol_version;
+        tls::uint16           length;
+        tls::from_bytes(content_type, buffer, index);
+        tls::from_bytes(protocol_version, buffer, index);
+        tls::from_bytes(length, buffer, index);
+        assert(index == buffer.size());
+
+        if (protocol_version != current_protocol_version) {
+            throw std::runtime_error("Invalid record protocol version " + util::base16_encode(&protocol_version, sizeof(protocol_version)) + " in " + __func__);
+        }
+        if (length < 1 || length > tls::record::max_length) {
+            throw std::runtime_error("Invalid record length " + std::to_string(length) + " in " + __func__ + "\nHeader: " + util::base16_encode(buffer));
+        }
+        buffer.resize(length);
+        boost::asio::read(socket, boost::asio::buffer(buffer));
+
+        // lazy
+        assert(content_type == tls::content_type::handshake);
+        assert(length == 80);
+        const std::vector<uint8_t> message_iv{&buffer[0], &buffer[fixed_iv_length]};
+        const std::vector<uint8_t> encrypted{&buffer[fixed_iv_length], &buffer[buffer.size()]};
+
+        std::cout << "IV\n" << util::base16_encode(message_iv)  << std::endl;
+        std::cout << "Encrypted\n" << util::base16_encode(encrypted)  << std::endl;
+
+        std::cout << "server_key\n" << util::base16_encode(server_enc_key)  << std::endl;
+        std::cout << "server_iv\n" << util::base16_encode(server_iv)  << std::endl;
+
+        const auto decrypted = aes::aes_decrypt_cbc(server_enc_key, /*server_iv*/message_iv, encrypted);
+        std::cout << "Decrypted\n" << util::base16_encode(decrypted) << std::endl;
+
+        // check padding
+        const auto padding_length = decrypted[decrypted.size()-1];
+        assert(decrypted.size() % block_length == 0);
+        assert(padding_length + 1U < decrypted.size()); // Padding+Padding length byte musn't be sole contents
+        for (unsigned i = 0; i < padding_length; ++i) assert(decrypted[decrypted.size()-1-padding_length] == padding_length);
+
+        // mac
+        const size_t mac_index = decrypted.size()-1-padding_length-mac_length;
+        const std::vector<uint8_t> mac{&decrypted[mac_index],&decrypted[mac_index+mac_length]};
+        std::cout << "MAC\n" << util::base16_encode(mac) << std::endl;
+
+        // Remember P_hash uses "server finished"
+        std::cerr << "WARNING: NOT CHECKING MAC AT " << __FILE__ << ":" << __LINE__ << " in " << __PRETTY_FUNCTION__ << std::endl;
+
+        const std::vector<uint8_t> content{&decrypted[0],&decrypted[mac_index]};
+        std::cout << "Content\n" << util::base16_encode(content) << std::endl;
+
+        assert(content.size() >= 5);
+        assert(content[0] == (int)tls::handshake_type::finished);
+        assert(content[1] == 0);
+        assert(content[2] == 0);
+        assert(content[3] == tls::finished::verify_data_length);
+        assert(content.size() == 4U + content[3]);
+
+        std::cout << "verify_data\n" << util::base16_encode(&content[4], content.size()-4) << std::endl;
+
+        assert(!"Not verifying...");
     }
 };
 
