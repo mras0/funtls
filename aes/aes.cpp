@@ -7,9 +7,12 @@
 
 #include "aes_impl.cpp"
 
-// TEMP
+//#define FUNTLS_AES_VERBOSE
+
+#ifdef FUNTLS_AES_VERBOSE
 #include <iostream>
 #include <util/base_conversion.h>
+#endif
 
 using namespace funtls;
 
@@ -22,7 +25,7 @@ namespace funtls { namespace aes {
 //algorithm is dependent on the key size. The number of rounds is represented by Nr, where Nr =
 //10 when Nk = 4, Nr = 12 when Nk = 6, and Nr = 14 when Nk = 8. 
 
-std::vector<uint8_t> aes_ecb(const std::vector<uint8_t>& K, const std::vector<uint8_t>& input)
+std::vector<uint8_t> aes_encrypt_ecb(const std::vector<uint8_t>& K, const std::vector<uint8_t>& input)
 {
     FUNTLS_CHECK_BINARY(K.size() % 4, ==, 0, "Unexpected key size " + std::to_string(K.size()));
     const unsigned Nk = Nk_from_size(K.size());
@@ -60,29 +63,108 @@ std::vector<uint8_t> aes_ecb(const std::vector<uint8_t>& K, const std::vector<ui
 }
 
 
-std::vector<uint8_t> aes_cbc(const std::vector<uint8_t>& key, const std::vector<uint8_t>& iv, const std::vector<uint8_t>& input)
+std::vector<uint8_t> aes_encrypt_cbc(const std::vector<uint8_t>& key, const std::vector<uint8_t>& iv, const std::vector<uint8_t>& input)
 {
     FUNTLS_CHECK_BINARY(input.size() % 16, ==, 0, "Input must be a multiple of 128-bit. Size="+std::to_string(input.size()));
 
     std::vector<uint8_t> last_c = iv;
 
+#ifdef FUNTLS_AES_VERBOSE
     std::cout << "Key          " << util::base16_encode(key) << std::endl;
     std::cout << "IV           " << util::base16_encode(iv) << std::endl;
+#endif
 
     std::vector<uint8_t> output;
     for (size_t i = 0; i < input.size(); i += 16) {
+#ifdef FUNTLS_AES_VERBOSE
         std::cout << "Block #" << (1+i/16) << std::endl;
         std::cout << "Plaintext    " << util::base16_encode(&input[i], 16) << std::endl;
+#endif
         std::vector<uint8_t> this_block(16);
         for (size_t j = 0; j < 16; ++j) {
             this_block[j] = input[i + j] ^ last_c[j];
         }
+#ifdef FUNTLS_AES_VERBOSE
         std::cout << "Input Block  " << util::base16_encode(&this_block[0], 16) << std::endl;
-        auto res = aes_ecb(key, this_block);
+#endif
+        auto res = aes_encrypt_ecb(key, this_block);
         assert(res.size() == 16);
         output.insert(output.end(), res.begin(), res.end());
+#ifdef FUNTLS_AES_VERBOSE
         std::cout << "Output Block " << util::base16_encode(&res[0], 16) << std::endl;
+#endif
         last_c = res;
+    }
+
+    return output;
+}
+
+std::vector<uint8_t> aes_decrypt_ecb(const std::vector<uint8_t>& K, const std::vector<uint8_t>& input)
+{
+    FUNTLS_CHECK_BINARY(K.size() % 4, ==, 0, "Unexpected key size " + std::to_string(K.size()));
+    const unsigned Nk = Nk_from_size(K.size());
+    FUNTLS_CHECK_BINARY(valid_Nk(Nk), ==, true, "Unexpected key size " + std::to_string(K.size()));
+    FUNTLS_CHECK_BINARY(input.size(), ==, 16, "Input must be 128-bit");
+    const unsigned Nr = Nr_from_Nk(Nk);
+
+    state s{input}; // state = in
+
+    const auto w = KeyExpansion(K);
+    FUNTLS_ASSERT_EQUAL(Nb*(Nr+1)*4, w.size());
+
+    AddRoundKey(s, &w[Nr*Nb*4]); // AddRoundKey(state, w[Nr*Nb, (Nr+1)*Nb-1])
+
+    for (unsigned round = Nr-1; round >= 1; --round) {
+        InvShiftRows(s);
+        InvSubBytes(s);
+        AddRoundKey(s, &w[round*Nb*4]);// AddRoundKey(state, w[round*Nb, (round+1)*Nb-1])
+        InvMixColumns(s);
+    }
+
+    InvShiftRows(s);
+    InvSubBytes(s);
+    AddRoundKey(s, &w[0*Nb*4]); // AddRoundKey(state, w[0, Nb-1])
+
+    return std::vector<uint8_t>{s.begin(),s.end()}; // out = state
+}
+
+std::vector<uint8_t> aes_decrypt_cbc(const std::vector<uint8_t>& key, const std::vector<uint8_t>& iv, const std::vector<uint8_t>& input)
+{
+    FUNTLS_CHECK_BINARY(input.size() % 16, ==, 0, "Input must be a multiple of 128-bit. Size="+std::to_string(input.size()));
+
+    std::vector<uint8_t> last_c = iv;
+
+#ifdef FUNTLS_AES_VERBOSE
+    std::cout << "Key          " << util::base16_encode(key) << std::endl;
+    std::cout << "IV           " << util::base16_encode(iv) << std::endl;
+#endif
+
+    std::vector<uint8_t> output;
+    for (size_t i = 0; i < input.size(); i += 16) {
+#ifdef FUNTLS_AES_VERBOSE
+        std::cout << "Block #" << (1+i/16) << std::endl;
+#endif
+        std::vector<uint8_t> this_block(16);
+        for (size_t j = 0; j < 16; ++j) {
+            this_block[j] = input[i + j];
+        }
+#ifdef FUNTLS_AES_VERBOSE
+        std::cout << "Input Block  " << util::base16_encode(&this_block[0], 16) << std::endl;
+#endif
+        auto res = aes_decrypt_ecb(key, this_block);
+        assert(res.size() == 16);
+#ifdef FUNTLS_AES_VERBOSE
+        std::cout << "Output Block " << util::base16_encode(&res[0], 16) << std::endl;
+#endif
+        for (size_t j = 0; j < 16; ++j) {
+            res[j] ^= last_c[j];
+        }
+#ifdef FUNTLS_AES_VERBOSE
+        std::cout << "Plaintext    " << util::base16_encode(&res[0], 16) << std::endl;
+#endif
+
+        output.insert(output.end(), res.begin(), res.end());
+        last_c = this_block;
     }
 
     return output;
