@@ -148,6 +148,7 @@ private:
     tls::session_id                 sesion_id;
     std::vector<uint8_t>            master_secret;
     hash::sha256                    handshake_message_digest;
+    uint64_t                        sequence_number = 0;
 
     std::vector<uint8_t>            client_mac_key;
     std::vector<uint8_t>            server_mac_key;
@@ -400,7 +401,6 @@ private:
         do_send(tls::content_type::handshake, content);
     }
 
-    uint8_t sequence_number = 0; // HACK!!
 
     void do_send(tls::content_type content_type, const std::vector<uint8_t>& content) {
         //
@@ -416,7 +416,8 @@ private:
         //                  TLSCompressed.length +
         //                  TLSCompressed.fragment);
         auto hash_algo = hash::hmac_sha256(client_mac_key);
-        hash_algo.input(std::vector<uint8_t>{0,0,0,0,0,0,0,sequence_number});
+        assert(sequence_number < 256);
+        hash_algo.input(std::vector<uint8_t>{0,0,0,0,0,0,0,static_cast<uint8_t>(sequence_number)});
         hash_algo.input(static_cast<const void*>(&content_type), 1);
         hash_algo.input(&current_protocol_version.major, 1);
         hash_algo.input(&current_protocol_version.minor, 1);
@@ -547,9 +548,10 @@ private:
         const std::vector<uint8_t> content{&decrypted[0],&decrypted[mac_index]};
         std::cout << "Content\n" << util::base16_encode(content) << std::endl;
 
-        // Check MAC
+        // Check MAC -- TODO: Unify with do_send
         auto hash_algo = hash::hmac_sha256(server_mac_key);
-        hash_algo.input(std::vector<uint8_t>{0,0,0,0,0,0,0,sequence_number});
+        assert(sequence_number < 256);
+        hash_algo.input(std::vector<uint8_t>{0,0,0,0,0,0,0,static_cast<uint8_t>(sequence_number)});
         hash_algo.input(static_cast<const void*>(&content_type), 1);
         hash_algo.input(&current_protocol_version.major, 1); // Since we only accept one version
         hash_algo.input(&current_protocol_version.minor, 1);
@@ -558,6 +560,8 @@ private:
         const auto calced_mac = hash_algo.result();
         std::cout << "Calculated MAC\n" << util::base16_encode(calced_mac) << std::endl;
         assert(calced_mac == mac);
+
+        sequence_number++;
 
         return std::make_pair(content_type, content);
     }
@@ -581,8 +585,6 @@ private:
         const auto calced_verify_data = PRF(master_secret, "server finished", handshake_message_digest.result(), tls::finished::verify_data_length);
         std::cout << "calculated verify_data\n" << util::base16_encode(calced_verify_data) << std::endl;
         assert(verify_data == calced_verify_data);
-
-        sequence_number = 1; // HACK
     }
 
     std::vector<uint8_t> do_next_app_data() {
@@ -612,11 +614,13 @@ int main(int argc, char* argv[])
 
         std::cout << "Completed handshake!\n";
 
-        const char* const data = "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n";
-        ts.send_app_data(std::vector<uint8_t>(data,data+strlen(data)));
+        const auto data = std::string("GET / HTTP/1.1\r\nHost: ")+host+"\r\n\r\n";
+        ts.send_app_data(std::vector<uint8_t>(data.begin(), data.end()));
 
-        const auto res = ts.next_app_data();
-        std::cout << std::string(res.begin(), res.end()) << std::endl;
+        for (;;) {
+            const auto res = ts.next_app_data();
+            std::cout << std::string(res.begin(), res.end()) << std::endl;
+        }
 
     } catch (const std::exception& e) {
         std::cerr << e.what() << std::endl;
