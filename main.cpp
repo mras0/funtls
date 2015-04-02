@@ -118,6 +118,14 @@ public:
         std::cout << "Session " << util::base16_encode(sesion_id.as_vector()) << " in progress\n";
     }
 
+    void send_app_data(const std::vector<uint8_t>& d) {
+        do_send_app_data(d);
+    }
+
+    std::vector<uint8_t> next_app_data() {
+        return do_next_app_data();
+    }
+
 private:
     // HMAC-SHA256
     static constexpr size_t         mac_length         = 256/8;
@@ -380,10 +388,14 @@ private:
 
         handshake_message_digest.input(content); // Now safe to update since we've used 
 
-        constexpr auto content_type = tls::content_type::handshake;
+        do_send(tls::content_type::handshake, content);
+    }
 
+    uint8_t sequence_number = 0; // HACK!!
+
+    void do_send(tls::content_type content_type, const std::vector<uint8_t>& content) {
         //
-        // We now have our plaintext content to send (content).
+        // We have our plaintext content to send (content).
         // First apply compression (trivial for CompressionMethod.null)
         // The next step is generating a MAC of the content
         //
@@ -395,7 +407,7 @@ private:
         //                  TLSCompressed.length +
         //                  TLSCompressed.fragment);
         auto hash_algo = hash::hmac_sha256(client_mac_key);
-        hash_algo.input(std::vector<uint8_t>{0,0,0,0,0,0,0,0}/*(uint8_t)client_seq*/);
+        hash_algo.input(std::vector<uint8_t>{0,0,0,0,0,0,0,sequence_number});
         hash_algo.input(static_cast<const void*>(&content_type), 1);
         hash_algo.input(&current_protocol_version.major, 1);
         hash_algo.input(&current_protocol_version.minor, 1);
@@ -465,12 +477,17 @@ private:
         boost::asio::write(socket, boost::asio::buffer(ciphertext_buffer));
     }
 
+    void do_send_app_data(const std::vector<uint8_t>& d) {
+        std::cout << __PRETTY_FUNCTION__ <<  ": " << util::base16_encode(d)  << std::endl;
+        do_send(tls::content_type::application_data, d);
+    }
+
     void read_change_cipher_spec(){
         (void) read_record().payload.get<tls::change_cipher_spec>();
         std::cout << "Got ChangeCipherSpec from server\n";
     }
 
-    void read_finished() {
+    std::pair<tls::content_type, std::vector<uint8_t>> do_read_record() {
         // TODO: Don't duplicate code from read_record()
         // TODO: improve really lazy parsing/validation
         std::vector<uint8_t> buffer(5);
@@ -493,10 +510,8 @@ private:
         }
         buffer.resize(length);
         boost::asio::read(socket, boost::asio::buffer(buffer));
+        assert(buffer.size() >= 80); // needs work..
 
-        // lazy
-        assert(content_type == tls::content_type::handshake);
-        assert(length == 80);
         const std::vector<uint8_t> message_iv{&buffer[0], &buffer[fixed_iv_length]};
         const std::vector<uint8_t> encrypted{&buffer[fixed_iv_length], &buffer[buffer.size()]};
 
@@ -525,16 +540,24 @@ private:
 
         // Check MAC
         auto hash_algo = hash::hmac_sha256(server_mac_key);
-        hash_algo.input(std::vector<uint8_t>{0,0,0,0,0,0,0,0}/*(sequence_number*/);
+        hash_algo.input(std::vector<uint8_t>{0,0,0,0,0,0,0,sequence_number});
         hash_algo.input(static_cast<const void*>(&content_type), 1);
-        hash_algo.input(&protocol_version.major, 1);
-        hash_algo.input(&protocol_version.minor, 1);
+        hash_algo.input(&current_protocol_version.major, 1); // Since we only accept one version
+        hash_algo.input(&current_protocol_version.minor, 1);
         hash_algo.input(std::vector<uint8_t>{uint8_t(content.size()>>8),uint8_t(content.size())});
         hash_algo.input(content);
         const auto calced_mac = hash_algo.result();
         std::cout << "Calculated MAC\n" << util::base16_encode(calced_mac) << std::endl;
         assert(calced_mac == mac);
 
+        return std::make_pair(content_type, content);
+    }
+
+    void read_finished() {
+        const auto rec = do_read_record();
+        const auto content_type = rec.first;
+        const auto& content = rec.second;
+        assert(content_type == tls::content_type::handshake);
         // Parse content
         assert(content.size() >= 5);
         assert(content[0] == (int)tls::handshake_type::finished);
@@ -549,6 +572,16 @@ private:
         const auto calced_verify_data = PRF(master_secret, "server finished", handshake_message_digest.result(), tls::finished::verify_data_length);
         std::cout << "calculated verify_data\n" << util::base16_encode(calced_verify_data) << std::endl;
         assert(verify_data == calced_verify_data);
+
+        sequence_number = 1; // HACK
+    }
+
+    std::vector<uint8_t> do_next_app_data() {
+        const auto rec = do_read_record();
+        const auto content_type = rec.first;
+        const auto& content = rec.second;
+        assert(content_type == tls::content_type::application_data);
+        return content;
     }
 };
 
@@ -569,6 +602,12 @@ int main()
         ts.perform_handshake();
 
         std::cout << "Completed handshake!\n";
+
+        const char* const data = "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        ts.send_app_data(std::vector<uint8_t>(data,data+strlen(data)));
+
+        const auto res = ts.next_app_data();
+        std::cout << std::string(res.begin(), res.end()) << std::endl;
 
     } catch (const std::exception& e) {
         std::cerr << e.what() << std::endl;
