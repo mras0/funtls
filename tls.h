@@ -440,6 +440,7 @@ inline void append_to_buffer(std::vector<uint8_t>& buffer, const record& item) {
 
 template<unsigned BitCount, typename Underlying>
 inline void from_bytes(uint<BitCount, Underlying>& item, const std::vector<uint8_t>& buffer, size_t& index) {
+    if (index + BitCount/8 > buffer.size()) throw std::runtime_error("Out of data in " + std::string(__func__));
     Underlying result = 0;
     for (unsigned i = 0; i < BitCount/8; ++i) {
         result |= static_cast<Underlying>(buffer[index+i]) << ((BitCount/8-1-i)*8);
@@ -534,7 +535,7 @@ inline void from_bytes(certificate& item, const std::vector<uint8_t>& buffer, si
     if (index + length > buffer.size()) {
         throw std::runtime_error("Out of data in " + std::string(__func__));
     }
-    size_t bytes_used = 3;
+    size_t bytes_used = 0;
     for (;;) {
         uint24 cert_length;
         from_bytes(cert_length, buffer, index);
@@ -544,7 +545,7 @@ inline void from_bytes(certificate& item, const std::vector<uint8_t>& buffer, si
         std::vector<uint8> cert_data(&buffer[index], &buffer[index+cert_length]);
         index+=cert_length;
         certificate_list.emplace_back(std::move(cert_data));
-        bytes_used+=cert_length;
+        bytes_used+=cert_length+3;
         if (bytes_used >= length) {
             assert(bytes_used == length);
             break;

@@ -585,10 +585,10 @@ private:
     }
 };
 
-int main()
+int main(int argc, char* argv[])
 {
-    const char* const host = "localhost";
-    const char* const port = "4433";
+    const char* const host = argc > 1 ? argv[1] : "localhost";
+    const char* const port = argc > 2 ? argv[2] : "443";
 
     try {
         boost::asio::io_service         io_service;
