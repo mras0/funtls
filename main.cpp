@@ -437,12 +437,15 @@ private:
         // content, mac and padding.
         //
         std::vector<uint8_t> fragment;
-        tls::append_to_buffer(fragment, client_iv);
+        std::vector<uint8_t> message_iv(fixed_iv_length);
+        tls::get_random_bytes(&message_iv[0], fixed_iv_length);
+        tls::append_to_buffer(fragment, message_iv);
+        assert(client_iv.size() == message_iv.size());
 
         std::cout << "client_enc_key=" << util::base16_encode(client_enc_key)  << std::endl;
-        std::cout << "client_iv=" << util::base16_encode(client_iv)  << std::endl;
+        std::cout << "message_iv=" << util::base16_encode(message_iv)  << std::endl;
 
-        tls::append_to_buffer(fragment, aes::aes_encrypt_cbc(client_enc_key, client_iv, content_and_mac));
+        tls::append_to_buffer(fragment, aes::aes_encrypt_cbc(client_enc_key, message_iv, content_and_mac));
 
         std::cout << "client_iv.size() = " << client_iv.size() << std::endl;
         std::cout << "content_and_mac.size() = " << content_and_mac.size() << std::endl;
@@ -512,27 +515,40 @@ private:
         assert(padding_length + 1U < decrypted.size()); // Padding+Padding length byte musn't be sole contents
         for (unsigned i = 0; i < padding_length; ++i) assert(decrypted[decrypted.size()-1-padding_length] == padding_length);
 
-        // mac
+        // Extract MAC + Content
         const size_t mac_index = decrypted.size()-1-padding_length-mac_length;
         const std::vector<uint8_t> mac{&decrypted[mac_index],&decrypted[mac_index+mac_length]};
         std::cout << "MAC\n" << util::base16_encode(mac) << std::endl;
 
-        // Remember P_hash uses "server finished"
-        std::cerr << "WARNING: NOT CHECKING MAC AT " << __FILE__ << ":" << __LINE__ << " in " << __PRETTY_FUNCTION__ << std::endl;
-
         const std::vector<uint8_t> content{&decrypted[0],&decrypted[mac_index]};
         std::cout << "Content\n" << util::base16_encode(content) << std::endl;
 
+        // Check MAC
+        auto hash_algo = hash::hmac_sha256(server_mac_key);
+        hash_algo.input(std::vector<uint8_t>{0,0,0,0,0,0,0,0}/*(sequence_number*/);
+        hash_algo.input(static_cast<const void*>(&content_type), 1);
+        hash_algo.input(&protocol_version.major, 1);
+        hash_algo.input(&protocol_version.minor, 1);
+        hash_algo.input(std::vector<uint8_t>{uint8_t(content.size()>>8),uint8_t(content.size())});
+        hash_algo.input(content);
+        const auto calced_mac = hash_algo.result();
+        std::cout << "Calculated MAC\n" << util::base16_encode(calced_mac) << std::endl;
+        assert(calced_mac == mac);
+
+        // Parse content
         assert(content.size() >= 5);
         assert(content[0] == (int)tls::handshake_type::finished);
         assert(content[1] == 0);
         assert(content[2] == 0);
         assert(content[3] == tls::finished::verify_data_length);
         assert(content.size() == 4U + content[3]);
+        const std::vector<uint8_t> verify_data{&content[4], &content[content.size()]};
 
-        std::cout << "verify_data\n" << util::base16_encode(&content[4], content.size()-4) << std::endl;
-
-        assert(!"Not verifying...");
+        std::cout << "verify_data\n" << util::base16_encode(verify_data) << std::endl;
+        std::cout << "Hash(handshake_messages) = " << util::base16_encode(handshake_message_digest.result()) << std::endl;
+        const auto calced_verify_data = PRF(master_secret, "server finished", handshake_message_digest.result(), tls::finished::verify_data_length);
+        std::cout << "calculated verify_data\n" << util::base16_encode(calced_verify_data) << std::endl;
+        assert(verify_data == calced_verify_data);
     }
 };
 
@@ -551,6 +567,8 @@ int main()
         std::cout << " OK" << std::endl;
         tls_socket ts{socket};
         ts.perform_handshake();
+
+        std::cout << "Completed handshake!\n";
 
     } catch (const std::exception& e) {
         std::cerr << e.what() << std::endl;

@@ -204,11 +204,27 @@ void test_hmac()
         const auto calculated_hmac_sha_512 = hash::hmac_sha512(key).input(data).result();
         FUNTLS_ASSERT_EQUAL(hmac_sha_512, calculated_hmac_sha_512);
     }
+
+    // Check that calling result doesn't modify the object
+    {
+        const auto& t = hmac_sha_test_cases[3];
+        const auto key          = util::base16_decode(t.key);
+        const auto data         = util::base16_decode(t.data);
+        const auto hmac_sha_256 = util::base16_decode(t.hmac_sha_256);
+        auto hash_obj = hash::hmac_sha256(key);
+        const auto hmac_sha256_of_empty_string = hash_obj.result();
+        FUNTLS_ASSERT_EQUAL(hmac_sha256_of_empty_string, hash_obj.result());
+        hash_obj.input(data);
+        FUNTLS_ASSERT_EQUAL(hmac_sha_256, hash_obj.result());
+        FUNTLS_ASSERT_EQUAL(hmac_sha_256, hash_obj.result());
+    }
 }
 
 int main()
 {
-    FUNTLS_ASSERT_EQUAL(util::base16_decode("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"), hash::sha256().result());
+    const auto sha256_of_empty_string = util::base16_decode("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+    FUNTLS_ASSERT_EQUAL(sha256_of_empty_string, hash::sha256().result());
+    FUNTLS_ASSERT_EQUAL(sha256_of_empty_string, hash::sha256().result());
     FUNTLS_ASSERT_EQUAL(util::base16_decode("936a185caaa266bb9cbe981e9e05cb78cd732b0b3280eb944412bb6f8f8f07af"), hash::sha256().input("helloworld", strlen("helloworld")).result());
     // TODO: test other hash variants
     test_hmac();

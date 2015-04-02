@@ -25,7 +25,7 @@ namespace detail {
 class algorithm_impl {
 public:
     virtual void                 input(const void* data, size_t length) = 0;
-    virtual std::vector<uint8_t> result() = 0;
+    virtual std::vector<uint8_t> result() const = 0;
 };
 
 std::unique_ptr<algorithm_impl> make_impl(algorithm algo);
@@ -45,7 +45,7 @@ public:
         return input(&v[0], v.size());
     }
 
-    std::vector<uint8_t> result() {
+    std::vector<uint8_t> result() const {
         return impl_->result();
     }
 

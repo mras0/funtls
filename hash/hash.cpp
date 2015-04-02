@@ -12,9 +12,10 @@ public:
     virtual void input(const void* data, size_t length) override {
         USHAInput(&context_, reinterpret_cast<const uint8_t*>(data), length);
     }
-    virtual std::vector<uint8_t> result() override {
+    virtual std::vector<uint8_t> result() const override {
         std::vector<uint8_t> result(USHAHashSize(static_cast<SHAversion>(context_.whichSha)));
-        USHAResult(&context_, &result[0]);
+        auto context = context_; // Make local copy to avoid modifying the local state
+        USHAResult(&context, &result[0]);
         return result;
     }
 private:
@@ -29,9 +30,10 @@ public:
     virtual void input(const void* data, size_t length) override {
         hmacInput(&context_, reinterpret_cast<const uint8_t*>(data), length);
     }
-    virtual std::vector<uint8_t> result() override {
+    virtual std::vector<uint8_t> result() const override {
         std::vector<uint8_t> result(USHAHashSize(static_cast<SHAversion>(context_.whichSha)));
-        hmacResult(&context_, &result[0]);
+        auto context = context_; // Make local copy to avoid modifying the local state
+        hmacResult(&context, &result[0]);
         return result;
     }
 private:
