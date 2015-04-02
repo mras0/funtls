@@ -143,7 +143,8 @@ private:
     boost::asio::ip::tcp::socket&   socket;
     const tls::random               client_random;
     tls::random                     server_random;
-    std::vector<uint8_t>            their_certificate;
+    std::unique_ptr<
+        x509::rsa_public_key>       server_public_key;
     tls::session_id                 sesion_id;
     std::vector<uint8_t>            master_secret;
     hash::sha256                    handshake_message_digest;
@@ -253,15 +254,25 @@ private:
         }
 
         if (certificate_lists.size() != 1) {
-            throw std::runtime_error("Unsupported number of certificate lists" + std::to_string(certificate_lists.size()));
-        }
-        if (certificate_lists[0].certificate_list.size() != 1) {
-            throw std::runtime_error("Unsupported number of certificate lists" + std::to_string(certificate_lists[0].certificate_list.size()));
+            throw std::runtime_error("Unsupported number of certificate lists: " + std::to_string(certificate_lists.size()));
         }
 
-        their_certificate = certificate_lists[0].certificate_list[0].as_vector();
-
+        // TODO: Make sure the certificate is correct etc.
         // TODO: Verify certificate(s)
+
+        for (const auto& c : certificate_lists[0].certificate_list) {
+            const auto v = c.as_vector();
+            auto cert_buf = util::buffer_view{&v[0], v.size()};
+            const auto cert = x509::v3_certificate::parse(asn1::read_der_encoded_value(cert_buf)).certificate();
+            std::cout << "Ignoring certificate:\n";
+            std::cout << " Issuer: " << cert.issuer << std::endl;
+            std::cout << " Subject: " << cert.subject << std::endl;
+        }
+
+        const auto their_certificate = certificate_lists[0].certificate_list[0].as_vector();
+        auto cert_buf = util::buffer_view{&their_certificate[0], their_certificate.size()};
+        const auto cert = x509::v3_certificate::parse(asn1::read_der_encoded_value(cert_buf));
+        server_public_key.reset(new x509::rsa_public_key(rsa_public_key_from_certificate(cert)));
     }
 
     void send_client_key_exchange() {
@@ -276,10 +287,8 @@ private:
 
         std::cout << "Pre-master secret: " << util::base16_encode(&pre_master_secret[2], pre_master_secret.size()-2) << std::endl;
 
-        // TODO: Make sure the certificate is correct etc.
-        auto cert_buf = util::buffer_view{&their_certificate[0], their_certificate.size()};
-        const auto cert = x509::v3_certificate::parse(asn1::read_der_encoded_value(cert_buf));
-        const auto s_pk = rsa_public_key_from_certificate(cert);
+        assert(server_public_key);
+        const auto& s_pk = *server_public_key;
         const auto n = s_pk.modolus.as<int_type>();
         const auto e = s_pk.public_exponent.as<int_type>();
 
