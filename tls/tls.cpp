@@ -1,5 +1,6 @@
 #include "tls.h"
 #include <util/base_conversion.h>
+#include <hash/hash.h> // TODO: remove from this file
 #include <sys/time.h> // gettimeofday
 
 namespace {
@@ -102,5 +103,57 @@ std::ostream& operator<<(std::ostream& os, const protocol_version& version)
     }
     return os;
 }
+
+std::vector<uint8_t> vec_concat(const std::vector<uint8_t>& a, const std::vector<uint8_t>& b) {
+    std::vector<uint8_t> combined;
+    combined.insert(combined.end(), a.begin(), a.end());
+    combined.insert(combined.end(), b.begin(), b.end());
+    return combined;
+}
+
+std::vector<uint8_t> HMAC_hash(const std::vector<uint8_t>& secret, const std::vector<uint8_t>& data) {
+    // Assumes HMAC is SHA256 based
+    assert(!secret.empty());
+    assert(!data.empty());
+    return hash::hmac_sha256{secret}.input(data).result();
+}
+
+std::vector<uint8_t> P_hash(const std::vector<uint8_t>& secret, const std::vector<uint8_t>& seed, size_t wanted_size) {
+    assert(!secret.empty());
+    assert(!seed.empty());
+    assert(wanted_size != 0);
+    // P_hash(secret, seed) = HMAC_hash(secret, A(1) + seed) +
+    //                        HMAC_hash(secret, A(2) + seed) +
+    //                        HMAC_hash(secret, A(3) + seed) + ...
+    // A() is defined as:
+    //    A(0) = seed
+    //    A(i) = HMAC_hash(secret, A(i-1))
+
+    std::vector<uint8_t> a = seed; // A(0) = seed
+
+    // P_hash can be iterated as many times as necessary to produce the
+    // required quantity of data.  For example, if P_SHA256 is being used to
+    // create 80 bytes of data, it will have to be iterated three times
+    // (through A(3)), creating 96 bytes of output data; the last 16 bytes
+    // of the final iteration will then be discarded, leaving 80 bytes of
+    // output data.
+
+    std::vector<uint8_t> result;
+    while (result.size() < wanted_size) {
+        a = HMAC_hash(secret, a); // A(i) = HMAC_hash(secret, A(i-1))
+        auto digest = HMAC_hash(secret, vec_concat(a, seed));
+        result.insert(result.end(), digest.begin(), digest.end());
+    }
+
+    assert(result.size() >= wanted_size);
+    return {result.begin(), result.begin() + wanted_size};
+}
+
+// Pseudo Random Function rfc5246 section 5
+std::vector<uint8_t> PRF(const std::vector<uint8_t>& secret, const std::string& label, const std::vector<uint8_t>& seed, size_t wanted_size) {
+    // PRF(secret, label, seed) = P_<hash>(secret, label + seed)
+    return P_hash(secret, vec_concat(std::vector<uint8_t>{label.begin(), label.end()}, seed), wanted_size);
+}
+
 
 } } // namespace funtls::tls

@@ -13,6 +13,8 @@
 
 #include "variant.h"
 
+#include "tls_ciphers.h"
+
 namespace funtls { namespace tls {
 
 template<unsigned BitCount, typename Underlying>
@@ -168,16 +170,6 @@ random make_random();
 
 using session_id  = vector<uint8, 0, 32>;
 
-using cipher_suite = opaque<2>; // Cryptographic suite selector
-
-inline bool operator==(const cipher_suite& a, const cipher_suite& b) {
-    return a.data[0] == b.data[0] && a.data[1] == b.data[1];
-}
-
-inline bool operator!=(const cipher_suite& a, const cipher_suite& b) {
-    return !(a == b);
-}
-
 enum class compression_method : uint8 {
     null = 0
 };
@@ -268,11 +260,13 @@ struct change_cipher_spec {
 };
 
 struct record {
-    static constexpr size_t max_length = (1<<14)+2048;
+    static constexpr size_t max_plaintext_length  = (1<<14)+2048;
+    static constexpr size_t max_compressed_length = max_plaintext_length + 1024;
+    static constexpr size_t max_ciphertext_length = max_compressed_length + 1024;
 
     content_type                            type;
     protocol_version                        version;
-    // uint16                               length; // Maximumem length: 2^14 (+1024 for compression and +1024 for ciphertext mac etc.)
+    // uint16                               length;
     std::vector<uint8_t>                    fragment;
 };
 
@@ -370,6 +364,10 @@ inline void append_to_buffer(std::vector<uint8_t>& buffer, const random& item) {
     append_to_buffer(buffer, item.random_bytes);
 }
 
+inline void append_to_buffer(std::vector<uint8_t>& buffer, const cipher_suite& item) {
+    append_to_buffer(buffer, static_cast<uint16>(item));
+}
+
 inline void append_to_buffer(std::vector<uint8_t>& buffer, const client_hello& item) {
     append_to_buffer(buffer, item.client_version);
     append_to_buffer(buffer, item.random);
@@ -412,15 +410,6 @@ inline void append_to_buffer(std::vector<uint8_t>& buffer, const handshake& item
     append_to_buffer(buffer, item.type());
     append_to_buffer(buffer, uint24(body_buffer.size()));
     buffer.insert(buffer.end(), body_buffer.begin(), body_buffer.end());
-}
-
-inline void append_to_buffer(std::vector<uint8_t>& buffer, const record& item) {
-    assert(item.fragment.size() < record::max_length);
-
-    append_to_buffer(buffer, item.type);
-    append_to_buffer(buffer, item.version);
-    append_to_buffer(buffer, tls::uint16(item.fragment.size()));
-    append_to_buffer(buffer, item.fragment);
 }
 
 template<unsigned BitCount, typename Underlying>
@@ -504,6 +493,11 @@ inline void from_bytes(random& item, const std::vector<uint8_t>& buffer, size_t&
     from_bytes(item.gmt_unix_time, buffer, index);
     from_bytes(item.random_bytes, buffer, index);
 }
+inline void from_bytes(cipher_suite& item, const std::vector<uint8_t>& buffer, size_t& index) {
+    uint16 x;
+    from_bytes(x, buffer, index);
+    item = static_cast<cipher_suite>(x);
+}
 inline void from_bytes(server_hello& item, const std::vector<uint8_t>& buffer, size_t& index) {
     from_bytes(item.server_version, buffer, index);
     from_bytes(item.random, buffer, index);
@@ -540,6 +534,11 @@ inline void from_bytes(certificate& item, const std::vector<uint8_t>& buffer, si
 }
 
 handshake handshake_from_bytes(const std::vector<uint8_t>& buffer, size_t& index);
+
+// TODO: remove
+std::vector<uint8_t> vec_concat(const std::vector<uint8_t>& a, const std::vector<uint8_t>& b);
+std::vector<uint8_t> P_hash(const std::vector<uint8_t>& secret, const std::vector<uint8_t>& seed, size_t wanted_size);
+std::vector<uint8_t> PRF(const std::vector<uint8_t>& secret, const std::string& label, const std::vector<uint8_t>& seed, size_t wanted_size);
 
 } } // namespace funtls::tls
 
