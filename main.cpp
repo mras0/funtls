@@ -62,6 +62,7 @@ public:
         Application Data             <------->     Application Data
         */
 
+        std::cout << "Requesting " << wanted_cipher << std::endl;
         send_client_hello();
         read_server_hello();
         read_until_server_hello_done();
@@ -87,7 +88,10 @@ private:
     static constexpr size_t         master_secret_size = 48;
 
     const tls::protocol_version     current_protocol_version = tls::protocol_version_tls_1_2;
-    const tls::cipher_suite         wanted_cipher            = tls::cipher_suite::rsa_with_aes_256_cbc_sha256;
+    //const tls::cipher_suite         wanted_cipher            = tls::cipher_suite::rsa_with_aes_128_cbc_sha;
+    const tls::cipher_suite         wanted_cipher            = tls::cipher_suite::rsa_with_aes_128_cbc_sha256;
+    //const tls::cipher_suite         wanted_cipher            = tls::cipher_suite::rsa_with_aes_256_cbc_sha;
+    //const tls::cipher_suite         wanted_cipher            = tls::cipher_suite::rsa_with_aes_256_cbc_sha256;
     tls::cipher_suite               current_cipher           = tls::cipher_suite::null_with_null_null;
 
     boost::asio::ip::tcp::socket&   socket;
@@ -347,12 +351,11 @@ private:
         boost::asio::write(socket, boost::asio::buffer(fragment));
     }
 
-
     std::vector<uint8_t> encrypt(tls::content_type content_type, const std::vector<uint8_t>& content) {
         if (current_cipher == tls::cipher_suite::null_with_null_null) {
             return content;
         }
-        assert(current_cipher == tls::cipher_suite::rsa_with_aes_256_cbc_sha256);
+        const auto cipher_param = tls::parameters_from_suite(current_cipher);
 
         // The MAC is generated as:
         // MAC(MAC_write_key, seq_num +
@@ -360,7 +363,7 @@ private:
         //                  TLSCompressed.version +
         //                  TLSCompressed.length +
         //                  TLSCompressed.fragment);
-        auto hash_algo = hash::hmac_sha256(client_mac_key);
+        auto hash_algo = tls::get_hmac(cipher_param.mac_algorithm, client_mac_key);
         assert(sequence_number < 256);
         hash_algo.input(std::vector<uint8_t>{0,0,0,0,0,0,0,static_cast<uint8_t>(sequence_number)});
         hash_algo.input(static_cast<const void*>(&content_type), 1);
@@ -392,7 +395,6 @@ private:
         //    length.  Legal values range from zero to 255, inclusive.  This
         //    length specifies the length of the padding field exclusive of the
         //    padding_length field itself.
-        const auto cipher_param = tls::parameters_from_suite(current_cipher);
         const auto block_length = cipher_param.block_length;
         uint8_t padding_length = block_length - (content_and_mac.size()+1) % block_length;
         for (unsigned i = 0; i < padding_length + 1U; ++i) {
@@ -404,6 +406,7 @@ private:
         // A GenericBlockCipher consist of the initialization vector and block-ciphered
         // content, mac and padding.
         //
+        assert(cipher_param.bulk_cipher_algorithm == tls::bulk_cipher_algorithm::aes);
         std::vector<uint8_t> fragment;
         std::vector<uint8_t> message_iv(cipher_param.iv_length);
         tls::get_random_bytes(&message_iv[0], message_iv.size());
@@ -490,7 +493,7 @@ private:
         // TODO: improve really lazy parsing/validation
         const auto cipher_param = tls::parameters_from_suite(current_cipher);
 
-        assert(buffer.size() >= 80); // needs work..
+        FUNTLS_CHECK_BINARY(buffer.size(), >=, cipher_param.iv_length, "Message too small"); // needs work..
 
         const std::vector<uint8_t> message_iv{&buffer[0], &buffer[cipher_param.iv_length]};
         const std::vector<uint8_t> encrypted{&buffer[cipher_param.iv_length], &buffer[buffer.size()]};
@@ -518,7 +521,7 @@ private:
         //std::cout << "Content\n" << util::base16_encode(content) << std::endl;
 
         // Check MAC -- TODO: Unify with do_send
-        auto hash_algo = hash::hmac_sha256(server_mac_key);
+        auto hash_algo = tls::get_hmac(cipher_param.mac_algorithm, server_mac_key);
         assert(sequence_number < 256);
         hash_algo.input(std::vector<uint8_t>{0,0,0,0,0,0,0,static_cast<uint8_t>(sequence_number)});
         hash_algo.input(static_cast<const void*>(&record_type), 1);

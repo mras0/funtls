@@ -31,7 +31,23 @@ int main()
         FUNTLS_ASSERT_EQUAL(0,                                  csp.mac_key_length);
     }
     {
-        std::cout << "TLS_RSA_WITH_AES_256_CBC_SHA256\n";
+        const auto suite = tls::cipher_suite::rsa_with_aes_128_cbc_sha;
+        const auto csp   = tls::parameters_from_suite(suite);
+        std::cout << csp << std::endl;
+
+        FUNTLS_ASSERT_EQUAL(suite,                              csp.cipher_suite);
+        FUNTLS_ASSERT_EQUAL(tls::key_exchange_algorithm::rsa,   csp.key_exchange_algorithm);
+        FUNTLS_ASSERT_EQUAL(tls::prf_algorithm::tls_prf_sha256, csp.prf_algorithm);
+        FUNTLS_ASSERT_EQUAL(tls::bulk_cipher_algorithm::aes,    csp.bulk_cipher_algorithm);
+        FUNTLS_ASSERT_EQUAL(tls::cipher_type::block,            csp.cipher_type);
+        FUNTLS_ASSERT_EQUAL(128/8,                              csp.key_length);
+        FUNTLS_ASSERT_EQUAL(128/8,                              csp.block_length);
+        FUNTLS_ASSERT_EQUAL(128/8,                              csp.iv_length);
+        FUNTLS_ASSERT_EQUAL(tls::mac_algorithm::hmac_sha1,      csp.mac_algorithm);
+        FUNTLS_ASSERT_EQUAL(160/8,                              csp.mac_length);
+        FUNTLS_ASSERT_EQUAL(160/8,                              csp.mac_key_length);
+    }
+    {
         const auto suite = tls::cipher_suite::rsa_with_aes_256_cbc_sha256;
         const auto csp   = tls::parameters_from_suite(suite);
         std::cout << csp << std::endl;

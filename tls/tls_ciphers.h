@@ -3,6 +3,7 @@
 
 #include <iosfwd>
 #include <cstdint>
+#include <hash/hash.h>
 
 namespace funtls { namespace tls {
 
@@ -130,6 +131,12 @@ struct null_mac_algo_triats {
     static constexpr uint8_t mac_key_length      = 0;
 };
 
+struct hmac_sha_algo_traits {
+    static constexpr auto mac_algorithm          = tls::mac_algorithm::hmac_sha1;
+    static constexpr uint8_t mac_length          = 160/8;
+    static constexpr uint8_t mac_key_length      = 160/8;
+};
+
 struct hmac_sha256_algo_traits {
     static constexpr auto mac_algorithm          = tls::mac_algorithm::hmac_sha256;
     static constexpr uint8_t mac_length          = 256/8;
@@ -163,6 +170,34 @@ struct cipher_suite_traits<cipher_suite::null_with_null_null>
 };
 
 template<>
+struct cipher_suite_traits<cipher_suite::rsa_with_aes_128_cbc_sha>
+    : public detail::cipher_suite_traits_base<
+        cipher_suite::rsa_with_aes_128_cbc_sha,
+        key_exchange_algorithm::rsa,
+        detail::aes_traits<128>,
+        detail::hmac_sha_algo_traits> {
+};
+
+template<>
+struct cipher_suite_traits<cipher_suite::rsa_with_aes_128_cbc_sha256>
+    : public detail::cipher_suite_traits_base<
+        cipher_suite::rsa_with_aes_128_cbc_sha256,
+        key_exchange_algorithm::rsa,
+        detail::aes_traits<128>,
+        detail::hmac_sha256_algo_traits> {
+};
+
+template<>
+struct cipher_suite_traits<cipher_suite::rsa_with_aes_256_cbc_sha>
+    : public detail::cipher_suite_traits_base<
+        cipher_suite::rsa_with_aes_128_cbc_sha,
+        key_exchange_algorithm::rsa,
+        detail::aes_traits<256>,
+        detail::hmac_sha_algo_traits> {
+};
+
+
+template<>
 struct cipher_suite_traits<cipher_suite::rsa_with_aes_256_cbc_sha256>
     : public detail::cipher_suite_traits_base<
         cipher_suite::rsa_with_aes_256_cbc_sha256,
@@ -185,6 +220,7 @@ struct cipher_suite_parameters {
     const uint8_t                     mac_key_length;
 };
 
+hash::hash_algorithm get_hmac(mac_algorithm algo, const std::vector<uint8_t>& key);
 cipher_suite_parameters parameters_from_suite(cipher_suite suite);
 
 std::ostream& operator<<(std::ostream& os, key_exchange_algorithm e);

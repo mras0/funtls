@@ -33,14 +33,14 @@ std::unique_ptr<algorithm_impl> make_hmac_impl(algorithm algo, const void* secre
 
 } // namespace detail
 
-class hash_algorithm_base {
+class hash_algorithm {
 public:
-    hash_algorithm_base& input(const void* data, size_t length) {
+    hash_algorithm& input(const void* data, size_t length) {
         impl_->input(data, length);
         return *this;
     }
 
-    hash_algorithm_base& input(const std::vector<uint8_t>& v) {
+    hash_algorithm& input(const std::vector<uint8_t>& v) {
         assert(!v.empty());
         return input(&v[0], v.size());
     }
@@ -50,7 +50,7 @@ public:
     }
 
 protected:
-    hash_algorithm_base(std::unique_ptr<detail::algorithm_impl>&& impl)
+    hash_algorithm(std::unique_ptr<detail::algorithm_impl>&& impl)
         : impl_(std::move(impl)) {
     }
 
@@ -59,38 +59,38 @@ private:
 };
 
 template<algorithm algo>
-class hash_algorithm : public hash_algorithm_base {
+class hash_algorithm_impl : public hash_algorithm {
 public:
-    hash_algorithm()
-        : hash_algorithm_base(detail::make_impl(algo)) {
+    hash_algorithm_impl()
+        : hash_algorithm(detail::make_impl(algo)) {
     }
 };
 
 template<algorithm algo>
-class hmac_algorithm : public hash_algorithm_base {
+class hmac_algorithm_impl : public hash_algorithm {
 public:
-    hmac_algorithm(const void* secret, size_t secret_length)
-        : hash_algorithm_base(detail::make_hmac_impl(algo, secret, secret_length)) {
+    hmac_algorithm_impl(const void* secret, size_t secret_length)
+        : hash_algorithm(detail::make_hmac_impl(algo, secret, secret_length)) {
     }
     template<typename T>
-    hmac_algorithm(const T& x)
-        : hmac_algorithm(&x[0], x.size()) {
+    hmac_algorithm_impl(const T& x)
+        : hmac_algorithm_impl(&x[0], x.size()) {
         static_assert(sizeof(x[0]) == 1, "");
         assert(!x.empty());
     }
 };
 
-using sha1        = hash_algorithm<algorithm::sha1>;
-using sha224      = hash_algorithm<algorithm::sha224>;
-using sha256      = hash_algorithm<algorithm::sha256>;
-using sha384      = hash_algorithm<algorithm::sha384>;
-using sha512      = hash_algorithm<algorithm::sha512>;
+using sha1        = hash_algorithm_impl<algorithm::sha1>;
+using sha224      = hash_algorithm_impl<algorithm::sha224>;
+using sha256      = hash_algorithm_impl<algorithm::sha256>;
+using sha384      = hash_algorithm_impl<algorithm::sha384>;
+using sha512      = hash_algorithm_impl<algorithm::sha512>;
 
-using hmac_sha1   = hmac_algorithm<algorithm::sha1>;
-using hmac_sha224 = hmac_algorithm<algorithm::sha224>;
-using hmac_sha256 = hmac_algorithm<algorithm::sha256>;
-using hmac_sha384 = hmac_algorithm<algorithm::sha384>;
-using hmac_sha512 = hmac_algorithm<algorithm::sha512>;
+using hmac_sha1   = hmac_algorithm_impl<algorithm::sha1>;
+using hmac_sha224 = hmac_algorithm_impl<algorithm::sha224>;
+using hmac_sha256 = hmac_algorithm_impl<algorithm::sha256>;
+using hmac_sha384 = hmac_algorithm_impl<algorithm::sha384>;
+using hmac_sha512 = hmac_algorithm_impl<algorithm::sha512>;
 
 } } // namespace funtls::hash
 
