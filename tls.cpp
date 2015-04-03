@@ -1,5 +1,5 @@
 #include "tls.h"
-
+#include <util/base_conversion.h>
 #include <sys/time.h> // gettimeofday
 
 namespace {
@@ -71,5 +71,36 @@ handshake handshake_from_bytes(const std::vector<uint8_t>& buffer, size_t& index
     throw std::runtime_error("Unknown handshake type " + std::to_string((int)handshake_type));
 }
 
+std::ostream& operator<<(std::ostream& os, const content_type& type)
+{
+    switch (type) {
+        case content_type::change_cipher_spec:
+            return os << "change_cipher_spec";
+        case content_type::alert:
+            return os << "alert";
+        case content_type::handshake:
+            return os << "handshake";
+        case content_type::application_data:
+            return os << "application_data";
+    }
+    os << "Unknown TLS content type 0x" << util::base16_encode(&type, sizeof(type));
+    assert(false);
+    return os;
+}
+
+std::ostream& operator<<(std::ostream& os, const protocol_version& version)
+{
+    if (version == protocol_version_tls_1_0) {
+        os << "TLS v1.0";
+    } else if (version == protocol_version_tls_1_1) {
+        os << "TLS v1.1";
+    } else if (version == protocol_version_tls_1_2) {
+        os << "TLS v1.2";
+    } else {
+        os << "Unknown TLS version " << version.major << "." << version.minor;
+        assert(false);
+    }
+    return os;
+}
 
 } } // namespace funtls::tls

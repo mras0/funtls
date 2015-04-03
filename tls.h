@@ -59,6 +59,7 @@ enum class content_type : uint8_t {
     handshake = 22,
     application_data = 23,
 };
+std::ostream& operator<<(std::ostream& os, const content_type& type);
 
 enum class handshake_type : uint8 {
     hello_request = 0,
@@ -78,16 +79,20 @@ struct protocol_version {
     uint8 minor;
 };
 
-constexpr bool operator==(const protocol_version& a, const protocol_version& b)
-{
+static_assert(sizeof(protocol_version) == 2, "");
+
+constexpr bool operator==(const protocol_version& a, const protocol_version& b) {
     return a.major == b.major && a.minor == b.minor;
 }
 
-constexpr bool operator!=(const protocol_version& a, const protocol_version& b)
-{
+constexpr bool operator!=(const protocol_version& a, const protocol_version& b) {
     return !(a == b);
 }
 
+std::ostream& operator<<(std::ostream& os, const protocol_version& version);
+
+static constexpr protocol_version protocol_version_tls_1_0{3, 1};
+static constexpr protocol_version protocol_version_tls_1_1{3, 2};
 static constexpr protocol_version protocol_version_tls_1_2{3, 3};
 
 void get_random_bytes(void* dest, size_t count);

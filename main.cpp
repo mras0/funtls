@@ -81,10 +81,55 @@ std::vector<uint8_t> PRF(const std::vector<uint8_t>& secret, const std::string& 
 
 } // unnamed namespace
 
+constexpr tls::protocol_version current_protocol_version = tls::protocol_version_tls_1_2;
+
 class tls_socket {
 public:
     explicit tls_socket(boost::asio::ip::tcp::socket& socket)
-        : socket(socket)
+        : socket(socket) {
+    }
+
+    void send_record(const tls::record& r) {
+        FUNTLS_CHECK_BINARY(r.version, ==, current_protocol_version, "Wrong TLS version");
+        FUNTLS_CHECK_BINARY(r.fragment.size(), >=, 1, "Illegal fragment size");
+        FUNTLS_CHECK_BINARY(r.fragment.size(), <=, tls::record::max_length, "Illegal fragment size");
+
+        std::vector<uint8_t> buffer;
+        tls::append_to_buffer(buffer, r);
+        boost::asio::write(socket, boost::asio::buffer(buffer));
+    }
+
+    tls::record read_record() {
+        std::vector<uint8_t> buffer(5);
+        boost::asio::read(socket, boost::asio::buffer(buffer));
+
+        size_t index = 0;
+        tls::content_type     content_type;
+        tls::protocol_version protocol_version;
+        tls::uint16           length;
+        tls::from_bytes(content_type, buffer, index);
+        tls::from_bytes(protocol_version, buffer, index);
+        tls::from_bytes(length, buffer, index);
+        assert(index == buffer.size());
+
+        FUNTLS_CHECK_BINARY(protocol_version, ==, current_protocol_version, "Wrong TLS version");
+        FUNTLS_CHECK_BINARY(length, >=, 1, "Illegal fragment size");
+        FUNTLS_CHECK_BINARY(length, <=, tls::record::max_length, "Illegal fragment size");
+
+        buffer.resize(length);
+        boost::asio::read(socket, boost::asio::buffer(buffer));
+
+        return tls::record{content_type, protocol_version, std::move(buffer)};
+    }
+
+private:
+    boost::asio::ip::tcp::socket& socket;
+};
+
+class tls_connection {
+public:
+    explicit tls_connection(tls_socket&& socket)
+        : socket(std::move(socket))
         , client_random(tls::make_random()) {
     }
 
@@ -138,10 +183,9 @@ private:
 
     static constexpr size_t         master_secret_size = 48;
 
-    const tls::protocol_version     current_protocol_version = tls::protocol_version_tls_1_2;
     const tls::cipher_suite         wanted_cipher            = tls::rsa_with_aes_256_cbc_sha256;
 
-    boost::asio::ip::tcp::socket&   socket;
+    tls_socket                      socket;
     const tls::random               client_random;
     tls::random                     server_random;
     std::unique_ptr<
@@ -149,14 +193,12 @@ private:
     tls::session_id                 sesion_id;
     std::vector<uint8_t>            master_secret;
     hash::sha256                    handshake_message_digest;
-    uint64_t                        sequence_number = 0;
+    uint64_t                        sequence_number = 0; // TODO: A seperate sequence number is used for each connection end
 
     std::vector<uint8_t>            client_mac_key;
     std::vector<uint8_t>            server_mac_key;
     std::vector<uint8_t>            client_enc_key;
     std::vector<uint8_t>            server_enc_key;
-    std::vector<uint8_t>            client_iv;
-    std::vector<uint8_t>            server_iv;
 
     // TODO: This only works when the payload isn't encrypted/compressed
     template<typename Payload>
@@ -164,57 +206,26 @@ private:
         std::vector<uint8_t> payload_buffer;
         append_to_buffer(payload_buffer, payload);
 
-        std::vector<uint8_t> buffer;
-        tls::append_to_buffer(buffer,
-            tls::record{
+        socket.send_record(tls::record{
                 payload.content_type,
                 current_protocol_version,
                 payload_buffer,
             });
         if (payload.content_type == tls::content_type::handshake) {
-            std::cout << "HACK: Message included in digest: " << (int)buffer[0] << "\n";
+            // HACK
             handshake_message_digest.input(payload_buffer);
         }
-        boost::asio::write(socket, boost::asio::buffer(buffer));
     }
 
-    tls::record read_record() {
-        std::vector<uint8_t> buffer(5);
-        boost::asio::read(socket, boost::asio::buffer(buffer));
+    tls::handshake read_handshake() {
+        auto record = socket.read_record();
+        FUNTLS_CHECK_BINARY(record.type, ==, tls::content_type::handshake, "Invalid content type");
 
         size_t index = 0;
-        tls::content_type     content_type;
-        tls::protocol_version protocol_version;
-        tls::uint16           length;
-        tls::from_bytes(content_type, buffer, index);
-        tls::from_bytes(protocol_version, buffer, index);
-        tls::from_bytes(length, buffer, index);
-        assert(index == buffer.size());
-
-        if (protocol_version != current_protocol_version) {
-            throw std::runtime_error("Invalid record protocol version " + util::base16_encode(&protocol_version, sizeof(protocol_version)) + " in " + __func__);
-        }
-        if (length < 1 || length > tls::record::max_length) {
-            throw std::runtime_error("Invalid record length " + std::to_string(length) + " in " + __func__ + "\nHeader: " + util::base16_encode(buffer));
-        }
-        buffer.resize(length);
-        boost::asio::read(socket, boost::asio::buffer(buffer));
-        index = 0;
-
-        switch (content_type) {
-        case tls::content_type::change_cipher_spec:
-            assert(length == 1);
-            assert(buffer[0] == 1);
-            return tls::record{content_type, protocol_version, buffer};
-        case tls::content_type::alert:
-            break;
-        case tls::content_type::handshake:
-            handshake_message_digest.input(buffer);
-            return tls::record{content_type, protocol_version, buffer};
-        case tls::content_type::application_data:
-            break;
-        }
-        throw std::runtime_error("Unknown content type " + std::to_string((int)content_type));
+        auto handshake = tls::handshake_from_bytes(record.fragment, index);
+        assert(index == record.fragment.size());
+        handshake_message_digest.input(record.fragment);
+        return handshake;
     }
 
     void send_client_hello() {
@@ -231,9 +242,7 @@ private:
     }
 
     void read_server_hello() {
-        auto record = read_record();
-        size_t index = 0;
-        auto handshake = tls::handshake_from_bytes(record.fragment, index);
+        auto handshake = read_handshake();
         auto& server_hello = handshake.body.get<tls::server_hello>();
         if (server_hello.cipher_suite != wanted_cipher) {
             throw std::runtime_error("Invalid cipher suite " + util::base16_encode(&server_hello.cipher_suite, 2));
@@ -249,9 +258,7 @@ private:
         std::vector<tls::certificate> certificate_lists;
 
         for (;;) {
-            auto record = read_record();
-            size_t index = 0;
-            auto handshake = tls::handshake_from_bytes(record.fragment, index);
+            auto handshake = read_handshake();
             if (handshake.type() == tls::handshake_type::server_hello_done) {
                 break;
             } else if (handshake.type() == tls::handshake_type::certificate) {
@@ -369,8 +376,9 @@ private:
         server_mac_key = std::vector<uint8_t>{&key_block[i], &key_block[i+mac_key_length]}; i += mac_key_length;
         client_enc_key = std::vector<uint8_t>{&key_block[i], &key_block[i+enc_key_length]}; i += enc_key_length;
         server_enc_key = std::vector<uint8_t>{&key_block[i], &key_block[i+enc_key_length]}; i += enc_key_length;
-        client_iv      = std::vector<uint8_t>{&key_block[i], &key_block[i+fixed_iv_length]}; i += fixed_iv_length;
-        server_iv      = std::vector<uint8_t>{&key_block[i], &key_block[i+fixed_iv_length]}; i += fixed_iv_length;
+        // Only used for TLS v1.1 and earlier?
+        /*client_iv      = std::vector<uint8_t>{&key_block[i], &key_block[i+fixed_iv_length]}; */i += fixed_iv_length;
+        /*server_iv      = std::vector<uint8_t>{&key_block[i], &key_block[i+fixed_iv_length]}; */i += fixed_iv_length;
         assert(i == key_block.size());
     }
 
@@ -470,80 +478,56 @@ private:
         std::vector<uint8_t> message_iv(fixed_iv_length);
         tls::get_random_bytes(&message_iv[0], fixed_iv_length);
         tls::append_to_buffer(fragment, message_iv);
-        assert(client_iv.size() == message_iv.size());
 
-        std::cout << "client_enc_key=" << util::base16_encode(client_enc_key)  << std::endl;
-        std::cout << "message_iv=" << util::base16_encode(message_iv)  << std::endl;
+        //std::cout << "client_enc_key=" << util::base16_encode(client_enc_key)  << std::endl;
+        //std::cout << "message_iv=" << util::base16_encode(message_iv)  << std::endl;
 
         tls::append_to_buffer(fragment, aes::aes_encrypt_cbc(client_enc_key, message_iv, content_and_mac));
 
-        std::cout << "client_iv.size() = " << client_iv.size() << std::endl;
-        std::cout << "content_and_mac.size() = " << content_and_mac.size() << std::endl;
-        std::cout << "fragment=" << util::base16_encode(client_iv) << util::base16_encode(content_and_mac) << std::endl;
-        std::cout << "fragment(iv, encryped(fragment))=" << util::base16_encode(fragment) << std::endl;
+        //std::cout << "client_iv.size() = " << client_iv.size() << std::endl;
+        //std::cout << "content_and_mac.size() = " << content_and_mac.size() << std::endl;
+        //std::cout << "fragment=" << util::base16_encode(client_iv) << util::base16_encode(content_and_mac) << std::endl;
+        //std::cout << "fragment(iv, encryped(fragment))=" << util::base16_encode(fragment) << std::endl;
 
 
         //
         // Now create and send the actual TLSCiphertext structure
         //
-        std::vector<uint8_t> ciphertext_buffer;
-        tls::append_to_buffer(ciphertext_buffer, content_type);
-        tls::append_to_buffer(ciphertext_buffer, current_protocol_version);
+
         assert(fragment.size() < ((1<<14)+2048) && "Payload of TLSCiphertext MUST NOT exceed 2^14 + 2048");
-        tls::append_to_buffer(ciphertext_buffer, tls::uint16(fragment.size()));
-        tls::append_to_buffer(ciphertext_buffer, fragment);
-        boost::asio::write(socket, boost::asio::buffer(ciphertext_buffer));
+        socket.send_record(tls::record{content_type, current_protocol_version, std::move(fragment)});
     }
 
     void do_send_app_data(const std::vector<uint8_t>& d) {
-        std::cout << __PRETTY_FUNCTION__ <<  ": " << util::base16_encode(d)  << std::endl;
         do_send(tls::content_type::application_data, d);
     }
 
     void read_change_cipher_spec(){
-        auto record = read_record();
-        assert(record.type == tls::content_type::change_cipher_spec);
-        assert(record.fragment.size() == 1);
-        assert(record.fragment[0] == 1);
+        auto record = socket.read_record();
+        FUNTLS_CHECK_BINARY(record.type,            ==, tls::content_type::change_cipher_spec, "Invalid content type");
+        FUNTLS_CHECK_BINARY(record.fragment.size(), ==, 1, "Invalid ChangeCipherSpec fragment size");
+        FUNTLS_CHECK_BINARY(record.fragment[0],     !=, 0, "Invalid ChangeCipherSpec fragment data");
         std::cout << "Got ChangeCipherSpec from server\n";
     }
 
-    std::pair<tls::content_type, std::vector<uint8_t>> do_read_record() {
-        // TODO: Don't duplicate code from read_record()
+    tls::record do_read_record() {
+        auto record = socket.read_record();
         // TODO: improve really lazy parsing/validation
-        std::vector<uint8_t> buffer(5);
-        boost::asio::read(socket, boost::asio::buffer(buffer));
-
-        size_t index = 0;
-        tls::content_type     content_type;
-        tls::protocol_version protocol_version;
-        tls::uint16           length;
-        tls::from_bytes(content_type, buffer, index);
-        tls::from_bytes(protocol_version, buffer, index);
-        tls::from_bytes(length, buffer, index);
-        assert(index == buffer.size());
-
-        if (protocol_version != current_protocol_version) {
-            throw std::runtime_error("Invalid record protocol version " + util::base16_encode(&protocol_version, sizeof(protocol_version)) + " in " + __func__);
+        if (record.version != current_protocol_version) {
+            throw std::runtime_error("Invalid record protocol version " + util::base16_encode(&record.version, sizeof(record.version)) + " in " + __func__);
         }
-        if (length < 1 || length > tls::record::max_length) {
-            throw std::runtime_error("Invalid record length " + std::to_string(length) + " in " + __func__ + "\nHeader: " + util::base16_encode(buffer));
-        }
-        buffer.resize(length);
-        boost::asio::read(socket, boost::asio::buffer(buffer));
-        assert(buffer.size() >= 80); // needs work..
+        assert(record.fragment.size() >= 80); // needs work..
 
-        const std::vector<uint8_t> message_iv{&buffer[0], &buffer[fixed_iv_length]};
-        const std::vector<uint8_t> encrypted{&buffer[fixed_iv_length], &buffer[buffer.size()]};
+        const std::vector<uint8_t> message_iv{&record.fragment[0], &record.fragment[fixed_iv_length]};
+        const std::vector<uint8_t> encrypted{&record.fragment[fixed_iv_length], &record.fragment[record.fragment.size()]};
 
-        std::cout << "IV\n" << util::base16_encode(message_iv)  << std::endl;
-        std::cout << "Encrypted\n" << util::base16_encode(encrypted)  << std::endl;
+        //std::cout << "IV\n" << util::base16_encode(message_iv)  << std::endl;
+        //std::cout << "Encrypted\n" << util::base16_encode(encrypted)  << std::endl;
 
-        std::cout << "server_key\n" << util::base16_encode(server_enc_key)  << std::endl;
-        std::cout << "server_iv\n" << util::base16_encode(server_iv)  << std::endl;
+        //std::cout << "server_key\n" << util::base16_encode(server_enc_key)  << std::endl;
 
-        const auto decrypted = aes::aes_decrypt_cbc(server_enc_key, /*server_iv*/message_iv, encrypted);
-        std::cout << "Decrypted\n" << util::base16_encode(decrypted) << std::endl;
+        const auto decrypted = aes::aes_decrypt_cbc(server_enc_key, message_iv, encrypted);
+        //std::cout << "Decrypted\n" << util::base16_encode(decrypted) << std::endl;
 
         // check padding
         const auto padding_length = decrypted[decrypted.size()-1];
@@ -563,9 +547,9 @@ private:
         auto hash_algo = hash::hmac_sha256(server_mac_key);
         assert(sequence_number < 256);
         hash_algo.input(std::vector<uint8_t>{0,0,0,0,0,0,0,static_cast<uint8_t>(sequence_number)});
-        hash_algo.input(static_cast<const void*>(&content_type), 1);
-        hash_algo.input(&current_protocol_version.major, 1); // Since we only accept one version
-        hash_algo.input(&current_protocol_version.minor, 1);
+        hash_algo.input(static_cast<const void*>(&record.type), 1);
+        hash_algo.input(&record.version.major, 1);
+        hash_algo.input(&record.version.minor, 1);
         hash_algo.input(std::vector<uint8_t>{uint8_t(content.size()>>8),uint8_t(content.size())});
         hash_algo.input(content);
         const auto calced_mac = hash_algo.result();
@@ -574,14 +558,13 @@ private:
 
         sequence_number++;
 
-        return std::make_pair(content_type, content);
+        return tls::record{record.type, record.version, std::move(content)};
     }
 
     void read_finished() {
-        const auto rec = do_read_record();
-        const auto content_type = rec.first;
-        const auto& content = rec.second;
-        assert(content_type == tls::content_type::handshake);
+        const auto record = do_read_record();
+        assert(record.type == tls::content_type::handshake);
+        const auto& content = record.fragment;
         // Parse content
         assert(content.size() >= 5);
         assert(content[0] == (int)tls::handshake_type::finished);
@@ -599,11 +582,9 @@ private:
     }
 
     std::vector<uint8_t> do_next_app_data() {
-        const auto rec = do_read_record();
-        const auto content_type = rec.first;
-        const auto& content = rec.second;
-        assert(content_type == tls::content_type::application_data);
-        return content;
+        const auto record = do_read_record();
+        assert(record.type == tls::content_type::application_data);
+        return record.fragment;
     }
 };
 
@@ -630,7 +611,7 @@ int main(int argc, char* argv[])
         std::cout << "Connecting to " << host << ":" << port << " ..." << std::flush;
         boost::asio::connect(socket, resolver.resolve({host, port}));
         std::cout << " OK" << std::endl;
-        tls_socket ts{socket};
+        tls_connection ts{tls_socket{socket}};
         ts.perform_handshake();
 
         std::cout << "Completed handshake!\n";
