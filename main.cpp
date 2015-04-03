@@ -74,11 +74,13 @@ public:
     }
 
     void send_app_data(const std::vector<uint8_t>& d) {
-        do_send_app_data(d);
+        send_record(tls::content_type::application_data, d);
     }
 
     std::vector<uint8_t> next_app_data() {
-        return do_next_app_data();
+        const auto record = read_record();
+        FUNTLS_CHECK_BINARY(record.type, ==, tls::content_type::application_data, "Unexpected content type");
+        return record.fragment;
     }
 
 private:
@@ -316,16 +318,41 @@ private:
 
         handshake_message_digest.input(content); // Now safe to update since we've used 
 
-        do_send(tls::content_type::handshake, content);
+        send_record(tls::content_type::handshake, content);
     }
 
+    void send_record(tls::content_type type, const std::vector<uint8_t>& plaintext) {
+        FUNTLS_CHECK_BINARY(plaintext.size(), >=, 1, "Illegal plain text size");
+        FUNTLS_CHECK_BINARY(plaintext.size(), <=, tls::record::max_plaintext_length, "Illegal plain text size");
 
-    void do_send(tls::content_type content_type, const std::vector<uint8_t>& content) {
         //
         // We have our plaintext content to send (content).
         // First apply compression (trivial for CompressionMethod.null)
-        // The next step is generating a MAC of the content
+        // TODO
         //
+
+        //
+        // Do encryption
+        //
+        auto fragment = encrypt(type, plaintext);
+        FUNTLS_CHECK_BINARY(fragment.size(), <=, tls::record::max_ciphertext_length, "Illegal fragment size");
+
+        std::vector<uint8_t> header;
+        tls::append_to_buffer(header, type);
+        tls::append_to_buffer(header, current_protocol_version);
+        tls::append_to_buffer(header, tls::uint16(fragment.size()));
+        assert(header.size() == 5);
+
+        boost::asio::write(socket, boost::asio::buffer(header));
+        boost::asio::write(socket, boost::asio::buffer(fragment));
+    }
+
+
+    std::vector<uint8_t> encrypt(tls::content_type content_type, const std::vector<uint8_t>& content) {
+        if (current_cipher == tls::cipher_suite::null_with_null_null) {
+            return content;
+        }
+        assert(current_cipher == tls::cipher_suite::rsa_with_aes_256_cbc_sha256);
 
         // The MAC is generated as:
         // MAC(MAC_write_key, seq_num +
@@ -383,26 +410,8 @@ private:
         tls::append_to_buffer(fragment, message_iv);
         tls::append_to_buffer(fragment, aes::aes_encrypt_cbc(client_enc_key, message_iv, content_and_mac));
 
-        //std::cout << "client_enc_key=" << util::base16_encode(client_enc_key)  << std::endl;
-        //std::cout << "message_iv=" << util::base16_encode(message_iv)  << std::endl;
-
-
-        //std::cout << "client_iv.size() = " << client_iv.size() << std::endl;
-        //std::cout << "content_and_mac.size() = " << content_and_mac.size() << std::endl;
-        //std::cout << "fragment=" << util::base16_encode(client_iv) << util::base16_encode(content_and_mac) << std::endl;
-        //std::cout << "fragment(iv, encryped(fragment))=" << util::base16_encode(fragment) << std::endl;
-
-
-        //
-        // Now create and send the actual TLSCiphertext structure
-        //
-
         assert(fragment.size() < ((1<<14)+2048) && "Payload of TLSCiphertext MUST NOT exceed 2^14 + 2048");
-        send_record(content_type, fragment);
-    }
-
-    void do_send_app_data(const std::vector<uint8_t>& d) {
-        do_send(tls::content_type::application_data, d);
+        return fragment;
     }
 
     void read_change_cipher_spec(){
@@ -432,29 +441,6 @@ private:
         const auto calced_verify_data = tls::PRF(master_secret, "server finished", handshake_message_digest.result(), tls::finished::verify_data_length);
         std::cout << "calculated verify_data\n" << util::base16_encode(calced_verify_data) << std::endl;
         assert(verify_data == calced_verify_data);
-    }
-
-    std::vector<uint8_t> do_next_app_data() {
-        const auto record = read_record();
-        assert(record.type == tls::content_type::application_data);
-        return record.fragment;
-    }
-
-
-    void send_record(tls::content_type type, const std::vector<uint8_t>& plaintext) {
-        FUNTLS_CHECK_BINARY(plaintext.size(), >=, 1, "Illegal plain text size");
-        FUNTLS_CHECK_BINARY(plaintext.size(), <=, tls::record::max_plaintext_length, "Illegal plain text size");
-
-        auto fragment = plaintext; // XXX: FIXME
-
-        std::vector<uint8_t> header;
-        tls::append_to_buffer(header, type);
-        tls::append_to_buffer(header, current_protocol_version);
-        tls::append_to_buffer(header, tls::uint16(fragment.size()));
-        assert(header.size() == 5);
-
-        boost::asio::write(socket, boost::asio::buffer(header));
-        boost::asio::write(socket, boost::asio::buffer(fragment));
     }
 
     tls::record read_record() {
