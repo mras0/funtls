@@ -13,6 +13,7 @@
 #include <x509/x509_rsa.h>
 #include <aes/aes.h>
 #include <util/base_conversion.h>
+#include <util/test.h>
 
 #include <boost/multiprecision/cpp_int.hpp>
 using int_type = boost::multiprecision::cpp_int;
@@ -159,16 +160,20 @@ private:
 
     // TODO: This only works when the payload isn't encrypted/compressed
     template<typename Payload>
-    void send_record(Payload&& payload) {
+    void send_record(const Payload& payload) {
+        std::vector<uint8_t> payload_buffer;
+        append_to_buffer(payload_buffer, payload);
+
         std::vector<uint8_t> buffer;
         tls::append_to_buffer(buffer,
             tls::record{
+                payload.content_type,
                 current_protocol_version,
-                std::forward<Payload>(payload)
+                payload_buffer,
             });
-        if (buffer[0] == 22) {
+        if (payload.content_type == tls::content_type::handshake) {
             std::cout << "HACK: Message included in digest: " << (int)buffer[0] << "\n";
-            handshake_message_digest.input(&buffer[5],buffer.size()-5);
+            handshake_message_digest.input(payload_buffer);
         }
         boost::asio::write(socket, boost::asio::buffer(buffer));
     }
@@ -200,12 +205,12 @@ private:
         case tls::content_type::change_cipher_spec:
             assert(length == 1);
             assert(buffer[0] == 1);
-            return tls::record{protocol_version, tls::change_cipher_spec{}};
+            return tls::record{content_type, protocol_version, buffer};
         case tls::content_type::alert:
             break;
         case tls::content_type::handshake:
             handshake_message_digest.input(buffer);
-            return tls::record{protocol_version, tls::handshake_from_bytes(buffer, index)};
+            return tls::record{content_type, protocol_version, buffer};
         case tls::content_type::application_data:
             break;
         }
@@ -227,7 +232,9 @@ private:
 
     void read_server_hello() {
         auto record = read_record();
-        auto& server_hello = record.payload.get<tls::handshake>().body.get<tls::server_hello>();
+        size_t index = 0;
+        auto handshake = tls::handshake_from_bytes(record.fragment, index);
+        auto& server_hello = handshake.body.get<tls::server_hello>();
         if (server_hello.cipher_suite != wanted_cipher) {
             throw std::runtime_error("Invalid cipher suite " + util::base16_encode(&server_hello.cipher_suite, 2));
         }
@@ -243,7 +250,8 @@ private:
 
         for (;;) {
             auto record = read_record();
-            auto& handshake = record.payload.get<tls::handshake>();
+            size_t index = 0;
+            auto handshake = tls::handshake_from_bytes(record.fragment, index);
             if (handshake.type() == tls::handshake_type::server_hello_done) {
                 break;
             } else if (handshake.type() == tls::handshake_type::certificate) {
@@ -493,7 +501,10 @@ private:
     }
 
     void read_change_cipher_spec(){
-        (void) read_record().payload.get<tls::change_cipher_spec>();
+        auto record = read_record();
+        assert(record.type == tls::content_type::change_cipher_spec);
+        assert(record.fragment.size() == 1);
+        assert(record.fragment[0] == 1);
         std::cout << "Got ChangeCipherSpec from server\n";
     }
 
@@ -596,12 +607,22 @@ private:
     }
 };
 
+void tls_test()
+{
+    const auto secret = util::base16_decode("01234567");
+    const auto seed   = util::base16_decode("89ABCDEF");
+    FUNTLS_ASSERT_EQUAL("3E8464579C39D7334B5E0412A46125C848009EAEC8315139C5A965ADFDBD579FF8B1730AB8541457",
+            util::base16_encode(P_hash(secret,seed,40)));
+}
+
 int main(int argc, char* argv[])
 {
     const char* const host = argc > 1 ? argv[1] : "localhost";
     const char* const port = argc > 2 ? argv[2] : "443";
 
     try {
+        tls_test();
+
         boost::asio::io_service         io_service;
         boost::asio::ip::tcp::socket    socket(io_service);
         boost::asio::ip::tcp::resolver  resolver(io_service);

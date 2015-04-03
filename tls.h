@@ -263,29 +263,12 @@ struct change_cipher_spec {
 };
 
 struct record {
-    static constexpr size_t max_length = (1<<14)-1;
+    static constexpr size_t max_length = (1<<14)+2048;
 
-    tls::protocol_version                        protocol_version;
-    tls::variant<handshake, change_cipher_spec>  payload;
-
-    tls::content_type type() const {
-        int type = -1;
-        payload.invoke(type_helper{type});
-        assert(type >= 0 && type <= 255);
-        return static_cast<tls::content_type>(type);
-    }
-
-private:
-    struct type_helper {
-        type_helper(int& type) : type(type) {}
-        template<typename T>
-        void operator()(const T&) {
-            assert(type < 0);
-            type = static_cast<int>(T::content_type);
-            assert(type >= 0 && type <= 255);
-        }
-        int& type;
-    };
+    content_type                            type;
+    protocol_version                        version;
+    // uint16                               length; // Maximumem length: 2^14 (+1024 for compression and +1024 for ciphertext mac etc.)
+    std::vector<uint8_t>                    fragment;
 };
 
 
@@ -427,15 +410,12 @@ inline void append_to_buffer(std::vector<uint8_t>& buffer, const handshake& item
 }
 
 inline void append_to_buffer(std::vector<uint8_t>& buffer, const record& item) {
-    std::vector<uint8_t> payload_buffer;
-    append_to_buffer(payload_buffer, item.payload);
+    assert(item.fragment.size() < record::max_length);
 
-    assert(payload_buffer.size() < record::max_length);
-
-    append_to_buffer(buffer, item.type());
-    append_to_buffer(buffer, item.protocol_version);
-    append_to_buffer(buffer, tls::uint16(payload_buffer.size()));
-    buffer.insert(buffer.end(), payload_buffer.begin(), payload_buffer.end());
+    append_to_buffer(buffer, item.type);
+    append_to_buffer(buffer, item.version);
+    append_to_buffer(buffer, tls::uint16(item.fragment.size()));
+    append_to_buffer(buffer, item.fragment);
 }
 
 template<unsigned BitCount, typename Underlying>
