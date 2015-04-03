@@ -289,6 +289,7 @@ private:
         // authentication processes were successful
         current_cipher = wanted_cipher; // HACKISH
         send_finished();
+        current_cipher = tls::cipher_suite::null_with_null_null; // HACKISH
     }
 
     void send_finished() {
@@ -410,10 +411,11 @@ private:
         FUNTLS_CHECK_BINARY(record.fragment.size(), ==, 1, "Invalid ChangeCipherSpec fragment size");
         FUNTLS_CHECK_BINARY(record.fragment[0],     !=, 0, "Invalid ChangeCipherSpec fragment data");
         std::cout << "Got ChangeCipherSpec from server\n";
+        current_cipher = wanted_cipher;
     }
 
     void read_finished() {
-        const auto record = do_read_record();
+        const auto record = read_record();
         assert(record.type == tls::content_type::handshake);
         const auto& content = record.fragment;
         // Parse content
@@ -433,7 +435,7 @@ private:
     }
 
     std::vector<uint8_t> do_next_app_data() {
-        const auto record = do_read_record();
+        const auto record = read_record();
         assert(record.type == tls::content_type::application_data);
         return record.fragment;
     }
@@ -470,26 +472,42 @@ private:
 
         FUNTLS_CHECK_BINARY(protocol_version, ==, current_protocol_version, "Wrong TLS version");
         FUNTLS_CHECK_BINARY(length, >=, 1, "Illegal fragment size");
-        FUNTLS_CHECK_BINARY(length, <=, tls::record::max_plaintext_length, "Illegal fragment size"); // FIXME
+        FUNTLS_CHECK_BINARY(length, <=, tls::record::max_ciphertext_length, "Illegal fragment size");
 
         buffer.resize(length);
         boost::asio::read(socket, boost::asio::buffer(buffer));
 
+        //
+        // Decrypt
+        //
+        if (current_cipher != tls::cipher_suite::null_with_null_null) {
+            decrypt(content_type, buffer);
+        }
+
+        //
+        // Decompression
+        //
+        // TODO: decompress buffer -> buffer
+        FUNTLS_CHECK_BINARY(buffer.size(), <=, tls::record::max_compressed_length, "Illegal decoded fragment size");
+
+        //
+        // We now have a TLSPlaintext buffer for consumption
+        //
+        FUNTLS_CHECK_BINARY(buffer.size(), <=, tls::record::max_plaintext_length, "Illegal decoded fragment size");
+
         return tls::record{content_type, protocol_version, std::move(buffer)};
     }
 
-    tls::record do_read_record() {
-        auto record = read_record();
+    void decrypt(tls::content_type record_type, std::vector<uint8_t>& buffer) {
+        assert(buffer.size() <= tls::record::max_ciphertext_length);
+
         // TODO: improve really lazy parsing/validation
-        if (record.version != current_protocol_version) {
-            throw std::runtime_error("Invalid record protocol version " + util::base16_encode(&record.version, sizeof(record.version)) + " in " + __func__);
-        }
         const auto cipher_param = tls::parameters_from_suite(current_cipher);
 
-        assert(record.fragment.size() >= 80); // needs work..
+        assert(buffer.size() >= 80); // needs work..
 
-        const std::vector<uint8_t> message_iv{&record.fragment[0], &record.fragment[cipher_param.iv_length]};
-        const std::vector<uint8_t> encrypted{&record.fragment[cipher_param.iv_length], &record.fragment[record.fragment.size()]};
+        const std::vector<uint8_t> message_iv{&buffer[0], &buffer[cipher_param.iv_length]};
+        const std::vector<uint8_t> encrypted{&buffer[cipher_param.iv_length], &buffer[buffer.size()]};
 
         //std::cout << "IV\n" << util::base16_encode(message_iv)  << std::endl;
         //std::cout << "Encrypted\n" << util::base16_encode(encrypted)  << std::endl;
@@ -508,18 +526,18 @@ private:
         // Extract MAC + Content
         const size_t mac_index = decrypted.size()-1-padding_length-cipher_param.mac_length;
         const std::vector<uint8_t> mac{&decrypted[mac_index],&decrypted[mac_index+cipher_param.mac_length]};
-        std::cout << "MAC\n" << util::base16_encode(mac) << std::endl;
+        //std::cout << "MAC\n" << util::base16_encode(mac) << std::endl;
 
         const std::vector<uint8_t> content{&decrypted[0],&decrypted[mac_index]};
-        std::cout << "Content\n" << util::base16_encode(content) << std::endl;
+        //std::cout << "Content\n" << util::base16_encode(content) << std::endl;
 
         // Check MAC -- TODO: Unify with do_send
         auto hash_algo = hash::hmac_sha256(server_mac_key);
         assert(sequence_number < 256);
         hash_algo.input(std::vector<uint8_t>{0,0,0,0,0,0,0,static_cast<uint8_t>(sequence_number)});
-        hash_algo.input(static_cast<const void*>(&record.type), 1);
-        hash_algo.input(&record.version.major, 1);
-        hash_algo.input(&record.version.minor, 1);
+        hash_algo.input(static_cast<const void*>(&record_type), 1);
+        hash_algo.input(&current_protocol_version.major, 1);
+        hash_algo.input(&current_protocol_version.minor, 1);
         hash_algo.input(std::vector<uint8_t>{uint8_t(content.size()>>8),uint8_t(content.size())});
         hash_algo.input(content);
         const auto calced_mac = hash_algo.result();
@@ -528,7 +546,7 @@ private:
 
         sequence_number++;
 
-        return tls::record{record.type, record.version, std::move(content)};
+        buffer = std::move(content);
     }
 };
 
