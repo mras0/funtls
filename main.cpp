@@ -33,6 +33,52 @@ namespace funtls { namespace tls {
 
 enum class connection_end { server, client };
 
+class cipher {
+public:
+    virtual ~cipher() {}
+    virtual std::vector<uint8_t> process(const std::vector<uint8_t>& iv, const std::vector<uint8_t>& data) = 0;
+};
+
+class null_cipher : public cipher {
+public:
+    null_cipher() {}
+    virtual std::vector<uint8_t> process(const std::vector<uint8_t>& iv, const std::vector<uint8_t>& data) override {
+        FUNTLS_CHECK_BINARY(iv.size(), ==, 0, "Initialization Vector provided to null_cipher");
+        return data;
+    }
+};
+
+class rc4_cipher : public cipher {
+public:
+    explicit rc4_cipher(const std::vector<uint8_t>& key) : rc4_(key) {}
+
+    virtual std::vector<uint8_t> process(const std::vector<uint8_t>& iv, const std::vector<uint8_t>& data) override {
+        FUNTLS_CHECK_BINARY(iv.size(), ==, 0, "Initialization Vector provided to rc4_cipher");
+        auto buffer = data;
+        rc4_.process(buffer);
+        return buffer;
+    }
+private:
+    rc4::rc4 rc4_;
+};
+
+class aes_cipher : public cipher {
+public:
+    enum operation { decrypt = 0, encrypt = 1 };
+    explicit aes_cipher(operation op, const std::vector<uint8_t>& key) : operation_(op), key_(key) {}
+
+    virtual std::vector<uint8_t> process(const std::vector<uint8_t>& iv, const std::vector<uint8_t>& data) override {
+        if (operation_ == decrypt) {
+            return aes::aes_decrypt_cbc(key_, iv, data);
+        } else {
+            assert(operation_ == encrypt);
+            return aes::aes_encrypt_cbc(key_, iv, data);
+        }
+    }
+private:
+    operation            operation_;
+    std::vector<uint8_t> key_;
+};
 
 } } // namespace funtls::tls
 
@@ -285,6 +331,17 @@ private:
         //client_iv      = std::vector<uint8_t>{&key_block[i], &key_block[i+fixed_iv_length]}; i += fixed_iv_length;
         //server_iv      = std::vector<uint8_t>{&key_block[i], &key_block[i+fixed_iv_length]}; i += fixed_iv_length;
         assert(i == key_block.size());
+
+        // TODO: FIXME: handle ConnectionEnd stuff
+        if (cipher_param.bulk_cipher_algorithm == tls::bulk_cipher_algorithm::rc4) {
+            encrypt_cipher.reset(new tls::rc4_cipher(client_enc_key));
+            decrypt_cipher.reset(new tls::rc4_cipher(server_enc_key));
+        } else if (cipher_param.bulk_cipher_algorithm == tls::bulk_cipher_algorithm::aes) {
+            encrypt_cipher.reset(new tls::aes_cipher(tls::aes_cipher::encrypt, client_enc_key));
+            decrypt_cipher.reset(new tls::aes_cipher(tls::aes_cipher::decrypt, server_enc_key));
+        } else {
+            FUNTLS_CHECK_FAILURE("Unsupported bulk_cipher_algorithm: " + std::to_string((int)cipher_param.bulk_cipher_algorithm));
+        }
     }
 
     void send_change_cipher_spec() {
@@ -419,51 +476,19 @@ private:
         } else {
             assert(cipher_param.cipher_type == tls::cipher_type::stream);
         }
-        tls::append_to_buffer(fragment, bulk_encrypt(client_enc_key, message_iv, content_and_mac));
+        tls::append_to_buffer(fragment, encrypt_cipher->process(message_iv, content_and_mac));
 
         assert(fragment.size() < ((1<<14)+2048) && "Payload of TLSCiphertext MUST NOT exceed 2^14 + 2048");
         return fragment;
     }
 
     // HACK HACK HACK FIXME TODO XXX
-    std::unique_ptr<rc4::rc4> encrypt_state;
-    std::vector<uint8_t> bulk_encrypt(const std::vector<uint8_t>& enc_key, const std::vector<uint8_t>& iv, const std::vector<uint8_t>& content) {
-        const auto cipher_param = tls::parameters_from_suite(current_cipher);
-        if (cipher_param.bulk_cipher_algorithm == tls::bulk_cipher_algorithm::rc4) {
-            assert(iv.size() == 0);
-            assert(enc_key.size() == cipher_param.key_length);
-            if (!encrypt_state) {
-                std::cout << "Initializing RC4 state with key: " << util::base16_encode(enc_key) << std::endl;
-                encrypt_state.reset(new rc4::rc4(enc_key));
-            }
-            auto data = content;
-            std::cout << "RC4(" << util::base16_encode(data) << ") = " << std::flush;
-            encrypt_state->process(data);
-            std::cout << util::base16_encode(data) << std::endl;
-            return data;
-        } else if (cipher_param.bulk_cipher_algorithm == tls::bulk_cipher_algorithm::aes) {
-            return aes::aes_encrypt_cbc(enc_key, iv, content);
-        } else {
-            assert(cipher_param.bulk_cipher_algorithm == tls::bulk_cipher_algorithm::null);
-        }
-        return content;
-    }
+    std::unique_ptr<tls::cipher> encrypt_cipher = std::unique_ptr<tls::cipher>(new tls::null_cipher{});
+    std::unique_ptr<tls::cipher> decrypt_cipher = std::unique_ptr<tls::cipher>(new tls::null_cipher{});
 
-    std::unique_ptr<rc4::rc4> decrypt_state;
     std::vector<uint8_t> bulk_decrypt(const std::vector<uint8_t>& dec_key, const std::vector<uint8_t>& iv, const std::vector<uint8_t>& content) {
         const auto cipher_param = tls::parameters_from_suite(current_cipher);
         if (cipher_param.bulk_cipher_algorithm == tls::bulk_cipher_algorithm::rc4) {
-            assert(iv.size() == 0);
-            assert(dec_key.size() == cipher_param.key_length);
-            if (!decrypt_state) {
-                std::cout << "Initializing RC4 state with key: " << util::base16_encode(dec_key) << std::endl;
-                decrypt_state.reset(new rc4::rc4(dec_key));
-            }
-            auto data = content;
-            std::cout << "RC4(" << util::base16_encode(data) << ") = " << std::flush;
-            decrypt_state->process(data);
-            std::cout << util::base16_encode(data) << std::endl;
-            return data;
         } else if (cipher_param.bulk_cipher_algorithm == tls::bulk_cipher_algorithm::aes) {
             return aes::aes_decrypt_cbc(dec_key, iv, content);
         } else {
@@ -558,7 +583,7 @@ private:
 
         //std::cout << "server_key\n" << util::base16_encode(server_enc_key)  << std::endl;
 
-        const auto decrypted = bulk_decrypt(server_enc_key, message_iv, encrypted);
+        const auto decrypted = decrypt_cipher->process(message_iv, encrypted);
         //std::cout << "Decrypted\n" << util::base16_encode(decrypted) << std::endl;
 
         // check padding
@@ -611,7 +636,7 @@ int main(int argc, char* argv[])
     //const tls::cipher_suite         wanted_cipher            = tls::cipher_suite::rsa_with_aes_128_cbc_sha;
     //const tls::cipher_suite         wanted_cipher            = tls::cipher_suite::rsa_with_aes_128_cbc_sha256;
     //const tls::cipher_suite         wanted_cipher            = tls::cipher_suite::rsa_with_aes_256_cbc_sha;
-    tls::cipher_suite               wanted_cipher            = tls::cipher_suite::rsa_with_aes_256_cbc_sha256;
+    const tls::cipher_suite         wanted_cipher            = tls::cipher_suite::rsa_with_aes_256_cbc_sha256;
     try {
         boost::asio::io_service         io_service;
         boost::asio::ip::tcp::socket    socket(io_service);
