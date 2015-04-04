@@ -115,9 +115,10 @@ cipher_suite_parameters parameters_from_suite(cipher_suite suite)
     switch (suite) {
 #define PARAMETERS_FROM_SUITE_CASE(cs) case cipher_suite::cs: return from_suite_impl<cipher_suite::cs>()
         PARAMETERS_FROM_SUITE_CASE(null_with_null_null);
+        PARAMETERS_FROM_SUITE_CASE(rsa_with_rc4_128_sha);
         PARAMETERS_FROM_SUITE_CASE(rsa_with_aes_128_cbc_sha);
-        PARAMETERS_FROM_SUITE_CASE(rsa_with_aes_128_cbc_sha256);
         PARAMETERS_FROM_SUITE_CASE(rsa_with_aes_256_cbc_sha);
+        PARAMETERS_FROM_SUITE_CASE(rsa_with_aes_128_cbc_sha256);
         PARAMETERS_FROM_SUITE_CASE(rsa_with_aes_256_cbc_sha256);
 #undef PARAMETERS_FROM_SUITE_CASE
         default: // TODO: REMOVE

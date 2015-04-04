@@ -19,6 +19,7 @@ add_definitions("-DBOOST_ALL_NO_LIB -DBOOST_SYSTEM_NO_DEPRECATED")
 add_library(boost STATIC ${boost_dir}/libs/system/src/error_code.cpp)
 
 add_subdirectory(util)
+add_subdirectory(rc4)
 add_subdirectory(aes)
 add_subdirectory(hash)
 add_subdirectory(asn1)
@@ -27,4 +28,4 @@ add_subdirectory(tls)
 
 include_directories(${funtls_SOURCE_DIR})
 add_executable(funtls main.cpp)
-target_link_libraries(funtls boost util hash asn1 x509 aes tls)
+target_link_libraries(funtls boost util hash asn1 x509 aes rc4 tls)

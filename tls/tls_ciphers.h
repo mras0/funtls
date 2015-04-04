@@ -170,21 +170,21 @@ struct cipher_suite_traits<cipher_suite::null_with_null_null>
 };
 
 template<>
+struct cipher_suite_traits<cipher_suite::rsa_with_rc4_128_sha>
+    : public detail::cipher_suite_traits_base<
+        cipher_suite::rsa_with_rc4_128_sha,
+        key_exchange_algorithm::rsa,
+        detail::rc4_traits,
+        detail::hmac_sha_algo_traits> {
+};
+
+template<>
 struct cipher_suite_traits<cipher_suite::rsa_with_aes_128_cbc_sha>
     : public detail::cipher_suite_traits_base<
         cipher_suite::rsa_with_aes_128_cbc_sha,
         key_exchange_algorithm::rsa,
         detail::aes_traits<128>,
         detail::hmac_sha_algo_traits> {
-};
-
-template<>
-struct cipher_suite_traits<cipher_suite::rsa_with_aes_128_cbc_sha256>
-    : public detail::cipher_suite_traits_base<
-        cipher_suite::rsa_with_aes_128_cbc_sha256,
-        key_exchange_algorithm::rsa,
-        detail::aes_traits<128>,
-        detail::hmac_sha256_algo_traits> {
 };
 
 template<>
@@ -196,6 +196,15 @@ struct cipher_suite_traits<cipher_suite::rsa_with_aes_256_cbc_sha>
         detail::hmac_sha_algo_traits> {
 };
 
+
+template<>
+struct cipher_suite_traits<cipher_suite::rsa_with_aes_128_cbc_sha256>
+    : public detail::cipher_suite_traits_base<
+        cipher_suite::rsa_with_aes_128_cbc_sha256,
+        key_exchange_algorithm::rsa,
+        detail::aes_traits<128>,
+        detail::hmac_sha256_algo_traits> {
+};
 
 template<>
 struct cipher_suite_traits<cipher_suite::rsa_with_aes_256_cbc_sha256>

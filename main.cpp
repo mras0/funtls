@@ -9,6 +9,7 @@
 #include <x509/x509.h>
 #include <x509/x509_rsa.h>
 #include <aes/aes.h>
+#include <rc4/rc4.h>
 #include <util/base_conversion.h>
 #include <util/test.h>
 #include <tls/tls.h>
@@ -42,7 +43,8 @@ public:
         , client_random(tls::make_random()) {
     }
 
-    void perform_handshake() {
+    void perform_handshake(tls::cipher_suite wanted_cipher) {
+        this->wanted_cipher = wanted_cipher;
         /*
         Client                                               Server
 
@@ -88,10 +90,7 @@ private:
     static constexpr size_t         master_secret_size = 48;
 
     const tls::protocol_version     current_protocol_version = tls::protocol_version_tls_1_2;
-    //const tls::cipher_suite         wanted_cipher            = tls::cipher_suite::rsa_with_aes_128_cbc_sha;
-    const tls::cipher_suite         wanted_cipher            = tls::cipher_suite::rsa_with_aes_128_cbc_sha256;
-    //const tls::cipher_suite         wanted_cipher            = tls::cipher_suite::rsa_with_aes_256_cbc_sha;
-    //const tls::cipher_suite         wanted_cipher            = tls::cipher_suite::rsa_with_aes_256_cbc_sha256;
+    tls::cipher_suite               wanted_cipher;
     tls::cipher_suite               current_cipher           = tls::cipher_suite::null_with_null_null;
 
     boost::asio::ip::tcp::socket&   socket;
@@ -396,25 +395,81 @@ private:
         //    length specifies the length of the padding field exclusive of the
         //    padding_length field itself.
         const auto block_length = cipher_param.block_length;
-        uint8_t padding_length = block_length - (content_and_mac.size()+1) % block_length;
-        for (unsigned i = 0; i < padding_length + 1U; ++i) {
-            content_and_mac.push_back(padding_length);
+        if (block_length) {
+            assert(cipher_param.cipher_type == tls::cipher_type::block);
+            uint8_t padding_length = block_length - (content_and_mac.size()+1) % block_length;
+            for (unsigned i = 0; i < padding_length + 1U; ++i) {
+                content_and_mac.push_back(padding_length);
+            }
+            assert(content_and_mac.size() % block_length == 0);
+        } else {
+            assert(cipher_param.cipher_type == tls::cipher_type::stream);
         }
-        assert(content_and_mac.size() % block_length == 0);
 
         //
         // A GenericBlockCipher consist of the initialization vector and block-ciphered
         // content, mac and padding.
         //
-        assert(cipher_param.bulk_cipher_algorithm == tls::bulk_cipher_algorithm::aes);
         std::vector<uint8_t> fragment;
         std::vector<uint8_t> message_iv(cipher_param.iv_length);
-        tls::get_random_bytes(&message_iv[0], message_iv.size());
-        tls::append_to_buffer(fragment, message_iv);
-        tls::append_to_buffer(fragment, aes::aes_encrypt_cbc(client_enc_key, message_iv, content_and_mac));
+        if (!message_iv.empty()) {
+            assert(cipher_param.cipher_type == tls::cipher_type::block);
+            tls::get_random_bytes(&message_iv[0], message_iv.size());
+            tls::append_to_buffer(fragment, message_iv);
+        } else {
+            assert(cipher_param.cipher_type == tls::cipher_type::stream);
+        }
+        tls::append_to_buffer(fragment, bulk_encrypt(client_enc_key, message_iv, content_and_mac));
 
         assert(fragment.size() < ((1<<14)+2048) && "Payload of TLSCiphertext MUST NOT exceed 2^14 + 2048");
         return fragment;
+    }
+
+    // HACK HACK HACK FIXME TODO XXX
+    std::unique_ptr<rc4::rc4> encrypt_state;
+    std::vector<uint8_t> bulk_encrypt(const std::vector<uint8_t>& enc_key, const std::vector<uint8_t>& iv, const std::vector<uint8_t>& content) {
+        const auto cipher_param = tls::parameters_from_suite(current_cipher);
+        if (cipher_param.bulk_cipher_algorithm == tls::bulk_cipher_algorithm::rc4) {
+            assert(iv.size() == 0);
+            assert(enc_key.size() == cipher_param.key_length);
+            if (!encrypt_state) {
+                std::cout << "Initializing RC4 state with key: " << util::base16_encode(enc_key) << std::endl;
+                encrypt_state.reset(new rc4::rc4(enc_key));
+            }
+            auto data = content;
+            std::cout << "RC4(" << util::base16_encode(data) << ") = " << std::flush;
+            encrypt_state->process(data);
+            std::cout << util::base16_encode(data) << std::endl;
+            return data;
+        } else if (cipher_param.bulk_cipher_algorithm == tls::bulk_cipher_algorithm::aes) {
+            return aes::aes_encrypt_cbc(enc_key, iv, content);
+        } else {
+            assert(cipher_param.bulk_cipher_algorithm == tls::bulk_cipher_algorithm::null);
+        }
+        return content;
+    }
+
+    std::unique_ptr<rc4::rc4> decrypt_state;
+    std::vector<uint8_t> bulk_decrypt(const std::vector<uint8_t>& dec_key, const std::vector<uint8_t>& iv, const std::vector<uint8_t>& content) {
+        const auto cipher_param = tls::parameters_from_suite(current_cipher);
+        if (cipher_param.bulk_cipher_algorithm == tls::bulk_cipher_algorithm::rc4) {
+            assert(iv.size() == 0);
+            assert(dec_key.size() == cipher_param.key_length);
+            if (!decrypt_state) {
+                std::cout << "Initializing RC4 state with key: " << util::base16_encode(dec_key) << std::endl;
+                decrypt_state.reset(new rc4::rc4(dec_key));
+            }
+            auto data = content;
+            std::cout << "RC4(" << util::base16_encode(data) << ") = " << std::flush;
+            decrypt_state->process(data);
+            std::cout << util::base16_encode(data) << std::endl;
+            return data;
+        } else if (cipher_param.bulk_cipher_algorithm == tls::bulk_cipher_algorithm::aes) {
+            return aes::aes_decrypt_cbc(dec_key, iv, content);
+        } else {
+            assert(cipher_param.bulk_cipher_algorithm == tls::bulk_cipher_algorithm::null);
+        }
+        return content;
     }
 
     void read_change_cipher_spec(){
@@ -503,22 +558,28 @@ private:
 
         //std::cout << "server_key\n" << util::base16_encode(server_enc_key)  << std::endl;
 
-        const auto decrypted = aes::aes_decrypt_cbc(server_enc_key, message_iv, encrypted);
+        const auto decrypted = bulk_decrypt(server_enc_key, message_iv, encrypted);
         //std::cout << "Decrypted\n" << util::base16_encode(decrypted) << std::endl;
 
         // check padding
-        const auto padding_length = decrypted[decrypted.size()-1];
-        assert(decrypted.size() % cipher_param.block_length == 0);
-        assert(padding_length + 1U < decrypted.size()); // Padding+Padding length byte musn't be sole contents
-        for (unsigned i = 0; i < padding_length; ++i) assert(decrypted[decrypted.size()-1-padding_length] == padding_length);
+        size_t padding_length = 0;
+        size_t mac_index = 0;
+        if (cipher_param.cipher_type == tls::cipher_type::block) {
+            // TODO: FIX
+            padding_length = decrypted[decrypted.size()-1];
+            mac_index = decrypted.size()-1-padding_length-cipher_param.mac_length;
+            assert(decrypted.size() % cipher_param.block_length == 0);
+            assert(padding_length + 1U < decrypted.size()); // Padding+Padding length byte musn't be sole contents
+            for (unsigned i = 0; i < padding_length; ++i) assert(decrypted[decrypted.size()-1-padding_length] == padding_length);
+        } else {
+            assert(cipher_param.cipher_type == tls::cipher_type::stream);
+            mac_index = decrypted.size()-cipher_param.mac_length;
+        }
 
         // Extract MAC + Content
-        const size_t mac_index = decrypted.size()-1-padding_length-cipher_param.mac_length;
         const std::vector<uint8_t> mac{&decrypted[mac_index],&decrypted[mac_index+cipher_param.mac_length]};
-        //std::cout << "MAC\n" << util::base16_encode(mac) << std::endl;
 
         const std::vector<uint8_t> content{&decrypted[0],&decrypted[mac_index]};
-        //std::cout << "Content\n" << util::base16_encode(content) << std::endl;
 
         // Check MAC -- TODO: Unify with do_send
         auto hash_algo = tls::get_hmac(cipher_param.mac_algorithm, server_mac_key);
@@ -530,7 +591,9 @@ private:
         hash_algo.input(std::vector<uint8_t>{uint8_t(content.size()>>8),uint8_t(content.size())});
         hash_algo.input(content);
         const auto calced_mac = hash_algo.result();
-        std::cout << "Calculated MAC\n" << util::base16_encode(calced_mac) << std::endl;
+        //std::cout << "MAC\n" << util::base16_encode(mac) << std::endl;
+        //std::cout << "Calculated MAC\n" << util::base16_encode(calced_mac) << std::endl;
+        //std::cout << "Content\n" << util::base16_encode(content) << std::endl;
         assert(calced_mac == mac);
 
         sequence_number++;
@@ -544,6 +607,11 @@ int main(int argc, char* argv[])
     const char* const host = argc > 1 ? argv[1] : "localhost";
     const char* const port = argc > 2 ? argv[2] : "443";
 
+    //const tls::cipher_suite         wanted_cipher            = tls::cipher_suite::rsa_with_rc4_128_sha;
+    //const tls::cipher_suite         wanted_cipher            = tls::cipher_suite::rsa_with_aes_128_cbc_sha;
+    //const tls::cipher_suite         wanted_cipher            = tls::cipher_suite::rsa_with_aes_128_cbc_sha256;
+    //const tls::cipher_suite         wanted_cipher            = tls::cipher_suite::rsa_with_aes_256_cbc_sha;
+    tls::cipher_suite               wanted_cipher            = tls::cipher_suite::rsa_with_aes_256_cbc_sha256;
     try {
         boost::asio::io_service         io_service;
         boost::asio::ip::tcp::socket    socket(io_service);
@@ -553,7 +621,7 @@ int main(int argc, char* argv[])
         boost::asio::connect(socket, resolver.resolve({host, port}));
         std::cout << " OK" << std::endl;
         tls_socket ts{socket};
-        ts.perform_handshake();
+        ts.perform_handshake(wanted_cipher);
 
         std::cout << "Completed handshake!\n";
 
