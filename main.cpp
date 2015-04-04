@@ -36,14 +36,13 @@ enum class connection_end { server, client };
 class cipher {
 public:
     virtual ~cipher() {}
-    virtual std::vector<uint8_t> process(const std::vector<uint8_t>& iv, const std::vector<uint8_t>& data) = 0;
+    virtual std::vector<uint8_t> process(const std::vector<uint8_t>& data) = 0;
 };
 
 class null_cipher : public cipher {
 public:
     null_cipher() {}
-    virtual std::vector<uint8_t> process(const std::vector<uint8_t>& iv, const std::vector<uint8_t>& data) override {
-        FUNTLS_CHECK_BINARY(iv.size(), ==, 0, "Initialization Vector provided to null_cipher");
+    virtual std::vector<uint8_t> process(const std::vector<uint8_t>& data) override {
         return data;
     }
 };
@@ -52,8 +51,7 @@ class rc4_cipher : public cipher {
 public:
     explicit rc4_cipher(const std::vector<uint8_t>& key) : rc4_(key) {}
 
-    virtual std::vector<uint8_t> process(const std::vector<uint8_t>& iv, const std::vector<uint8_t>& data) override {
-        FUNTLS_CHECK_BINARY(iv.size(), ==, 0, "Initialization Vector provided to rc4_cipher");
+    virtual std::vector<uint8_t> process(const std::vector<uint8_t>& data) override {
         auto buffer = data;
         rc4_.process(buffer);
         return buffer;
@@ -64,15 +62,30 @@ private:
 
 class aes_cipher : public cipher {
 public:
+    static constexpr size_t iv_length = 128/8;
+
     enum operation { decrypt = 0, encrypt = 1 };
     explicit aes_cipher(operation op, const std::vector<uint8_t>& key) : operation_(op), key_(key) {}
 
-    virtual std::vector<uint8_t> process(const std::vector<uint8_t>& iv, const std::vector<uint8_t>& data) override {
+    //
+    // A GenericBlockCipher consist of the initialization vector and block-ciphered
+    // content, mac and padding.
+    //
+
+    virtual std::vector<uint8_t> process(const std::vector<uint8_t>& data) override {
         if (operation_ == decrypt) {
-            return aes::aes_decrypt_cbc(key_, iv, data);
+            FUNTLS_CHECK_BINARY(data.size(), >, iv_length, "Message too small");
+            // Extract initialization vector
+            const std::vector<uint8_t> iv(&data[0],&data[iv_length]);
+            const std::vector<uint8_t> encrypted(&data[iv_length],&data[data.size()]);
+            return aes::aes_decrypt_cbc(key_, iv, encrypted);
         } else {
             assert(operation_ == encrypt);
-            return aes::aes_encrypt_cbc(key_, iv, data);
+            // Generate initialization vector
+            std::vector<uint8_t> message(iv_length);
+            tls::get_random_bytes(&message[0], message.size());
+            tls::append_to_buffer(message, aes::aes_encrypt_cbc(key_, message, data));
+            return message;
         }
     }
 private:
@@ -289,17 +302,16 @@ private:
         // 3.a
         const auto m = x509::base256_decode<int_type>(EM); // m = OS2IP (EM)
         assert(m < n); // Is the message too long?
-
-        std::cout << "m (" << EM.size() << ") = " << util::base16_encode(EM) << std::dec << "\n";
+        //std::cout << "m (" << EM.size() << ") = " << util::base16_encode(EM) << std::dec << "\n";
 
         // 3.b
         const int_type c = powm(m, e, n); // c = RSAEP ((n, e), m)
-        std::cout << "c:\n" << c << std::endl;
+        /std::cout << "c:\n" << c << std::endl;
 
         // 3.c Convert the ciphertext representative c to a ciphertext C of length k octets
         // C = I2OSP (c, k)
         const auto C = x509::base256_encode(c, k);
-        std::cout << "C:\n" << util::base16_encode(C) << std::endl;
+        //std::cout << "C:\n" << util::base16_encode(C) << std::endl;
 
         tls::client_key_exchange client_key_exchange{tls::vector<tls::uint8,0,(1<<16)-1>{C}};
         send_record(tls::handshake{client_key_exchange});
@@ -463,20 +475,7 @@ private:
             assert(cipher_param.cipher_type == tls::cipher_type::stream);
         }
 
-        //
-        // A GenericBlockCipher consist of the initialization vector and block-ciphered
-        // content, mac and padding.
-        //
-        std::vector<uint8_t> fragment;
-        std::vector<uint8_t> message_iv(cipher_param.iv_length);
-        if (!message_iv.empty()) {
-            assert(cipher_param.cipher_type == tls::cipher_type::block);
-            tls::get_random_bytes(&message_iv[0], message_iv.size());
-            tls::append_to_buffer(fragment, message_iv);
-        } else {
-            assert(cipher_param.cipher_type == tls::cipher_type::stream);
-        }
-        tls::append_to_buffer(fragment, encrypt_cipher->process(message_iv, content_and_mac));
+        auto fragment = encrypt_cipher->process(content_and_mac);
 
         assert(fragment.size() < ((1<<14)+2048) && "Payload of TLSCiphertext MUST NOT exceed 2^14 + 2048");
         return fragment;
@@ -575,16 +574,7 @@ private:
 
         FUNTLS_CHECK_BINARY(buffer.size(), >=, cipher_param.iv_length, "Message too small"); // needs work..
 
-        const std::vector<uint8_t> message_iv{&buffer[0], &buffer[cipher_param.iv_length]};
-        const std::vector<uint8_t> encrypted{&buffer[cipher_param.iv_length], &buffer[buffer.size()]};
-
-        //std::cout << "IV\n" << util::base16_encode(message_iv)  << std::endl;
-        //std::cout << "Encrypted\n" << util::base16_encode(encrypted)  << std::endl;
-
-        //std::cout << "server_key\n" << util::base16_encode(server_enc_key)  << std::endl;
-
-        const auto decrypted = decrypt_cipher->process(message_iv, encrypted);
-        //std::cout << "Decrypted\n" << util::base16_encode(decrypted) << std::endl;
+        const auto decrypted = decrypt_cipher->process(buffer);
 
         // check padding
         size_t padding_length = 0;
