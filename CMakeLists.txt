@@ -29,3 +29,9 @@ add_subdirectory(tls)
 include_directories(${funtls_SOURCE_DIR})
 add_executable(funtls main.cpp)
 target_link_libraries(funtls boost util hash asn1 x509 aes rc4 tls)
+
+set_source_files_properties(tags PROPERTIES GENERATED true)
+add_custom_target(tags
+    COMMAND ctags -R --c++-kinds=+p --fields=+iaS --extra=+q --exclude=build* .
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+add_dependencies(funtls tags)

@@ -39,7 +39,7 @@ hash::hash_algorithm get_hmac(mac_algorithm algo, const std::vector<uint8_t>& ke
 {
     switch (algo) {
     case mac_algorithm::null:        break;
-    case mac_algorithm::hmac_md5:    break;
+    case mac_algorithm::hmac_md5:    return hash::hmac_md5{key};
     case mac_algorithm::hmac_sha1:   return hash::hmac_sha1{key};
     case mac_algorithm::hmac_sha256: return hash::hmac_sha256{key};
     case mac_algorithm::hmac_sha384: return hash::hmac_sha384{key};
@@ -115,6 +115,7 @@ cipher_suite_parameters parameters_from_suite(cipher_suite suite)
     switch (suite) {
 #define PARAMETERS_FROM_SUITE_CASE(cs) case cipher_suite::cs: return from_suite_impl<cipher_suite::cs>()
         PARAMETERS_FROM_SUITE_CASE(null_with_null_null);
+        PARAMETERS_FROM_SUITE_CASE(rsa_with_rc4_128_md5);
         PARAMETERS_FROM_SUITE_CASE(rsa_with_rc4_128_sha);
         PARAMETERS_FROM_SUITE_CASE(rsa_with_aes_128_cbc_sha);
         PARAMETERS_FROM_SUITE_CASE(rsa_with_aes_256_cbc_sha);

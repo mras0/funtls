@@ -86,6 +86,10 @@ enum class mac_algorithm {
     hmac_sha512
 };
 
+// TODO: This isn't as clever as I hoped it would be
+//       Of course some of the uglyness could be hidden
+//       behind macros, but rethink before doing that
+
 template<cipher_suite suite>
 struct cipher_suite_traits;
 
@@ -131,6 +135,12 @@ struct null_mac_algo_triats {
     static constexpr uint8_t mac_key_length      = 0;
 };
 
+struct hmac_md5_algo_traits {
+    static constexpr auto mac_algorithm          = tls::mac_algorithm::hmac_md5;
+    static constexpr uint8_t mac_length          = 128/8;
+    static constexpr uint8_t mac_key_length      = 128/8;
+};
+
 struct hmac_sha_algo_traits {
     static constexpr auto mac_algorithm          = tls::mac_algorithm::hmac_sha1;
     static constexpr uint8_t mac_length          = 160/8;
@@ -167,6 +177,15 @@ struct cipher_suite_traits<cipher_suite::null_with_null_null>
         key_exchange_algorithm::null,
         detail::null_bulk_algo_traits,
         detail::null_mac_algo_triats> {
+};
+
+template<>
+struct cipher_suite_traits<cipher_suite::rsa_with_rc4_128_md5>
+    : public detail::cipher_suite_traits_base<
+        cipher_suite::rsa_with_rc4_128_sha,
+        key_exchange_algorithm::rsa,
+        detail::rc4_traits,
+        detail::hmac_md5_algo_traits> {
 };
 
 template<>

@@ -14,6 +14,12 @@ std::ostream& operator<<(std::ostream& os, const std::vector<uint8_t>& v)
     return os << util::base16_encode(v);
 }
 
+std::vector<uint8_t> s2v(const std::string& s)
+{
+    return std::vector<uint8_t>(s.begin(), s.end());
+}
+
+
 //
 // Identifiers and Test Vectors for HMAC-SHA-224, HMAC-SHA-256, HMAC-SHA-384, and HMAC-SHA-512
 // https://www.ietf.org/rfc/rfc4231.txt
@@ -220,6 +226,16 @@ void test_hmac()
     }
 }
 
+void test_md5()
+{
+#define TEST_MD5(expected, indata) FUNTLS_ASSERT_EQUAL(util::base16_decode(expected), hash::md5().input(s2v(indata)).result())
+    TEST_MD5("9e107d9d372bb6826bd81d3542a419d6", "The quick brown fox jumps over the lazy dog");
+    TEST_MD5("e4d909c290d0fb1ca068ffaddf22cbd0", "The quick brown fox jumps over the lazy dog.");
+    TEST_MD5("d41d8cd98f00b204e9800998ecf8427e", "");
+#undef TEST_MD5
+    FUNTLS_ASSERT_EQUAL(util::base16_decode("80070713463e7749b90c2dc24911e275"), hash::hmac_md5(std::string("key")).input(s2v("The quick brown fox jumps over the lazy dog")).result());
+}
+
 int main()
 {
     const auto sha256_of_empty_string = util::base16_decode("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
@@ -227,5 +243,13 @@ int main()
     FUNTLS_ASSERT_EQUAL(sha256_of_empty_string, hash::sha256().result());
     FUNTLS_ASSERT_EQUAL(util::base16_decode("936a185caaa266bb9cbe981e9e05cb78cd732b0b3280eb944412bb6f8f8f07af"), hash::sha256().input("helloworld", strlen("helloworld")).result());
     // TODO: test other hash variants
+    // TODO: check interesting key lengths (e.g. around the hash block size (64 for MD5 and SHA1))
     test_hmac();
+    test_md5();
+    // Some empty HMACs
+    const std::string empty_key;
+    FUNTLS_ASSERT_EQUAL(util::base16_decode("74e6f7298a9c2d168935f58c001bad88"), hash::hmac_md5(empty_key).result());
+    FUNTLS_ASSERT_EQUAL(util::base16_decode("fbdb1d1b18aa6c08324b7d64b71fb76370690e1d"), hash::hmac_sha1(empty_key).result());
+    FUNTLS_ASSERT_EQUAL(util::base16_decode("b613679a0814d9ec772f95d778c35fc5ff1697c493715653c6c712144292c5ad"), hash::hmac_sha256(empty_key).result());
+
 }

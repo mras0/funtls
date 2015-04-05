@@ -5,11 +5,11 @@
 #include <cstdint>
 #include <cstddef>
 #include <memory>
-#include <cassert>
 
 namespace funtls { namespace hash {
 
 enum class algorithm {
+    md5,
     sha1,
     sha224,
     sha256,
@@ -41,8 +41,7 @@ public:
     }
 
     hash_algorithm& input(const std::vector<uint8_t>& v) {
-        assert(!v.empty());
-        return input(&v[0], v.size());
+        return input(v.size() ? &v[0] : nullptr, v.size());
     }
 
     std::vector<uint8_t> result() const {
@@ -74,18 +73,19 @@ public:
     }
     template<typename T>
     hmac_algorithm_impl(const T& x)
-        : hmac_algorithm_impl(&x[0], x.size()) {
+        : hmac_algorithm_impl(x.size() ? &x[0] : nullptr, x.size()) {
         static_assert(sizeof(x[0]) == 1, "");
-        assert(!x.empty());
     }
 };
 
+using md5         = hash_algorithm_impl<algorithm::md5>;
 using sha1        = hash_algorithm_impl<algorithm::sha1>;
 using sha224      = hash_algorithm_impl<algorithm::sha224>;
 using sha256      = hash_algorithm_impl<algorithm::sha256>;
 using sha384      = hash_algorithm_impl<algorithm::sha384>;
 using sha512      = hash_algorithm_impl<algorithm::sha512>;
 
+using hmac_md5    = hmac_algorithm_impl<algorithm::md5>;
 using hmac_sha1   = hmac_algorithm_impl<algorithm::sha1>;
 using hmac_sha224 = hmac_algorithm_impl<algorithm::sha224>;
 using hmac_sha256 = hmac_algorithm_impl<algorithm::sha256>;
