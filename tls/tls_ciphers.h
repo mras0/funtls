@@ -243,6 +243,33 @@ struct cipher_suite_traits<cipher_suite::rsa_with_aes_256_cbc_sha256>
         hmac_sha256_algo_traits> {
 };
 
+template<>
+struct cipher_suite_traits<cipher_suite::dh_rsa_with_3des_ede_cbc_sha>
+    : public detail::cipher_suite_traits_base<
+        cipher_suite::dh_rsa_with_3des_ede_cbc_sha,
+        key_exchange_algorithm::dh_rsa,
+        _3des_traits,
+        hmac_sha_algo_traits> {
+};
+
+template<>
+struct cipher_suite_traits<cipher_suite::dhe_rsa_with_3des_ede_cbc_sha>
+    : public detail::cipher_suite_traits_base<
+        cipher_suite::dhe_rsa_with_3des_ede_cbc_sha,
+        key_exchange_algorithm::dhe_rsa,
+        _3des_traits,
+        hmac_sha_algo_traits> {
+};
+
+template<>
+struct cipher_suite_traits<cipher_suite::dh_rsa_with_aes_128_cbc_sha>
+    : public detail::cipher_suite_traits_base<
+        cipher_suite::dh_rsa_with_3des_ede_cbc_sha,
+        key_exchange_algorithm::dh_rsa,
+        aes_traits<128>,
+        hmac_sha_algo_traits> {
+};
+
 struct cipher_suite_parameters {
     const tls::cipher_suite           cipher_suite;
     const tls::key_exchange_algorithm key_exchange_algorithm;

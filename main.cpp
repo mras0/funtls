@@ -287,18 +287,7 @@ private:
         server_public_key.reset(new x509::rsa_public_key(rsa_public_key_from_certificate(cert)));
     }
 
-    void send_client_key_exchange() {
-        // OK, now it's time to do ClientKeyExchange
-        // Since we're doing RSA, we'll be sending the EncryptedPreMasterSecret
-
-        // Prepare pre-master secret (version + 46 random bytes)
-        std::vector<uint8_t> pre_master_secret(master_secret_size);
-        pre_master_secret[0] = current_protocol_version.major;
-        pre_master_secret[1] = current_protocol_version.minor;
-        tls::get_random_bytes(&pre_master_secret[2], pre_master_secret.size()-2);
-
-        std::cout << "Pre-master secret: " << util::base16_encode(&pre_master_secret[2], pre_master_secret.size()-2) << std::endl;
-
+    std::vector<uint8_t> rsa_client_kex_data(const std::vector<uint8_t>& pre_master_secret) const {
         assert(server_public_key);
         const auto& s_pk = *server_public_key;
         const auto n = s_pk.modolus.as<int_type>();
@@ -346,6 +335,22 @@ private:
         const auto C = x509::base256_encode(c, k);
         //std::cout << "C:\n" << util::base16_encode(C) << std::endl;
 
+        return C;
+    }
+
+    void send_client_key_exchange() {
+        // OK, now it's time to do ClientKeyExchange
+        // Since we're doing RSA, we'll be sending the EncryptedPreMasterSecret
+
+        // Prepare pre-master secret (version + 46 random bytes)
+        std::vector<uint8_t> pre_master_secret(master_secret_size);
+        pre_master_secret[0] = current_protocol_version.major;
+        pre_master_secret[1] = current_protocol_version.minor;
+        tls::get_random_bytes(&pre_master_secret[2], pre_master_secret.size()-2);
+
+        std::cout << "Pre-master secret: " << util::base16_encode(&pre_master_secret[2], pre_master_secret.size()-2) << std::endl;
+
+        const auto C = rsa_client_kex_data(pre_master_secret);
         tls::client_key_exchange client_key_exchange{tls::vector<tls::uint8,0,(1<<16)-1>{C}};
         send_record(tls::handshake{client_key_exchange});
 
@@ -665,6 +670,10 @@ int main(int argc, char* argv[])
     //const tls::cipher_suite wanted_cipher = tls::cipher_suite::rsa_with_aes_128_cbc_sha256;
     //const tls::cipher_suite wanted_cipher = tls::cipher_suite::rsa_with_aes_256_cbc_sha;
     const tls::cipher_suite wanted_cipher = tls::cipher_suite::rsa_with_aes_256_cbc_sha256;
+
+    // WIP:
+    //const tls::cipher_suite wanted_cipher = tls::cipher_suite::dhe_rsa_with_3des_ede_cbc_sha;
+    std::cout << "Wanted cipher:\n" << tls::parameters_from_suite(wanted_cipher) << std::endl;
     try {
         boost::asio::io_service         io_service;
         boost::asio::ip::tcp::socket    socket(io_service);

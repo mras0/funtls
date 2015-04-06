@@ -122,6 +122,9 @@ cipher_suite_parameters parameters_from_suite(cipher_suite suite)
         PARAMETERS_FROM_SUITE_CASE(rsa_with_aes_256_cbc_sha);
         PARAMETERS_FROM_SUITE_CASE(rsa_with_aes_128_cbc_sha256);
         PARAMETERS_FROM_SUITE_CASE(rsa_with_aes_256_cbc_sha256);
+        PARAMETERS_FROM_SUITE_CASE(dh_rsa_with_3des_ede_cbc_sha);
+        PARAMETERS_FROM_SUITE_CASE(dhe_rsa_with_3des_ede_cbc_sha);
+        PARAMETERS_FROM_SUITE_CASE(dh_rsa_with_aes_128_cbc_sha);
 #undef PARAMETERS_FROM_SUITE_CASE
         default: // TODO: REMOVE
         break;
@@ -136,7 +139,9 @@ std::ostream& operator<<(std::ostream& os, cipher_suite suite)
     os << "_WITH_" << csp.bulk_cipher_algorithm;
     if (csp.bulk_cipher_algorithm == bulk_cipher_algorithm::rc4) {
         os << "_" << 8*csp.key_length;
-    } else if (csp.bulk_cipher_algorithm == bulk_cipher_algorithm::_3des || csp.bulk_cipher_algorithm == bulk_cipher_algorithm::aes) {
+    } else if (csp.bulk_cipher_algorithm == bulk_cipher_algorithm::_3des) {
+        os << "_EDE_CBC";
+    } else if (csp.bulk_cipher_algorithm == bulk_cipher_algorithm::aes) {
         os << "_" << 8*csp.key_length << "_CBC";
     } else {
         assert(csp.bulk_cipher_algorithm == bulk_cipher_algorithm::null);
