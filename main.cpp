@@ -10,6 +10,7 @@
 #include <x509/x509_rsa.h>
 #include <aes/aes.h>
 #include <rc4/rc4.h>
+#include <3des/3des.h>
 #include <util/base_conversion.h>
 #include <util/test.h>
 #include <tls/tls.h>
@@ -109,14 +110,13 @@ public:
             // Extract initialization vector
             const std::vector<uint8_t> iv(&data[0],&data[iv_length]);
             const std::vector<uint8_t> encrypted(&data[iv_length],&data[data.size()]);
-            //return _3des_decrypt_cbc(key_, iv, encrypted);
-            return {};
+            return _3des::_3des_decrypt_cbc(key_, iv, encrypted);
         } else {
             assert(operation_ == encrypt);
             // Generate initialization vector
             std::vector<uint8_t> message(iv_length);
             tls::get_random_bytes(&message[0], message.size());
-            //tls::append_to_buffer(message, _3des_encrypt_cbc(key_, message, data));
+            tls::append_to_buffer(message, _3des::_3des_encrypt_cbc(key_, message, data));
             return message;
         }
     }

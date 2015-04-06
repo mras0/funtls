@@ -2,6 +2,10 @@
 #include <util/test.h>
 #include <cassert>
 
+#include <iostream>
+
+using namespace funtls;
+
 namespace {
 #if 0
 template<typename T>
@@ -25,6 +29,13 @@ uint64_t _3des_get_u64(const uint8_t* src)
         res = (res<<8) | src[i];
     }
     return res;
+}
+
+void _3des_put_u64(uint8_t* dst, uint64_t n)
+{
+    for (unsigned i = 0; i < sizeof(n); ++i) {
+        dst[i] = static_cast<uint8_t>(n >> (8*(sizeof(n)-1-i)));
+    }
 }
 
 template<size_t NumBits>
@@ -301,38 +312,75 @@ uint64_t des(des_op op, uint64_t key, uint64_t input)
     return inved;
 }
 
+uint64_t _3des_encrypt_cbc(uint64_t k1, uint64_t k2, uint64_t k3, uint64_t input, uint64_t iv)
+{
+    return _3des::_3des_encrypt(k1, k2, k3, input ^ iv);
+}
+
+uint64_t _3des_decrypt_cbc(uint64_t k1, uint64_t k2, uint64_t k3, uint64_t input, uint64_t iv)
+{
+    return _3des::_3des_decrypt(k1, k2, k3, input) ^ iv;
+}
+
 }
 
 namespace funtls { namespace _3des {
-
-// Each DES key is nominally stored or transmitted as 8 bytes, each of odd parity
-std::vector<uint8_t> _3des_encrypt_cbc(const std::vector<uint8_t>& key, const std::vector<uint8_t>& iv, const std::vector<uint8_t>& input)
-{
-    FUNTLS_CHECK_BINARY(key.size(), ==, key_length_bytes, "Invalid 3DES key length");
-    FUNTLS_CHECK_BINARY(iv.size(),  ==, block_length_bytes, "Invalid 3DES initialization vector length");
-    FUNTLS_CHECK_BINARY(input.size() % block_length_bytes, ==, 0,  "Invalid 3DES input length " + std::to_string(input.size()));
-    FUNTLS_CHECK_FAILURE("Not implemented");
-}
-
-std::vector<uint8_t> _3des_decrypt_cbc(const std::vector<uint8_t>& key, const std::vector<uint8_t>& iv, const std::vector<uint8_t>& input)
-{
-    FUNTLS_CHECK_BINARY(key.size(), ==, key_length_bytes, "Invalid 3DES key length");
-    FUNTLS_CHECK_BINARY(iv.size(),  ==, block_length_bytes, "Invalid 3DES initialization vector length");
-    FUNTLS_CHECK_BINARY(input.size() % block_length_bytes, ==, 0,  "Invalid 3DES input length " + std::to_string(input.size()));
-    FUNTLS_CHECK_FAILURE("Not implemented");
-}
 
 uint64_t _3des_encrypt(uint64_t k1, uint64_t k2, uint64_t k3, uint64_t input)
 {
     // ciphertext = EK3(DK2(EK1(plaintext)))
     return des(des_op::enc, k3, des(des_op::dec, k2, des(des_op::enc, k1, input)));
-
 }
 
 uint64_t _3des_decrypt(uint64_t k1, uint64_t k2, uint64_t k3, uint64_t input)
 {
     // plaintext = DK1(EK2(DK3(ciphertext)))
     return des(des_op::dec, k1, des(des_op::enc, k2, des(des_op::dec, k3, input)));
+}
+
+// TODO: The CBC modes could reuse the key schedule
+
+// Each DES key is nominally stored or transmitted as 8 bytes, each of odd parity
+std::vector<uint8_t> _3des_encrypt_cbc(const std::vector<uint8_t>& key, const std::vector<uint8_t>& iv_bytes, const std::vector<uint8_t>& input)
+{
+    FUNTLS_CHECK_BINARY(key.size(), ==, key_length_bytes, "Invalid 3DES key length");
+    FUNTLS_CHECK_BINARY(iv_bytes.size(), ==, block_length_bytes, "Invalid 3DES initialization vector length");
+    FUNTLS_CHECK_BINARY(input.size() % block_length_bytes, ==, 0,  "Invalid 3DES input length " + std::to_string(input.size()));
+
+    const uint64_t k1 = _3des_get_u64(&key[0*8]);
+    const uint64_t k2 = _3des_get_u64(&key[1*8]);
+    const uint64_t k3 = _3des_get_u64(&key[2*8]);
+    uint64_t iv = _3des_get_u64(&iv_bytes[0]);
+
+    std::vector<uint8_t> output(input.size());
+    for (size_t i = 0; i < input.size(); i += block_length_bytes) {
+        const uint64_t m = _3des_get_u64(&input[i]);
+        const uint64_t c = ::_3des_encrypt_cbc(k1, k2, k3, m, iv);
+        _3des_put_u64(&output[i], c);
+        iv = c;
+    }
+    return output;
+}
+
+std::vector<uint8_t> _3des_decrypt_cbc(const std::vector<uint8_t>& key, const std::vector<uint8_t>& iv_bytes, const std::vector<uint8_t>& input)
+{
+    FUNTLS_CHECK_BINARY(key.size(), ==, key_length_bytes, "Invalid 3DES key length");
+    FUNTLS_CHECK_BINARY(iv_bytes.size(),  ==, block_length_bytes, "Invalid 3DES initialization vector length");
+    FUNTLS_CHECK_BINARY(input.size() % block_length_bytes, ==, 0,  "Invalid 3DES input length " + std::to_string(input.size()));
+
+    const uint64_t k1 = _3des_get_u64(&key[0*8]);
+    const uint64_t k2 = _3des_get_u64(&key[1*8]);
+    const uint64_t k3 = _3des_get_u64(&key[2*8]);
+    uint64_t iv = _3des_get_u64(&iv_bytes[0]);
+
+    std::vector<uint8_t> output(input.size());
+    for (size_t i = 0; i < input.size(); i += block_length_bytes) {
+        const uint64_t c = _3des_get_u64(&input[i]);
+        const uint64_t m = ::_3des_decrypt_cbc(k1, k2, k3, c, iv);
+        _3des_put_u64(&output[i], m);
+        iv = c;
+    }
+    return output;
 }
 
 } } // namespace funtls::_3des
