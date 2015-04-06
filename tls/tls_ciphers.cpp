@@ -117,6 +117,7 @@ cipher_suite_parameters parameters_from_suite(cipher_suite suite)
         PARAMETERS_FROM_SUITE_CASE(null_with_null_null);
         PARAMETERS_FROM_SUITE_CASE(rsa_with_rc4_128_md5);
         PARAMETERS_FROM_SUITE_CASE(rsa_with_rc4_128_sha);
+        PARAMETERS_FROM_SUITE_CASE(rsa_with_3des_ede_cbc_sha);
         PARAMETERS_FROM_SUITE_CASE(rsa_with_aes_128_cbc_sha);
         PARAMETERS_FROM_SUITE_CASE(rsa_with_aes_256_cbc_sha);
         PARAMETERS_FROM_SUITE_CASE(rsa_with_aes_128_cbc_sha256);

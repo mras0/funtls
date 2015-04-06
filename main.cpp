@@ -62,7 +62,8 @@ private:
 
 class aes_cipher : public cipher {
 public:
-    static constexpr size_t iv_length = 128/8;
+    static constexpr size_t iv_length = aes_traits<256>::iv_length;
+    static_assert(aes_traits<256>::iv_length == aes_traits<128>::iv_length, "");
 
     enum operation { decrypt = 0, encrypt = 1 };
     explicit aes_cipher(operation op, const std::vector<uint8_t>& key) : operation_(op), key_(key) {}
@@ -91,6 +92,38 @@ public:
 private:
     operation            operation_;
     std::vector<uint8_t> key_;
+};
+
+class _3des_cipher : public cipher {
+public:
+    static constexpr size_t iv_length = _3des_traits::iv_length;
+
+    enum operation { decrypt = 0, encrypt = 1 };
+    explicit _3des_cipher(operation op, const std::vector<uint8_t>& key) : operation_(op), key_(key) {
+    }
+
+    // TODO: Unify GenericBlockCipher stuff with aes_cipher
+    virtual std::vector<uint8_t> process(const std::vector<uint8_t>& data) override {
+        if (operation_ == decrypt) {
+            FUNTLS_CHECK_BINARY(data.size(), >, iv_length, "Message too small");
+            // Extract initialization vector
+            const std::vector<uint8_t> iv(&data[0],&data[iv_length]);
+            const std::vector<uint8_t> encrypted(&data[iv_length],&data[data.size()]);
+            //return _3des_decrypt_cbc(key_, iv, encrypted);
+            return {};
+        } else {
+            assert(operation_ == encrypt);
+            // Generate initialization vector
+            std::vector<uint8_t> message(iv_length);
+            tls::get_random_bytes(&message[0], message.size());
+            //tls::append_to_buffer(message, _3des_encrypt_cbc(key_, message, data));
+            return message;
+        }
+    }
+private:
+    operation            operation_;
+    std::vector<uint8_t> key_;
+
 };
 
 } } // namespace funtls::tls
@@ -351,6 +384,9 @@ private:
         } else if (cipher_param.bulk_cipher_algorithm == tls::bulk_cipher_algorithm::aes) {
             encrypt_cipher.reset(new tls::aes_cipher(tls::aes_cipher::encrypt, client_enc_key));
             decrypt_cipher.reset(new tls::aes_cipher(tls::aes_cipher::decrypt, server_enc_key));
+        } else if (cipher_param.bulk_cipher_algorithm == tls::bulk_cipher_algorithm::_3des) {
+            encrypt_cipher.reset(new tls::_3des_cipher(tls::_3des_cipher::encrypt, client_enc_key));
+            decrypt_cipher.reset(new tls::_3des_cipher(tls::_3des_cipher::decrypt, server_enc_key));
         } else {
             FUNTLS_CHECK_FAILURE("Unsupported bulk_cipher_algorithm: " + std::to_string((int)cipher_param.bulk_cipher_algorithm));
         }
@@ -622,12 +658,13 @@ int main(int argc, char* argv[])
     const char* const host = argc > 1 ? argv[1] : "localhost";
     const char* const port = argc > 2 ? argv[2] : "443";
 
-    const tls::cipher_suite         wanted_cipher            = tls::cipher_suite::rsa_with_rc4_128_md5;
+    //const tls::cipher_suite         wanted_cipher            = tls::cipher_suite::rsa_with_rc4_128_md5;
     //const tls::cipher_suite         wanted_cipher            = tls::cipher_suite::rsa_with_rc4_128_sha;
     //const tls::cipher_suite         wanted_cipher            = tls::cipher_suite::rsa_with_aes_128_cbc_sha;
     //const tls::cipher_suite         wanted_cipher            = tls::cipher_suite::rsa_with_aes_128_cbc_sha256;
     //const tls::cipher_suite         wanted_cipher            = tls::cipher_suite::rsa_with_aes_256_cbc_sha;
     //const tls::cipher_suite         wanted_cipher            = tls::cipher_suite::rsa_with_aes_256_cbc_sha256;
+    const tls::cipher_suite         wanted_cipher            = tls::cipher_suite::rsa_with_3des_ede_cbc_sha;
     try {
         boost::asio::io_service         io_service;
         boost::asio::ip::tcp::socket    socket(io_service);
