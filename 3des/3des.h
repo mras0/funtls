@@ -9,6 +9,10 @@
 namespace funtls { namespace _3des {
 static constexpr uint8_t key_length_bytes    = 192/8;
 static constexpr uint8_t block_length_bytes  = 64/8;
+
+uint64_t _3des_encrypt(uint64_t k1, uint64_t k2, uint64_t k3, uint64_t input);
+uint64_t _3des_decrypt(uint64_t k1, uint64_t k2, uint64_t k3, uint64_t input);
+
 } } // namespace funtls::_3des
 
 
