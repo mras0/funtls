@@ -55,6 +55,21 @@ private:
     size_t         index_;
 };
 
+template<typename T, unsigned bits=sizeof(T)*8>
+T get_be_uint(buffer_view& b) {
+    T x(0);
+    for (unsigned bit = 0; bit < bits; bit += 8) {
+        x <<= 8;
+        x |= b.get();
+    }
+    return x;
+}
+
+inline uint8_t get_be_uint8(buffer_view& b) { return b.get(); }
+inline uint16_t get_be_uint16(buffer_view& b) { return get_be_uint<uint16_t>(b); }
+inline uint32_t get_be_uint32(buffer_view& b) { return get_be_uint<uint32_t>(b); }
+inline uint64_t get_be_uint64(buffer_view& b) { return get_be_uint<uint64_t>(b); }
+
 } } // namespace funtls::util
 
 #endif

@@ -299,16 +299,10 @@ inline void append_to_buffer(std::vector<uint8_t>& buffer, uint64 item) {
     buffer.push_back(item);
 }
 
-inline void append_to_buffer(std::vector<uint8_t>& buffer, handshake_type item) {
-    buffer.push_back(static_cast<uint8_t>(item));
-}
-
-inline void append_to_buffer(std::vector<uint8_t>& buffer, content_type item) {
-    buffer.push_back(static_cast<uint8_t>(item));
-}
-
-inline void append_to_buffer(std::vector<uint8_t>& buffer, compression_method item) {
-    buffer.push_back(static_cast<uint8_t>(item));
+template<typename EnumType, typename=typename std::enable_if<std::is_enum<EnumType>::value>::type>
+void append_to_buffer(std::vector<uint8_t>& buffer, EnumType item)
+{
+    append_to_buffer(buffer, static_cast<typename std::underlying_type<EnumType>::type>(item));
 }
 
 template<unsigned BitCount, typename Underlying>
@@ -365,10 +359,6 @@ inline void append_to_buffer(std::vector<uint8_t>& buffer, const random& item) {
     append_to_buffer(buffer, item.random_bytes);
 }
 
-inline void append_to_buffer(std::vector<uint8_t>& buffer, const cipher_suite& item) {
-    append_to_buffer(buffer, static_cast<uint16>(item));
-}
-
 inline void append_to_buffer(std::vector<uint8_t>& buffer, const client_hello& item) {
     append_to_buffer(buffer, item.client_version);
     append_to_buffer(buffer, item.random);
@@ -415,50 +405,32 @@ inline void append_to_buffer(std::vector<uint8_t>& buffer, const handshake& item
 
 template<unsigned BitCount, typename Underlying>
 inline void from_bytes(uint<BitCount, Underlying>& item, util::buffer_view& buffer) {
-    Underlying result = 0;
-    for (unsigned i = 0; i < BitCount/8; ++i) {
-        result |= static_cast<Underlying>(buffer.get()) << ((BitCount/8-1-i)*8);
-    }
-    item = uint<BitCount, Underlying>(result);
+    item = util::get_be_uint<Underlying, BitCount>(buffer);
 }
 inline void from_bytes(uint8_t& item, util::buffer_view& buffer) {
-    item = buffer.get();
+    item = get_be_uint8(buffer);
 }
 inline void from_bytes(uint16_t& item, util::buffer_view& buffer) {
-    item  = uint16_t(buffer.get())<<8;
-    item |= buffer.get();
+    item = get_be_uint16(buffer);
 }
 inline void from_bytes(uint32_t& item, util::buffer_view& buffer) {
-    item  = uint32_t(buffer.get())<<24;
-    item |= uint32_t(buffer.get())<<16;
-    item |= uint32_t(buffer.get())<<8;
-    item |= buffer.get();
+    item = get_be_uint32(buffer);
 }
 inline void from_bytes(uint64_t& item, util::buffer_view& buffer) {
-    item |= uint64_t(buffer.get())<<56;
-    item |= uint64_t(buffer.get())<<48;
-    item |= uint64_t(buffer.get())<<40;
-    item |= uint64_t(buffer.get())<<32;
-    item |= uint64_t(buffer.get())<<24;
-    item |= uint64_t(buffer.get())<<16;
-    item |= uint64_t(buffer.get())<<8;
-    item |= buffer.get();
+    item = get_be_uint64(buffer);
 }
 
-inline void from_bytes(handshake_type& item, util::buffer_view& buffer) {
-    item = static_cast<handshake_type>(buffer.get());
+template<typename EnumType, typename=typename std::enable_if<std::is_enum<EnumType>::value>::type>
+void from_bytes(EnumType& item, util::buffer_view& buffer)
+{
+    typename std::underlying_type<EnumType>::type x;
+    from_bytes(x, buffer);
+    item = static_cast<EnumType>(x);
 }
-inline void from_bytes(content_type& item, util::buffer_view& buffer) {
-    item = static_cast<content_type>(buffer.get());
-}
-inline void from_bytes(compression_method& item, util::buffer_view& buffer) {
-    item = static_cast<compression_method>(buffer.get());
-}
+
 template<unsigned ByteCount>
 inline void from_bytes(opaque<ByteCount>& item, util::buffer_view& buffer) {
-    for (unsigned i = 0; i < ByteCount; ++i) {
-        item.data[i] = buffer.get();
-    }
+    buffer.read(&item.data[0], ByteCount);
 }
 
 template<typename T, size_t LowerBoundInBytes, size_t UpperBoundInBytes>
@@ -482,11 +454,6 @@ inline void from_bytes(protocol_version& item, util::buffer_view& buffer) {
 inline void from_bytes(random& item, util::buffer_view& buffer) {
     from_bytes(item.gmt_unix_time, buffer);
     from_bytes(item.random_bytes, buffer);
-}
-inline void from_bytes(cipher_suite& item, util::buffer_view& buffer) {
-    uint16 x;
-    from_bytes(x, buffer);
-    item = static_cast<cipher_suite>(x);
 }
 inline void from_bytes(server_hello& item, util::buffer_view& buffer) {
     from_bytes(item.server_version, buffer);

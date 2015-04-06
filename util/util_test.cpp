@@ -152,9 +152,20 @@ void buffer_test()
     FUNTLS_ASSERT_THROWS(empty.get(), std::runtime_error);
 }
 
+void test_buffer_getters()
+{
+    using namespace funtls::util;
+    const uint8_t buffer[8] = { 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef };
+    { buffer_view buf{buffer, sizeof(buffer)}; FUNTLS_ASSERT_EQUAL(0x01, get_be_uint8(buf)); }
+    { buffer_view buf{buffer, sizeof(buffer)}; FUNTLS_ASSERT_EQUAL(0x0123, get_be_uint16(buf)); }
+    { buffer_view buf{buffer, sizeof(buffer)}; FUNTLS_ASSERT_EQUAL(0x01234567, get_be_uint32(buf)); }
+    { buffer_view buf{buffer, sizeof(buffer)}; FUNTLS_ASSERT_EQUAL(0x0123456789abcdef, get_be_uint64(buf)); }
+}
+
 int main()
 {
     base16_test();
     base64_test();
     buffer_test();
+    test_buffer_getters();
 }
