@@ -265,13 +265,14 @@ void key_schedule(uint64_t (&ks)[num_des_rounds], uint64_t key)
     }
 }
 
-uint64_t des(uint64_t key, uint64_t input)
+enum class des_op { enc, dec };
+uint64_t des(uint64_t key, uint64_t input, des_op op)
 {
     std::cout << "K " << bin(key, 8) << "\nM " << bin(input, 4) << std::endl;
 
     // Produce key schedule from key
-    uint64_t Kn[num_des_rounds];
-    key_schedule(Kn, key);
+    uint64_t Ks[num_des_rounds];
+    key_schedule(Ks, key);
 
     // Initial permutation
     input = initial_permute(input);
@@ -282,9 +283,10 @@ uint64_t des(uint64_t key, uint64_t input)
 
     // Do 16 rounds of "F" (apply the Feistel function)
     for (unsigned round = 0; round < num_des_rounds; ++round) {
-        std::cout << "Round " << round << "\nL  " << bin(l, 4) << "\nR  " << bin(r, 4) << "\nKn " << bin(Kn[round], 6, 48) << std::endl;
+        const auto Kn = Ks[op == des_op::enc ? round : num_des_rounds-1-round];
+        std::cout << "Round " << round << "\nL  " << bin(l, 4) << "\nR  " << bin(r, 4) << "\nKn " << bin(Kn, 6, 48) << std::endl;
         const uint32_t next_l = r;
-        r = l ^ feistel(r, Kn[round]);
+        r = l ^ feistel(r, Kn);
         l = next_l;
     }
     std::cout << "Round " << num_des_rounds << "\nL  " << bin(l, 4) << "\nR  " << bin(r, 4) << std::endl;

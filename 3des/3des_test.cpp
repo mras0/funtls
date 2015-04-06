@@ -50,10 +50,7 @@ int main()
     // Example from http://page.math.tu-berlin.de/~kant/teaching/hess/krypto-ws2006/des.htm
     const uint64_t K = 0x133457799BBCDFF1;
     const uint64_t M = 0x0123456789ABCDEF;
-
-    std::cout << "K = 0x" << util::base16_encode(&K, sizeof(K)) << std::endl;
-    std::cout << "M = 0x" << util::base16_encode(&M, sizeof(M)) << std::endl;
-    std::cout << std::hex << des(K, M) << std::endl;
-    FUNTLS_ASSERT_EQUAL(0x85E813540F0AB405, des(K,M));
+    FUNTLS_ASSERT_EQUAL(0x85E813540F0AB405, des(K,M,des_op::enc));
+    FUNTLS_ASSERT_EQUAL(M, des(K,0x85E813540F0AB405,des_op::dec));
     // http://csrc.nist.gov/publications/nistpubs/800-20/800-20.pdf -- Appendix A
 }
