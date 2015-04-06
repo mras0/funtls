@@ -658,13 +658,13 @@ int main(int argc, char* argv[])
     const char* const host = argc > 1 ? argv[1] : "localhost";
     const char* const port = argc > 2 ? argv[2] : "443";
 
-    //const tls::cipher_suite         wanted_cipher            = tls::cipher_suite::rsa_with_rc4_128_md5;
-    //const tls::cipher_suite         wanted_cipher            = tls::cipher_suite::rsa_with_rc4_128_sha;
-    //const tls::cipher_suite         wanted_cipher            = tls::cipher_suite::rsa_with_aes_128_cbc_sha;
-    //const tls::cipher_suite         wanted_cipher            = tls::cipher_suite::rsa_with_aes_128_cbc_sha256;
-    //const tls::cipher_suite         wanted_cipher            = tls::cipher_suite::rsa_with_aes_256_cbc_sha;
-    //const tls::cipher_suite         wanted_cipher            = tls::cipher_suite::rsa_with_aes_256_cbc_sha256;
-    const tls::cipher_suite         wanted_cipher            = tls::cipher_suite::rsa_with_3des_ede_cbc_sha;
+    //const tls::cipher_suite wanted_cipher = tls::cipher_suite::rsa_with_rc4_128_md5;
+    //const tls::cipher_suite wanted_cipher = tls::cipher_suite::rsa_with_rc4_128_sha;
+    //const tls::cipher_suite wanted_cipher = tls::cipher_suite::rsa_with_3des_ede_cbc_sha;
+    //const tls::cipher_suite wanted_cipher = tls::cipher_suite::rsa_with_aes_128_cbc_sha;
+    //const tls::cipher_suite wanted_cipher = tls::cipher_suite::rsa_with_aes_128_cbc_sha256;
+    //const tls::cipher_suite wanted_cipher = tls::cipher_suite::rsa_with_aes_256_cbc_sha;
+    const tls::cipher_suite wanted_cipher = tls::cipher_suite::rsa_with_aes_256_cbc_sha256;
     try {
         boost::asio::io_service         io_service;
         boost::asio::ip::tcp::socket    socket(io_service);

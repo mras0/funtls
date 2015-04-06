@@ -55,11 +55,8 @@ void _3des_tests()
     FUNTLS_ASSERT_EQUAL(M3, _3des::_3des_decrypt(K1, K2, K3, C3));
 }
 
-int main()
+void _3des_cbc_simple()
 {
-    des_tests();
-    _3des_tests();
-
     // Test 3DES-CBC
     // http://csrc.nist.gov/publications/nistpubs/800-20/800-20.pdf 5.2.1.1
     const auto key      = util::base16_decode("010101010101010101010101010101010101010101010101"); // K1=K2=K3
@@ -142,4 +139,26 @@ int main()
         FUNTLS_ASSERT_EQUAL(expected, encrypted);
         FUNTLS_ASSERT_EQUAL(input, _3des::_3des_decrypt_cbc(key, iv, encrypted));
     }
+}
+
+void _3des_cbc_tests()
+{
+    _3des_cbc_simple();
+
+    // test with randomly generated key, iv and input
+    const auto key      = util::base16_decode("7a41cb315ba3a5be3f20e8de95e7937d2fa9e4257066a6ae");
+    const auto iv       = util::base16_decode("c3d6e71e01b909a1");
+    const auto input    = util::base16_decode("6b828909234864d806c32869df44cdd362ab3e97db69f9cb724e0587d93aad7274383dae41b8c8ba650f49a7cd2cd098");
+    const auto expected = util::base16_decode("f5c3c4964492a142028230d3160edd2f622daa839ed11f26856882fdfb866f8f1c11f117f82513a1321a7adf64c8ec29");
+    const auto encrypted = _3des::_3des_encrypt_cbc(key, iv, input);
+    FUNTLS_ASSERT_EQUAL(expected, encrypted);
+    FUNTLS_ASSERT_EQUAL(input, _3des::_3des_decrypt_cbc(key, iv, encrypted));
+}
+
+int main()
+{
+    des_tests();
+    _3des_tests();
+    _3des_cbc_tests();
+
 }
