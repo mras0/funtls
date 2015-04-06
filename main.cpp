@@ -13,6 +13,7 @@
 #include <3des/3des.h>
 #include <util/base_conversion.h>
 #include <util/test.h>
+#include <util/buffer.h>
 #include <tls/tls.h>
 
 #include <boost/multiprecision/cpp_int.hpp>
@@ -217,9 +218,9 @@ private:
         auto record = read_record();
         FUNTLS_CHECK_BINARY(record.type, ==, tls::content_type::handshake, "Invalid content type");
 
-        size_t index = 0;
-        auto handshake = tls::handshake_from_bytes(record.fragment, index);
-        assert(index == record.fragment.size());
+        util::buffer_view frag_buf{&record.fragment[0], record.fragment.size()};
+        auto handshake = tls::handshake_from_bytes(frag_buf);
+        assert(frag_buf.remaining() == 0);
         handshake_message_digest.input(record.fragment);
         return handshake;
     }
@@ -570,14 +571,14 @@ private:
         std::vector<uint8_t> buffer(5);
         boost::asio::read(socket, boost::asio::buffer(buffer));
 
-        size_t index = 0;
+        util::buffer_view buf_view{&buffer[0], buffer.size()};
         tls::content_type     content_type;
         tls::protocol_version protocol_version;
         tls::uint16           length;
-        tls::from_bytes(content_type, buffer, index);
-        tls::from_bytes(protocol_version, buffer, index);
-        tls::from_bytes(length, buffer, index);
-        assert(index == buffer.size());
+        tls::from_bytes(content_type, buf_view);
+        tls::from_bytes(protocol_version, buf_view);
+        tls::from_bytes(length, buf_view);
+        assert(buf_view.remaining() == 0);
 
         FUNTLS_CHECK_BINARY(protocol_version, ==, current_protocol_version, "Wrong TLS version");
         FUNTLS_CHECK_BINARY(length, >=, 1, "Illegal fragment size");

@@ -11,9 +11,10 @@
 #include <string>
 #include <iostream>
 
-#include "variant.h"
+#include <util/buffer.h>
 
-#include "tls_ciphers.h"
+#include <tls/variant.h>
+#include <tls/tls_ciphers.h>
 
 namespace funtls { namespace tls {
 
@@ -413,116 +414,101 @@ inline void append_to_buffer(std::vector<uint8_t>& buffer, const handshake& item
 }
 
 template<unsigned BitCount, typename Underlying>
-inline void from_bytes(uint<BitCount, Underlying>& item, const std::vector<uint8_t>& buffer, size_t& index) {
-    if (index + BitCount/8 > buffer.size()) throw std::runtime_error("Out of data in " + std::string(__func__));
+inline void from_bytes(uint<BitCount, Underlying>& item, util::buffer_view& buffer) {
     Underlying result = 0;
     for (unsigned i = 0; i < BitCount/8; ++i) {
-        result |= static_cast<Underlying>(buffer[index+i]) << ((BitCount/8-1-i)*8);
+        result |= static_cast<Underlying>(buffer.get()) << ((BitCount/8-1-i)*8);
     }
-    index += BitCount/8;
     item = uint<BitCount, Underlying>(result);
 }
-inline void from_bytes(uint8_t& item, const std::vector<uint8_t>& buffer, size_t& index) {
-    if (index + 1 > buffer.size()) throw std::runtime_error("Out of data in " + std::string(__func__));
-    item = buffer[index++];
+inline void from_bytes(uint8_t& item, util::buffer_view& buffer) {
+    item = buffer.get();
 }
-inline void from_bytes(uint16_t& item, const std::vector<uint8_t>& buffer, size_t& index) {
-    if (index + 2 > buffer.size()) throw std::runtime_error("Out of data in " + std::string(__func__));
-    item  = uint16_t(buffer[index++])<<8;
-    item |= buffer[index++];
+inline void from_bytes(uint16_t& item, util::buffer_view& buffer) {
+    item  = uint16_t(buffer.get())<<8;
+    item |= buffer.get();
 }
-inline void from_bytes(uint32_t& item, const std::vector<uint8_t>& buffer, size_t& index) {
-    if (index + 4 > buffer.size()) throw std::runtime_error("Out of data in " + std::string(__func__));
-    item  = uint32_t(buffer[index++])<<24;
-    item |= uint32_t(buffer[index++])<<16;
-    item |= uint32_t(buffer[index++])<<8;
-    item |= buffer[index++];
+inline void from_bytes(uint32_t& item, util::buffer_view& buffer) {
+    item  = uint32_t(buffer.get())<<24;
+    item |= uint32_t(buffer.get())<<16;
+    item |= uint32_t(buffer.get())<<8;
+    item |= buffer.get();
 }
-inline void from_bytes(uint64_t& item, const std::vector<uint8_t>& buffer, size_t& index) {
-    if (index + 8 > buffer.size()) throw std::runtime_error("Out of data in " + std::string(__func__));
-    item |= uint64_t(buffer[index++])<<56;
-    item |= uint64_t(buffer[index++])<<48;
-    item |= uint64_t(buffer[index++])<<40;
-    item |= uint64_t(buffer[index++])<<32;
-    item |= uint64_t(buffer[index++])<<24;
-    item |= uint64_t(buffer[index++])<<16;
-    item |= uint64_t(buffer[index++])<<8;
-    item |= buffer[index++];
+inline void from_bytes(uint64_t& item, util::buffer_view& buffer) {
+    item |= uint64_t(buffer.get())<<56;
+    item |= uint64_t(buffer.get())<<48;
+    item |= uint64_t(buffer.get())<<40;
+    item |= uint64_t(buffer.get())<<32;
+    item |= uint64_t(buffer.get())<<24;
+    item |= uint64_t(buffer.get())<<16;
+    item |= uint64_t(buffer.get())<<8;
+    item |= buffer.get();
 }
 
-inline void from_bytes(handshake_type& item, const std::vector<uint8_t>& buffer, size_t& index) {
-    if (index + 1 > buffer.size()) throw std::runtime_error("Out of data in " + std::string(__func__));
-    item = static_cast<handshake_type>(buffer[index++]);
+inline void from_bytes(handshake_type& item, util::buffer_view& buffer) {
+    item = static_cast<handshake_type>(buffer.get());
 }
-inline void from_bytes(content_type& item, const std::vector<uint8_t>& buffer, size_t& index) {
-    if (index + 1 > buffer.size()) throw std::runtime_error("Out of data in " + std::string(__func__));
-    item = static_cast<content_type>(buffer[index++]);
+inline void from_bytes(content_type& item, util::buffer_view& buffer) {
+    item = static_cast<content_type>(buffer.get());
 }
-inline void from_bytes(compression_method& item, const std::vector<uint8_t>& buffer, size_t& index) {
-    if (index + 1 > buffer.size()) throw std::runtime_error("Out of data in " + std::string(__func__));
-    item = static_cast<compression_method>(buffer[index++]);
+inline void from_bytes(compression_method& item, util::buffer_view& buffer) {
+    item = static_cast<compression_method>(buffer.get());
 }
 template<unsigned ByteCount>
-inline void from_bytes(opaque<ByteCount>& item, const std::vector<uint8_t>& buffer, size_t& index) {
-    if (index + ByteCount > buffer.size()) throw std::runtime_error("Out of data in " + std::string(__func__));
+inline void from_bytes(opaque<ByteCount>& item, util::buffer_view& buffer) {
     for (unsigned i = 0; i < ByteCount; ++i) {
-        item.data[i] = buffer[index++];
+        item.data[i] = buffer.get();
     }
 }
 
 template<typename T, size_t LowerBoundInBytes, size_t UpperBoundInBytes>
-inline void from_bytes(vector<T, LowerBoundInBytes, UpperBoundInBytes>& item, const std::vector<uint8_t>& buffer, size_t& index) {
+inline void from_bytes(vector<T, LowerBoundInBytes, UpperBoundInBytes>& item, util::buffer_view& buffer) {
     typename smallest_possible_uint<8*log256(UpperBoundInBytes)>::type byte_count;
-    from_bytes(byte_count, buffer, index);
+    from_bytes(byte_count, buffer);
     if (byte_count < LowerBoundInBytes) throw std::runtime_error("Byte count " + std::to_string(byte_count) + " < " + std::to_string(LowerBoundInBytes));
     if (byte_count > UpperBoundInBytes) throw std::runtime_error("Byte count " + std::to_string(byte_count) + " > " + std::to_string(UpperBoundInBytes));
     if (byte_count % sizeof(T)) throw std::runtime_error("Byte count " + std::to_string(byte_count) + " % " + std::to_string(sizeof(T)));
     std::vector<T> data(byte_count / sizeof(T));
     for (auto& subitem : data) {
-        from_bytes(subitem, buffer, index);
+        from_bytes(subitem, buffer);
     }
     item = vector<T, LowerBoundInBytes, UpperBoundInBytes>{data};
 }
 
-inline void from_bytes(protocol_version& item, const std::vector<uint8_t>& buffer, size_t& index) {
-    if (index + 2 > buffer.size()) throw std::runtime_error("Out of data in " + std::string(__func__));
-    item.major = buffer[index++];
-    item.minor = buffer[index++];
+inline void from_bytes(protocol_version& item, util::buffer_view& buffer) {
+    item.major = buffer.get();
+    item.minor = buffer.get();
 }
-inline void from_bytes(random& item, const std::vector<uint8_t>& buffer, size_t& index) {
-    from_bytes(item.gmt_unix_time, buffer, index);
-    from_bytes(item.random_bytes, buffer, index);
+inline void from_bytes(random& item, util::buffer_view& buffer) {
+    from_bytes(item.gmt_unix_time, buffer);
+    from_bytes(item.random_bytes, buffer);
 }
-inline void from_bytes(cipher_suite& item, const std::vector<uint8_t>& buffer, size_t& index) {
+inline void from_bytes(cipher_suite& item, util::buffer_view& buffer) {
     uint16 x;
-    from_bytes(x, buffer, index);
+    from_bytes(x, buffer);
     item = static_cast<cipher_suite>(x);
 }
-inline void from_bytes(server_hello& item, const std::vector<uint8_t>& buffer, size_t& index) {
-    from_bytes(item.server_version, buffer, index);
-    from_bytes(item.random, buffer, index);
-    from_bytes(item.session_id, buffer, index);
-    from_bytes(item.cipher_suite, buffer, index);
-    from_bytes(item.compression_method, buffer, index);
+inline void from_bytes(server_hello& item, util::buffer_view& buffer) {
+    from_bytes(item.server_version, buffer);
+    from_bytes(item.random, buffer);
+    from_bytes(item.session_id, buffer);
+    from_bytes(item.cipher_suite, buffer);
+    from_bytes(item.compression_method, buffer);
 }
-inline void from_bytes(certificate& item, const std::vector<uint8_t>& buffer, size_t& index) {
+inline void from_bytes(certificate& item, util::buffer_view& buffer) {
     // TODO: XXX: This is ugly...
     uint24 length;
-    from_bytes(length, buffer, index);
+    from_bytes(length, buffer);
     std::vector<tls::asn1cert> certificate_list;
     std::cout << "Reading " << length << " bytes of certificate data\n";
-    if (index + length > buffer.size()) {
-        throw std::runtime_error("Out of data in " + std::string(__func__));
-    }
     size_t bytes_used = 0;
     for (;;) {
         uint24 cert_length;
-        from_bytes(cert_length, buffer, index);
+        from_bytes(cert_length, buffer);
         std::cout << " Found certificate of length " << cert_length << "\n";
         if (!cert_length) throw std::runtime_error("Empty certificate found");
-        if (index + cert_length > buffer.size()) throw std::runtime_error("Out of data in " + std::string(__func__));
-        std::vector<uint8> cert_data(&buffer[index], &buffer[index+cert_length]);
-        index+=cert_length;
+        std::vector<uint8> cert_data(cert_length);
+        buffer.read(&cert_data[0], cert_data.size());
         certificate_list.emplace_back(std::move(cert_data));
         bytes_used+=cert_length+3;
         if (bytes_used >= length) {
@@ -533,7 +519,7 @@ inline void from_bytes(certificate& item, const std::vector<uint8_t>& buffer, si
     item.certificate_list = std::move(certificate_list);
 }
 
-handshake handshake_from_bytes(const std::vector<uint8_t>& buffer, size_t& index);
+handshake handshake_from_bytes(util::buffer_view& buffer);
 
 // TODO: remove
 std::vector<uint8_t> vec_concat(const std::vector<uint8_t>& a, const std::vector<uint8_t>& b);
