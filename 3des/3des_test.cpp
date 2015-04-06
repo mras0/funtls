@@ -45,7 +45,6 @@ void test_cbc_3des128() // F.2.1
 
 int main()
 {
-    std::cout << std::hex; std::cerr << std::hex;
     FUNTLS_ASSERT_EQUAL(0x0102030405060708, inverse_initial_permute(initial_permute(0x0102030405060708)));
 
     // Example from http://page.math.tu-berlin.de/~kant/teaching/hess/krypto-ws2006/des.htm
@@ -54,6 +53,7 @@ int main()
 
     std::cout << "K = 0x" << util::base16_encode(&K, sizeof(K)) << std::endl;
     std::cout << "M = 0x" << util::base16_encode(&M, sizeof(M)) << std::endl;
-    std::cout << des(K, M) << std::endl;
+    std::cout << std::hex << des(K, M) << std::endl;
+    FUNTLS_ASSERT_EQUAL(0x85E813540F0AB405, des(K,M));
     // http://csrc.nist.gov/publications/nistpubs/800-20/800-20.pdf -- Appendix A
 }
