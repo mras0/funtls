@@ -1,4 +1,5 @@
 #include <iostream>
+#include <stdexcept>
 
 #include <aes/aes.h>
 #include <util/base_conversion.h>
@@ -269,22 +270,6 @@ state blockmul(const state& x, const state& y)
     return z;
 }
 
-#if 0
-state ghash_h(const std::vector<uint8_t>& H, const std::vector<uint8_t>& X)
-{
-    assert(H.size() == aes::block_size_bytes);
-    assert(X.size() % aes::block_size_bytes == 0);
-
-    state Y; // start with zero block
-    for (size_t i = 0; i < X.size(); i += aes::block_size_bytes) {
-        // Y_i = (Y_{i-1} ^ X_i) * H
-        Y ^= state{&X[i]};
-        Y = blockmul(Y, state{H});
-    }
-    return Y;
-}
-#endif
-
 void one_block(state& X, const state& H, const state& in)
 {
     X ^= in;
@@ -342,43 +327,9 @@ void incr32(state& s)
     }
 }
 
-// K:  secret key, whose length is appropriate for the underlying block cipher
-// IV: initialization vector
-// P:  plaintext
-// A:  additional data
-//
-// returns C (cipher text), T (authentication tag)
-std::pair<std::vector<uint8_t>, std::vector<uint8_t>> aes_cgm(const std::vector<uint8_t>& K, const std::vector<uint8_t>& IV, const std::vector<uint8_t>& P, const std::vector<uint8_t>& A)
+template<typename E_K_type>
+std::vector<uint8_t> aes_cgm_inner(E_K_type E_K, state& Y, const std::vector<uint8_t>& P)
 {
-    using namespace funtls::aes;
-
-    std::cout << "Input\n";
-    std::cout << "K  " << util::base16_encode(K) << std::endl;
-    std::cout << "IV " << util::base16_encode(IV) << std::endl;
-    std::cout << "P  " << util::base16_encode(P) << std::endl;
-    std::cout << "A  " << util::base16_encode(A) << std::endl;
-    std::cout << "\n";
-
-    auto E_K = [&](const std::vector<uint8_t>& input) { return aes_encrypt_ecb(K, input); };
-
-    const auto H = E_K(std::vector<uint8_t>(block_size_bytes)); // H=E(K, 0_128);
-    state Y;
-    if (IV.size() == 96/8) {
-        // Y_0 = IV || 0_31 || 1_1
-        std::copy(IV.begin(), IV.end(), Y.begin());
-        assert(Y[12] == 0);
-        assert(Y[13] == 0);
-        assert(Y[14] == 0);
-        assert(Y[15] == 0);
-        Y[15] |= 1;
-    } else {
-        Y = ghash(H, std::vector<uint8_t>{}, IV);
-    }
-    const auto Y0 = Y.as_vector();
-
-    std::cout << "H =  " << util::base16_encode(H) << std::endl;
-    std::cout << "Y0 = " << util::base16_encode(Y0) << std::endl;
-
     std::vector<uint8_t> C(P.size());
     for (unsigned i = 0; i < P.size(); i += aes::block_size_bytes) {
         unsigned remaining = P.size() - i;
@@ -399,6 +350,47 @@ std::pair<std::vector<uint8_t>, std::vector<uint8_t>> aes_cgm(const std::vector<
         std::cout << "C  = " << util::base16_encode(c.as_vector()) << std::endl;
         std::copy(c.begin(), c.begin() + remaining, &C[i]);
     }
+    return C;
+}
+
+state initial_y(const std::vector<uint8_t>& H, const std::vector<uint8_t>& IV)
+{
+    state Y;
+    if (IV.size() == 96/8) {
+        // Y_0 = IV || 0_31 || 1_1
+        std::copy(IV.begin(), IV.end(), Y.begin());
+        assert(Y[12] == 0);
+        assert(Y[13] == 0);
+        assert(Y[14] == 0);
+        assert(Y[15] == 0);
+        Y[15] |= 1;
+    } else {
+        Y = ghash(H, std::vector<uint8_t>{}, IV);
+    }
+
+    return Y;
+}
+
+// K:  secret key, whose length is appropriate for the underlying block cipher
+// IV: initialization vector
+// P:  plaintext
+// A:  additional data
+//
+// returns C (cipher text), T (authentication tag)
+std::pair<std::vector<uint8_t>, std::vector<uint8_t>> aes_encrypt_cgm(const std::vector<uint8_t>& K, const std::vector<uint8_t>& IV, const std::vector<uint8_t>& P, const std::vector<uint8_t>& A)
+{
+    using namespace funtls::aes;
+
+    auto E_K = [&](const std::vector<uint8_t>& input) { return aes_encrypt_ecb(K, input); };
+
+    const auto H = E_K(std::vector<uint8_t>(block_size_bytes)); // H=E(K, 0_128);
+    state Y = initial_y(H, IV);
+    const auto Y0 = Y.as_vector();
+
+    std::cout << "H =  " << util::base16_encode(H) << std::endl;
+    std::cout << "Y0 = " << util::base16_encode(Y0) << std::endl;
+
+    auto C = aes_cgm_inner(E_K, Y, P);
 
     // T = MSB_t(GHASH(H, A, C) ^ E(K, Y0))
     auto T_s = ghash(H, A, C);
@@ -406,9 +398,42 @@ std::pair<std::vector<uint8_t>, std::vector<uint8_t>> aes_cgm(const std::vector<
     return std::make_pair(std::move(C), std::vector<uint8_t>(T_s.begin(), T_s.end()));
 }
 
-// http://csrc.nist.gov/groups/ST/toolkit/BCM/documents/proposedmodes/gcm/gcm-spec.pdf
+std::vector<uint8_t> aes_decrypt_cgm(const std::vector<uint8_t>& K, const std::vector<uint8_t>& IV, const std::vector<uint8_t>& C, const std::vector<uint8_t>& A, const std::vector<uint8_t>& T)
+{
+    std::cout << "Input\n";
+    std::cout << "K  " << util::base16_encode(K) << std::endl;
+    std::cout << "IV " << util::base16_encode(IV) << std::endl;
+    std::cout << "C  " << util::base16_encode(C) << std::endl;
+    std::cout << "A  " << util::base16_encode(A) << std::endl;
+    std::cout << "T  " << util::base16_encode(T) << std::endl;
+    std::cout << "\n";
+
+    using namespace funtls::aes;
+
+    auto E_K = [&](const std::vector<uint8_t>& input) { return aes_encrypt_ecb(K, input); };
+
+    const auto H = E_K(std::vector<uint8_t>(block_size_bytes)); // H=E(K, 0_128);
+    state Y = initial_y(H, IV);
+    const auto Y0 = Y.as_vector();
+
+    std::cout << "H =  " << util::base16_encode(H) << std::endl;
+    std::cout << "Y0 = " << util::base16_encode(Y0) << std::endl;
+
+    // T' = MSB_t(GHASH(H, A, C) ^ E(K, Y0))
+    auto T_calced = ghash(H, A, C);
+    T_calced ^= E_K(Y0);
+
+    std::cout << "T' = " << util::base16_encode(T_calced.as_vector()) << std::endl;
+
+    FUNTLS_CHECK_BINARY(T, ==, T_calced.as_vector(), "Signature check failed");
+
+    return aes_cgm_inner(E_K, Y, C);
+}
+
 void test_cgm_aes()
 {
+    // Test cases from Appendix B in
+    // http://csrc.nist.gov/groups/ST/toolkit/BCM/documents/proposedmodes/gcm/gcm-spec.pdf
     static const struct {
         const std::string k;
         const std::string p;
@@ -731,12 +756,19 @@ void test_cgm_aes()
         const auto P  = util::base16_decode(t.p);
         const auto A  = util::base16_decode(t.a);
 
-        const auto res = aes_cgm(K, IV, P, A);
+        const auto res = aes_encrypt_cgm(K, IV, P, A);
         const auto& C = res.first;
         const auto& T = res.second;
         FUNTLS_ASSERT_EQUAL(P.size(), C.size());
         FUNTLS_ASSERT_EQUAL(util::base16_decode(t.c), C);
         FUNTLS_ASSERT_EQUAL(util::base16_decode(t.t), T);
+
+        const auto decrypted = aes_decrypt_cgm(K, IV, C, A, T);
+        FUNTLS_ASSERT_EQUAL(P, decrypted);
+
+        std::vector<uint8_t> bad_t = T;
+        bad_t[0]^=0x01;
+        FUNTLS_ASSERT_THROWS(aes_decrypt_cgm(K, IV, C, A, bad_t), std::runtime_error);
     }
 }
 
