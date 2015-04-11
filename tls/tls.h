@@ -61,7 +61,49 @@ enum class content_type : uint8_t {
     handshake = 22,
     application_data = 23,
 };
-std::ostream& operator<<(std::ostream& os, const content_type& type);
+std::ostream& operator<<(std::ostream& os, content_type type);
+
+enum class alert_level : uint8_t {
+    warning = 1,
+    fatal = 2
+};
+std::ostream& operator<<(std::ostream& os, alert_level level);
+
+enum class alert_description : uint8_t {
+    close_notify = 0,
+    unexpected_message = 10,
+    bad_record_mac = 20,
+    decryption_failed_RESERVED = 21,
+    record_overflow = 22,
+    decompression_failure = 30,
+    handshake_failure = 40,
+    no_certificate_RESERVED = 41,
+    bad_certificate = 42,
+    unsupported_certificate = 43,
+    certificate_revoked = 44,
+    certificate_expired = 45,
+    certificate_unknown = 46,
+    illegal_parameter = 47,
+    unknown_ca = 48,
+    access_denied = 49,
+    decode_error = 50,
+    decrypt_error = 51,
+    export_restriction_RESERVED = 60,
+    protocol_version = 70,
+    insufficient_security = 71,
+    internal_error = 80,
+    user_canceled = 90,
+    no_renegotiation = 100,
+    unsupported_extension = 110,
+};
+std::ostream& operator<<(std::ostream& os, alert_description desc);
+
+struct alert {
+    static constexpr tls::content_type content_type = tls::content_type::alert;
+
+    alert_level       level;
+    alert_description description;
+};
 
 enum class handshake_type : uint8 {
     hello_request = 0,
@@ -243,7 +285,7 @@ struct server_hello_done {
     static constexpr tls::handshake_type handshake_type = tls::handshake_type::server_hello_done;
 };
 
-struct client_key_exchange {
+struct client_key_exchange_rsa {
     static constexpr tls::handshake_type handshake_type = tls::handshake_type::client_key_exchange;
 
     //Implementation note: Public-key-encrypted data is represented as an
@@ -253,6 +295,11 @@ struct client_key_exchange {
 
     // For RSA
     vector<uint8, 0, (1<<16)-1> encrypted_pre_master_secret; // Always 48 bytes for RSA
+};
+
+struct client_key_exchange_dhe_rsa {
+    static constexpr tls::handshake_type handshake_type = tls::handshake_type::client_key_exchange;
+    vector<uint8, 1, (1<<16)-1> dh_Yc;
 };
 
 struct finished {
@@ -381,8 +428,12 @@ inline void append_to_buffer(std::vector<uint8_t>& buffer, const server_hello_do
     assert(!"Not implemented");
 }
 
-inline void append_to_buffer(std::vector<uint8_t>& buffer, const client_key_exchange& item) {
+inline void append_to_buffer(std::vector<uint8_t>& buffer, const client_key_exchange_rsa& item) {
     append_to_buffer(buffer, item.encrypted_pre_master_secret);
+}
+
+inline void append_to_buffer(std::vector<uint8_t>& buffer, const client_key_exchange_dhe_rsa& item) {
+    append_to_buffer(buffer, item.dh_Yc);
 }
 
 inline void append_to_buffer(std::vector<uint8_t>& buffer, const finished& item) {
@@ -454,6 +505,11 @@ inline void from_bytes(vector<T, LowerBoundInBytes, UpperBoundInBytes>& item, ut
         from_bytes(subitem, buffer);
     }
     item = vector<T, LowerBoundInBytes, UpperBoundInBytes>{data};
+}
+
+inline void from_bytes(alert& item, util::buffer_view& buffer) {
+    from_bytes(item.level, buffer);
+    from_bytes(item.description, buffer);
 }
 
 inline void from_bytes(protocol_version& item, util::buffer_view& buffer) {

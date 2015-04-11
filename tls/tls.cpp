@@ -71,7 +71,7 @@ handshake handshake_from_bytes(util::buffer_view& buffer)
 }
 #endif
 
-std::ostream& operator<<(std::ostream& os, const content_type& type)
+std::ostream& operator<<(std::ostream& os, content_type type)
 {
     switch (type) {
         case content_type::change_cipher_spec:
@@ -84,6 +84,51 @@ std::ostream& operator<<(std::ostream& os, const content_type& type)
             return os << "application_data";
     }
     os << "Unknown TLS content type 0x" << util::base16_encode(&type, sizeof(type));
+    assert(false);
+    return os;
+}
+
+std::ostream& operator<<(std::ostream& os, alert_level level)
+{
+    switch (level) {
+        case alert_level::warning: return os << "warning";
+        case alert_level::fatal:   return os << "fatal";
+    }
+    os << "Unknown TLS AlertLevel 0x" << util::base16_encode(&level, sizeof(level));
+    assert(false);
+    return os;
+}
+
+std::ostream& operator<<(std::ostream& os, alert_description desc)
+{
+    switch (desc) {
+    case alert_description::close_notify: return os << "close_notify";
+    case alert_description::unexpected_message: return os << "unexpected_message";
+    case alert_description::bad_record_mac: return os << "bad_record_mac";
+    case alert_description::decryption_failed_RESERVED: return os << "decryption_failed_RESERVED";
+    case alert_description::record_overflow: return os << "record_overflow";
+    case alert_description::decompression_failure: return os << "decompression_failure";
+    case alert_description::handshake_failure: return os << "handshake_failure";
+    case alert_description::no_certificate_RESERVED: return os << "no_certificate_RESERVED";
+    case alert_description::bad_certificate: return os << "bad_certificate";
+    case alert_description::unsupported_certificate: return os << "unsupported_certificate";
+    case alert_description::certificate_revoked: return os << "certificate_revoked";
+    case alert_description::certificate_expired: return os << "certificate_expired";
+    case alert_description::certificate_unknown: return os << "certificate_unknown";
+    case alert_description::illegal_parameter: return os << "illegal_parameter";
+    case alert_description::unknown_ca: return os << "unknown_ca";
+    case alert_description::access_denied: return os << "access_denied";
+    case alert_description::decode_error: return os << "decode_error";
+    case alert_description::decrypt_error: return os << "decrypt_error";
+    case alert_description::export_restriction_RESERVED: return os << "export_restriction_RESERVED";
+    case alert_description::protocol_version: return os << "protocol_version";
+    case alert_description::insufficient_security: return os << "insufficient_security";
+    case alert_description::internal_error: return os << "internal_error";
+    case alert_description::user_canceled: return os << "user_canceled";
+    case alert_description::no_renegotiation: return os << "no_renegotiation";
+    case alert_description::unsupported_extension: return os << "unsupported_extension";
+    }
+    os << "Unknown TLS AlertDescription 0x" << util::base16_encode(&desc, sizeof(desc));
     assert(false);
     return os;
 }

@@ -191,6 +191,8 @@ private:
     tls::random                     server_random;
     std::unique_ptr<
         x509::rsa_public_key>       server_public_key;
+    std::unique_ptr<
+        tls::server_dh_params>      server_dh_params;
     tls::session_id                 sesion_id;
     std::vector<uint8_t>            master_secret;
     hash::sha256                    handshake_message_digest;
@@ -338,6 +340,8 @@ private:
                         util::base16_encode(calced_digest) + " Expected: " +
                         util::base16_encode(digest.digest));
             }
+
+            server_dh_params.reset(new tls::server_dh_params(dhe_kex->params));
         }
     }
 
@@ -385,7 +389,7 @@ private:
         return C;
     }
 
-    void send_client_key_exchange() {
+    std::vector<uint8_t> send_client_key_exchange_rsa() {
         // OK, now it's time to do ClientKeyExchange
         // Since we're doing RSA, we'll be sending the EncryptedPreMasterSecret
 
@@ -398,10 +402,51 @@ private:
         std::cout << "Pre-master secret: " << util::base16_encode(&pre_master_secret[2], pre_master_secret.size()-2) << std::endl;
 
         const auto C = rsa_client_kex_data(pre_master_secret);
-        tls::client_key_exchange client_key_exchange{tls::vector<tls::uint8,0,(1<<16)-1>{C}};
+        tls::client_key_exchange_rsa client_key_exchange{tls::vector<tls::uint8,0,(1<<16)-1>{C}};
+        send_record(make_handshake(client_key_exchange));
+        return pre_master_secret;
+    }
+
+    std::vector<uint8_t> send_client_key_exchange_dhe_rsa() {
+        const size_t key_size = server_dh_params->dh_p.size();
+        std::cout << "Should generate int of size " << key_size*8 << " bits " << std::endl;
+        std::vector<uint8_t> rand_int(key_size);
+        do {
+            tls::get_random_bytes(&rand_int[0], rand_int.size());
+        } while (std::find_if(rand_int.begin(), rand_int.end(), [](uint8_t i) { return i != 0; }) == rand_int.end());
+
+        const int_type private_key = x509::base256_decode<int_type>(rand_int);
+
+        std::cout << "DHE client private key: " << std::hex << private_key << std::dec << std::endl;
+
+        const int_type p  = x509::base256_decode<int_type>(server_dh_params->dh_p.as_vector());
+        const int_type g  = x509::base256_decode<int_type>(server_dh_params->dh_g.as_vector());
+        const int_type Ys = x509::base256_decode<int_type>(server_dh_params->dh_Ys.as_vector());
+        const int_type Yc = powm(g, private_key, p);
+        const auto dh_Yc  = x509::base256_encode(Yc, key_size);
+
+        std::cout << "dh_Yc = " << util::base16_encode(dh_Yc) << std::endl;
+
+        tls::client_key_exchange_dhe_rsa client_key_exchange{tls::vector<tls::uint8,1,(1<<16)-1>{dh_Yc}};
         send_record(make_handshake(client_key_exchange));
 
+        const int_type Z = powm(Ys, private_key, p);
+        const auto dh_Z  = x509::base256_encode(Z, key_size);
+        std::cout << "Negotaited key = " << util::base16_encode(dh_Z) << std::endl;
+        return dh_Z;
+    }
 
+    void send_client_key_exchange() {
+        const auto cipher_param = tls::parameters_from_suite(wanted_cipher);
+        std::vector<uint8_t> pre_master_secret;
+        if (cipher_param.key_exchange_algorithm == tls::key_exchange_algorithm::rsa) {
+            pre_master_secret = send_client_key_exchange_rsa();
+        } else if (cipher_param.key_exchange_algorithm == tls::key_exchange_algorithm::dhe_rsa) {
+            assert(server_dh_params);
+            pre_master_secret = send_client_key_exchange_dhe_rsa();
+        } else {
+            FUNTLS_CHECK_FAILURE("Internal error: Unsupported KeyExchangeAlgorithm " + std::to_string((int)(cipher_param.key_exchange_algorithm)));
+        }
         // We can now compute the master_secret as specified in rfc5246 8.1
         // master_secret = PRF(pre_master_secret, "master secret", ClientHello.random + ServerHello.random)[0..47]
 
@@ -415,7 +460,6 @@ private:
         // Now do Key Calculation http://tools.ietf.org/html/rfc5246#section-6.3
         // key_block = PRF(SecurityParameters.master_secret, "key expansion",
         // SecurityParameters.server_random + SecurityParameters.client_random)
-        const auto cipher_param = tls::parameters_from_suite(wanted_cipher);
         const size_t key_block_length  = 2 * cipher_param.mac_key_length + 2 * cipher_param.key_length;
         auto key_block = tls::PRF(master_secret, "key expansion", tls::vec_concat(server_random.as_vector(), client_random.as_vector()), key_block_length);
 
@@ -442,7 +486,7 @@ private:
         } else {
             FUNTLS_CHECK_FAILURE("Unsupported bulk_cipher_algorithm: " + std::to_string((int)cipher_param.bulk_cipher_algorithm));
         }
-    }
+     }
 
     void send_change_cipher_spec() {
         send_record(tls::change_cipher_spec{});
@@ -651,6 +695,19 @@ private:
         //
         FUNTLS_CHECK_BINARY(buffer.size(), <=, tls::record::max_plaintext_length, "Illegal decoded fragment size");
 
+
+        if (content_type == tls::content_type::alert) {
+            util::buffer_view alert_buf(&buffer[0], buffer.size());
+            tls::alert alert;
+            tls::from_bytes(alert, alert_buf);
+            FUNTLS_CHECK_BINARY(alert_buf.remaining(), ==, 0, "Invalid alert message");
+
+            std::ostringstream oss;
+            oss << alert.level << " " << alert.description;
+            std::cout << "Got alert: " << oss.str() <<  std::endl;
+            throw std::runtime_error("Alert received: " + oss.str());
+        }
+
         return tls::record{content_type, protocol_version, std::move(buffer)};
     }
 
@@ -716,10 +773,10 @@ int main(int argc, char* argv[])
     //const tls::cipher_suite wanted_cipher = tls::cipher_suite::rsa_with_aes_128_cbc_sha;
     //const tls::cipher_suite wanted_cipher = tls::cipher_suite::rsa_with_aes_128_cbc_sha256;
     //const tls::cipher_suite wanted_cipher = tls::cipher_suite::rsa_with_aes_256_cbc_sha;
-    const tls::cipher_suite wanted_cipher = tls::cipher_suite::rsa_with_aes_256_cbc_sha256;
-
-    // WIP:
+    //const tls::cipher_suite wanted_cipher = tls::cipher_suite::rsa_with_aes_256_cbc_sha256;
     //const tls::cipher_suite wanted_cipher = tls::cipher_suite::dhe_rsa_with_3des_ede_cbc_sha;
+    //const tls::cipher_suite wanted_cipher = tls::cipher_suite::dhe_rsa_with_3des_ede_cbc_sha;
+    const tls::cipher_suite wanted_cipher = tls::cipher_suite::dhe_rsa_with_aes_256_cbc_sha256;
     std::cout << "Wanted cipher:\n" << tls::parameters_from_suite(wanted_cipher) << std::endl;
     try {
         boost::asio::io_service         io_service;

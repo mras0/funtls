@@ -122,9 +122,11 @@ cipher_suite_parameters parameters_from_suite(cipher_suite suite)
         PARAMETERS_FROM_SUITE_CASE(rsa_with_aes_256_cbc_sha);
         PARAMETERS_FROM_SUITE_CASE(rsa_with_aes_128_cbc_sha256);
         PARAMETERS_FROM_SUITE_CASE(rsa_with_aes_256_cbc_sha256);
-        PARAMETERS_FROM_SUITE_CASE(dh_rsa_with_3des_ede_cbc_sha);
         PARAMETERS_FROM_SUITE_CASE(dhe_rsa_with_3des_ede_cbc_sha);
-        PARAMETERS_FROM_SUITE_CASE(dh_rsa_with_aes_128_cbc_sha);
+        PARAMETERS_FROM_SUITE_CASE(dhe_rsa_with_aes_128_cbc_sha);
+        PARAMETERS_FROM_SUITE_CASE(dhe_rsa_with_aes_256_cbc_sha);
+        PARAMETERS_FROM_SUITE_CASE(dhe_rsa_with_aes_128_cbc_sha256);
+        PARAMETERS_FROM_SUITE_CASE(dhe_rsa_with_aes_256_cbc_sha256);
 #undef PARAMETERS_FROM_SUITE_CASE
         default: // TODO: REMOVE
         break;
