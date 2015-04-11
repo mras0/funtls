@@ -100,11 +100,6 @@ static constexpr protocol_version protocol_version_tls_1_2{3, 3};
 
 void get_random_bytes(void* dest, size_t count);
 
-template<unsigned ByteCount>
-struct opaque {
-    uint8 data[ByteCount];
-};
-
 constexpr size_t log256(size_t n) {
     return n < 256 ? 1 : 1 + log256(n/256);
 }
@@ -163,7 +158,7 @@ private:
 
 struct random {
     uint32   gmt_unix_time;
-    opaque<28> random_bytes;
+    uint8    random_bytes[28];
 
     std::vector<uint8_t> as_vector() const;
 };
@@ -226,7 +221,7 @@ struct finished {
     static constexpr tls::handshake_type handshake_type = tls::handshake_type::finished;
 
     static constexpr size_t verify_data_length = 12; // For RSA at least
-    opaque<verify_data_length> verify_data;
+    uint8 verify_data[verify_data_length];
 };
 
 struct handshake {
@@ -314,8 +309,8 @@ inline void append_to_buffer(std::vector<uint8_t>& buffer, const uint<BitCount, 
 }
 
 template<unsigned ByteCount>
-inline void append_to_buffer(std::vector<uint8_t>& buffer, const opaque<ByteCount>& item) {
-    buffer.insert(buffer.end(), item.data, item.data+ByteCount);
+inline void append_to_buffer(std::vector<uint8_t>& buffer, const uint8 (&item)[ByteCount]) {
+    buffer.insert(buffer.end(), item, item+ByteCount);
 }
 
 template<typename T, size_t LowerBoundInBytes, size_t UpperBoundInBytes>
@@ -429,8 +424,8 @@ void from_bytes(EnumType& item, util::buffer_view& buffer)
 }
 
 template<unsigned ByteCount>
-inline void from_bytes(opaque<ByteCount>& item, util::buffer_view& buffer) {
-    buffer.read(&item.data[0], ByteCount);
+inline void from_bytes(uint8 (&item)[ByteCount], util::buffer_view& buffer) {
+    buffer.read(item, ByteCount);
 }
 
 template<typename T, size_t LowerBoundInBytes, size_t UpperBoundInBytes>
