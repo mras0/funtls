@@ -219,15 +219,15 @@ private:
         FUNTLS_CHECK_BINARY(record.type, ==, tls::content_type::handshake, "Invalid content type");
 
         util::buffer_view frag_buf{&record.fragment[0], record.fragment.size()};
-        auto handshake = tls::handshake_from_bytes(frag_buf);
+        tls::handshake handshake;
+        tls::from_bytes(handshake, frag_buf);
         assert(frag_buf.remaining() == 0);
         handshake_message_digest.input(record.fragment);
         return handshake;
     }
 
     void send_client_hello() {
-        send_record(
-        tls::handshake{
+        send_record(tls::make_handshake(
             tls::client_hello{
                 current_protocol_version,
                 client_random,
@@ -235,12 +235,12 @@ private:
                 { wanted_cipher },
                 { tls::compression_method::null },
             }
-        });
+        ));
     }
 
     void read_server_hello() {
         auto handshake = read_handshake();
-        auto& server_hello = handshake.body.get<tls::server_hello>();
+        auto server_hello = tls::get_as<tls::server_hello>(handshake);
         if (server_hello.cipher_suite != wanted_cipher) {
             throw std::runtime_error("Invalid cipher suite " + util::base16_encode(&server_hello.cipher_suite, 2));
         }
@@ -251,18 +251,47 @@ private:
         sesion_id = server_hello.session_id;
     }
 
+    // TODO: Improve this function
     void read_until_server_hello_done() {
         std::vector<tls::certificate> certificate_lists;
 
-        for (;;) {
+        static const tls::handshake_type handshake_order[] = {
+            tls::handshake_type::certificate,
+            tls::handshake_type::server_key_exchange,
+            //tls::handshake_type::certificate_request
+            tls::handshake_type::server_hello_done
+        };
+
+        const auto cipher_param = tls::parameters_from_suite(wanted_cipher);
+        std::unique_ptr<tls::server_key_exchange_dhe> dhe_kex;
+
+        static const size_t num_handshake_order = sizeof(handshake_order)/sizeof(*handshake_order);
+        for (size_t order = 0; ; ) {
             auto handshake = read_handshake();
-            if (handshake.type() == tls::handshake_type::server_hello_done) {
+            while (handshake.type != handshake_order[order]) {
+                ++order;
+                FUNTLS_CHECK_BINARY(order, <, num_handshake_order, "Handshake of type " + std::to_string((int)handshake.type) + " received out of order");
+            }
+
+            if (handshake.type == tls::handshake_type::certificate) {
+                certificate_lists.push_back(tls::get_as<tls::certificate>(handshake));
+            } else if (handshake.type == tls::handshake_type::server_key_exchange) {
+                // HACK
+                FUNTLS_CHECK_BINARY(tls::key_exchange_algorithm::dhe_rsa, ==, cipher_param.key_exchange_algorithm, "");
+                auto kex = tls::get_as<tls::server_key_exchange_dhe>(handshake);
+                std::cout << "Got server key exchange! hash=" << kex.hash_algorithm << " signature=" << kex.signature_algorithm << std::endl;
+                std::cout << "Signature: " << util::base16_encode(kex.signature.as_vector()) << std::endl;
+                std::cout << "dh_p:      " << util::base16_encode(kex.params.dh_p.as_vector()) << std::endl;
+                std::cout << "dh_g:      " << util::base16_encode(kex.params.dh_g.as_vector()) << std::endl;
+                std::cout << "dh_Ys:     " << util::base16_encode(kex.params.dh_Ys.as_vector()) << std::endl;
+
+                dhe_kex.reset(new tls::server_key_exchange_dhe(kex));
+
+            } else if (handshake.type == tls::handshake_type::server_hello_done) {
+                FUNTLS_CHECK_BINARY(handshake.body.size(), ==, 0, "Invalid ServerHelloDone message");
                 break;
-            } else if (handshake.type() == tls::handshake_type::certificate) {
-                // TODO: Only accept if before other type
-                certificate_lists.push_back(std::move(handshake.body.get<tls::certificate>()));
             } else {
-                throw std::runtime_error("Unknown handshake type " + std::to_string((int)handshake.type()));
+                FUNTLS_CHECK_FAILURE("Internal error: Unknown handshake type " + std::to_string((int)handshake.type));
             }
         }
 
@@ -286,6 +315,30 @@ private:
         auto cert_buf = util::buffer_view{&their_certificate[0], their_certificate.size()};
         const auto cert = x509::v3_certificate::parse(asn1::read_der_encoded_value(cert_buf));
         server_public_key.reset(new x509::rsa_public_key(rsa_public_key_from_certificate(cert)));
+
+        // HAX
+        if (dhe_kex) {
+            std::cout << "Verifying server DHE signature\n";
+            FUNTLS_CHECK_BINARY(dhe_kex->signature_algorithm, ==, tls::signature_algorithm::rsa, "");
+            const auto digest = x509::pkcs1_decode(*server_public_key, dhe_kex->signature.as_vector());
+            FUNTLS_CHECK_BINARY(x509::id_sha1,             ==, digest.digest_algorithm, "");
+            FUNTLS_CHECK_BINARY(tls::hash_algorithm::sha1, ==, dhe_kex->hash_algorithm, "");
+            std::cout << "Digest (Algorithm: " << digest.digest_algorithm << ")\n" << util::base16_encode(digest.digest) << std::endl;
+
+            std::vector<uint8_t> digest_buf;
+            append_to_buffer(digest_buf, client_random);
+            append_to_buffer(digest_buf, server_random);
+            append_to_buffer(digest_buf, dhe_kex->params);
+            const auto calced_digest = hash::sha1{}.input(digest_buf).result();
+            std::cout << "Calculated digest: " << util::base16_encode(calced_digest) << std::endl;
+
+            FUNTLS_CHECK_BINARY(calced_digest.size(), ==, digest.digest.size(), "Wrong digest size");
+            if (!std::equal(calced_digest.begin(), calced_digest.end(), digest.digest.begin())) {
+                throw std::runtime_error("Digest mismatch in " + std::string(__PRETTY_FUNCTION__) + " Calculated: " +
+                        util::base16_encode(calced_digest) + " Expected: " +
+                        util::base16_encode(digest.digest));
+            }
+        }
     }
 
     std::vector<uint8_t> rsa_client_kex_data(const std::vector<uint8_t>& pre_master_secret) const {
@@ -297,14 +350,7 @@ private:
         // Perform RSAES-PKCS1-V1_5-ENCRYPT (http://tools.ietf.org/html/rfc3447 7.2.1)
 
         // Get k=message length
-        size_t k = s_pk.modolus.octet_count(); // Length of modolus
-        assert(k!=0);
-        if (s_pk.modolus.octet(0) == 0) {
-            // The leading byte of the modulos was 0, discount it in calculating the
-            // bit length
-            k--;
-            assert(k && (s_pk.modolus.octet(1) & 0x80)); // The leading byte should only be 0 if the msb is set on the next byte
-        }
+        const size_t k = s_pk.key_length();
 
         // Build message to encrypt: EM = 0x00 || 0x02 || PS || 0x00 || M
         std::vector<uint8_t> EM(k-pre_master_secret.size());
@@ -353,7 +399,7 @@ private:
 
         const auto C = rsa_client_kex_data(pre_master_secret);
         tls::client_key_exchange client_key_exchange{tls::vector<tls::uint8,0,(1<<16)-1>{C}};
-        send_record(tls::handshake{client_key_exchange});
+        send_record(make_handshake(client_key_exchange));
 
 
         // We can now compute the master_secret as specified in rfc5246 8.1

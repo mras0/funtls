@@ -43,6 +43,7 @@ std::vector<uint8_t> random::as_vector() const {
     return buf;
 }
 
+#if 0
 handshake handshake_from_bytes(util::buffer_view& buffer)
 {
     tls::handshake_type handshake_type;
@@ -68,6 +69,7 @@ handshake handshake_from_bytes(util::buffer_view& buffer)
     }
     throw std::runtime_error("Unknown handshake type " + std::to_string((int)handshake_type));
 }
+#endif
 
 std::ostream& operator<<(std::ostream& os, const content_type& type)
 {
@@ -152,5 +154,29 @@ std::vector<uint8_t> PRF(const std::vector<uint8_t>& secret, const std::string& 
     return P_hash(secret, vec_concat(std::vector<uint8_t>{label.begin(), label.end()}, seed), wanted_size);
 }
 
+std::ostream& operator<<(std::ostream& os, hash_algorithm h)
+{
+    switch (h) {
+        case hash_algorithm::none:   return os << "none";
+        case hash_algorithm::md5:    return os << "md5";
+        case hash_algorithm::sha1:   return os << "sha1";
+        case hash_algorithm::sha224: return os << "sha224";
+        case hash_algorithm::sha256: return os << "sha256";
+        case hash_algorithm::sha384: return os << "sha384";
+        case hash_algorithm::sha512: return os << "sha512";
+    }
+    return os << "Unknown HashAlgorithm " << static_cast<unsigned>(h);
+}
+
+std::ostream& operator<<(std::ostream& os, signature_algorithm s)
+{
+    switch (s) {
+        case signature_algorithm::anonymous: return os << "anonymous";
+        case signature_algorithm::rsa:       return os << "rsa";
+        case signature_algorithm::dsa:       return os << "dsa";
+        case signature_algorithm::ecdsa:     return os << "ecdsa";
+    }
+    return os << "Unknown SignatureAlgorithm " << static_cast<unsigned>(s);
+}
 
 } } // namespace funtls::tls

@@ -46,73 +46,30 @@ void check_x509_v3(const x509::v3_certificate& cert)
     auto s_pk = rsa_public_key_from_certificate(cert);
     std::cout << " Subject public key: n=0x" << util::base16_encode(s_pk.modolus.as_vector())
         << " e=0x" << util::base16_encode(s_pk.public_exponent.as_vector()) << std::endl;
+    FUNTLS_CHECK_BINARY(s_pk.key_length() & (s_pk.key_length()-1), ==, 0, "Non pow2 key length?");
 
     assert(cert.signature_algorithm() == x509::sha256WithRSAEncryption);
     auto sig_value = cert.signature().as_vector();
     std::cout << " " << sig_value.size() << " bits" << std::endl;
     std::cout << " " << util::base16_encode(sig_value) << std::endl;
 
-    // The signatureValue field contains a digital signature computed upon
-    // the ASN.1 DER encoded tbsCertificate.  The ASN.1 DER encoded
-    // tbsCertificate is used as the input to the signature function.
-
-    // See 9.2 EMSA-PKCS1-v1_5 in RFC3447
-
-    // The encrypted signature is stored as a base-256 encoded number in the bitstring
-    const auto sig_int  = x509::base256_decode<int_type>(cert.signature());
-    const size_t em_len = sig_value.size(); // encrypted message length
-
     // Decode the signature using the issuers public key (here using the subjects PK since the cert is selfsigned)
     const auto issuer_pk = s_pk;
-    int_type d = powm(sig_int, issuer_pk.public_exponent.as<int_type>(), issuer_pk.modolus.as<int_type>());
-    const auto decoded = x509::base256_encode(d, em_len);
-    std::cout << "Decoded signature:\n" << util::base16_encode(&decoded[0], decoded.size()) << std::endl;
-
-    // EM = 0x00 || 0x01 || PS || 0x00 || T (T=DER encoded DigestInfo)
-    auto digest_buf = util::buffer_view{&decoded[0], decoded.size()};
-    const auto sig0 = digest_buf.get();
-    const auto sig1 = digest_buf.get();
-    if (sig0 != 0x00 || sig1 != 0x01) {
-        throw std::runtime_error("Invalid PKCS#1 1.5 signature. Expected 0x00 0x01 Got: 0x" + util::base16_encode(&sig0, 1) + " 0x" + util::base16_encode(&sig1, 1));
-    }
-    // Skip padding
-    for (;;) {
-        const auto b = digest_buf.get();
-        if (b == 0xff) { // Padding...
-            continue;
-        } else if (b == 0x00) { // End of padding
-            break;
-        } else {
-            throw std::runtime_error("Invalid byte in PKCS#1 1.5 padding: 0x" + util::base16_encode(&b, 1));
-        }
-    }
-    // DigestInfo ::= SEQUENCE {
-    //   digestAlgorithm AlgorithmIdentifier,
-    //   digest OCTET STRING }
-
-    auto digest_info = asn1::sequence_view{asn1::read_der_encoded_value(digest_buf)};
-    assert(digest_buf.remaining() == 0);
-
-    auto digest_algo = x509::read_algorithm_identifer(digest_info.next());
-    std::cout << "Digest algorithm: " << digest_algo << std::endl;
-    static const asn1::object_id id_sha256{2,16,840,1,101,3,4,2,1};
-    assert(digest_algo == id_sha256);
-    auto digest = asn1::octet_string{digest_info.next()}.as_vector();
-    assert(!digest_info.has_next());
-    std::cout << "Digest: " << util::base16_encode(&digest[0], digest.size()) << std::endl;
+    auto digest = x509::pkcs1_decode(issuer_pk, cert.signature().as_vector());
+    std::cout << "Digest algorithm: " << digest.digest_algorithm << std::endl;
+    assert(digest.digest_algorithm == x509::id_sha256);
+    std::cout << "Digest: " << util::base16_encode(digest.digest) << std::endl;
 
     const auto& cert_buf = cert.certificate_der_encoded();
     const auto calced_digest = hash::sha256{}.input(cert_buf).result();
-    std::cout << "Calculated digest: " << util::base16_encode(&calced_digest[0], calced_digest.size()) << std::endl;
+    std::cout << "Calculated digest: " << util::base16_encode(calced_digest) << std::endl;
 
-    if (digest.size() != calced_digest.size()) {
-        throw std::runtime_error("Invalid digest size expected " + std::to_string(calced_digest.size()) + " got " + std::to_string(digest.size()) + " in " + __PRETTY_FUNCTION__);
-    }
+    FUNTLS_ASSERT_EQUAL(calced_digest.size(), digest.digest.size());
 
-    if (!std::equal(calced_digest.begin(), calced_digest.end(), digest.begin())) {
+    if (!std::equal(calced_digest.begin(), calced_digest.end(), digest.digest.begin())) {
         throw std::runtime_error("Digest mismatch in " + std::string(__PRETTY_FUNCTION__) + " Calculated: " +
-                util::base16_encode(&calced_digest[0], calced_digest.size()) + " Expected: " +
-                util::base16_encode(&digest[0], digest.size()));
+                util::base16_encode(calced_digest) + " Expected: " +
+                util::base16_encode(digest.digest));
     }
 }
 

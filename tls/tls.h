@@ -13,7 +13,6 @@
 
 #include <util/buffer.h>
 
-#include <tls/variant.h>
 #include <tls/tls_ciphers.h>
 
 namespace funtls { namespace tls {
@@ -113,7 +112,7 @@ struct vector {
     static_assert(UpperBoundInBytes % sizeof(T) == 0, "");
 
     constexpr vector() {
-        static_assert(LowerBoundInBytes == 0, "");
+        //static_assert(LowerBoundInBytes == 0, "");
     }
 
     vector(const std::vector<T>& l) : data(l) {
@@ -201,6 +200,45 @@ struct certificate {
     std::vector<tls::asn1cert> certificate_list;
 };
 
+enum class hash_algorithm : uint8 {
+    none = 0,
+    md5  = 1,
+    sha1 = 2,
+    sha224 = 3,
+    sha256 = 4,
+    sha384 = 5,
+    sha512 = 6
+};
+
+std::ostream& operator<<(std::ostream& os, hash_algorithm h);
+
+enum class signature_algorithm : uint8 {
+      anonymous = 0,
+      rsa       = 1,
+      dsa       = 2,
+      ecdsa     = 3
+};
+
+std::ostream& operator<<(std::ostream& os, signature_algorithm s);
+
+
+// Ephemeral DH parameters
+struct server_dh_params {
+    tls::vector<uint8, 1, (1<<16)-1> dh_p;  // The prime modulus used for the Diffie-Hellman operation.
+    tls::vector<uint8, 1, (1<<16)-1> dh_g;  // The generator used for the Diffie-Hellman operation.
+    tls::vector<uint8, 1, (1<<16)-1> dh_Ys; // The server's Diffie-Hellman public value (g^X mod p).
+};
+
+struct server_key_exchange_dhe {
+    static constexpr tls::handshake_type handshake_type = tls::handshake_type::server_key_exchange;
+
+    server_dh_params                 params;
+    // signature
+    tls::hash_algorithm              hash_algorithm;
+    tls::signature_algorithm         signature_algorithm;
+    tls::vector<uint8, 1, (1<<16)-1> signature;
+};
+
 struct server_hello_done {
     static constexpr tls::handshake_type handshake_type = tls::handshake_type::server_hello_done;
 };
@@ -227,26 +265,10 @@ struct finished {
 struct handshake {
     static constexpr tls::content_type content_type = tls::content_type::handshake;
 
-    tls::variant<client_hello, server_hello, certificate, server_hello_done, client_key_exchange, finished> body;
+    tls::handshake_type type;
 
-    tls::handshake_type type() const {
-        int type = -1;
-        body.invoke(type_helper{type});
-        assert(type >= 0 && type <= 255);
-        return static_cast<tls::handshake_type>(type);
-    }
-
-private:
-    struct type_helper {
-        type_helper(int& type) : type(type) {}
-        template<typename T>
-        void operator()(const T&) {
-            assert(type < 0);
-            type = static_cast<int>(T::handshake_type);
-            assert(type >= 0 && type <= 255);
-        }
-        int& type;
-    };
+    using body_length_type = uint24;
+    std::vector<uint8_t> body;
 };
 
 struct change_cipher_spec {
@@ -262,7 +284,8 @@ struct record {
 
     content_type                            type;
     protocol_version                        version;
-    // uint16                               length;
+
+    using fragment_length_type = uint16;
     std::vector<uint8_t>                    fragment;
 };
 
@@ -321,25 +344,6 @@ inline void append_to_buffer(std::vector<uint8_t>& buffer, const vector<T, Lower
     }
 }
 
-namespace detail {
-struct append_helper {
-    append_helper(std::vector<uint8_t>& buffer) : buffer(buffer) {
-    }
-
-    template<typename T>
-    void operator()(const T& t) {
-        append_to_buffer(buffer, t);
-    }
-
-    std::vector<uint8_t>& buffer;
-};
-} // namespace detail
-
-template<typename... Ts>
-void append_to_buffer(std::vector<uint8_t>& buffer, const tls::variant<Ts...>& item) {
-    item.invoke(detail::append_helper{buffer});
-}
-
 inline void append_to_buffer(std::vector<uint8_t>& buffer, const std::vector<uint8_t>& item) {
     buffer.insert(buffer.end(), item.begin(), item.end());
 }
@@ -389,13 +393,23 @@ inline void append_to_buffer(std::vector<uint8_t>& buffer, const change_cipher_s
     buffer.push_back(change_cipher_spec::change_cipher_spec_type);
 }
 
-inline void append_to_buffer(std::vector<uint8_t>& buffer, const handshake& item) {
-    std::vector<uint8_t> body_buffer;
-    append_to_buffer(body_buffer, item.body);
+inline void append_to_buffer(std::vector<uint8_t>& buffer, const server_dh_params& params) {
+    append_to_buffer(buffer, params.dh_p);
+    append_to_buffer(buffer, params.dh_g);
+    append_to_buffer(buffer, params.dh_Ys);
+}
 
-    append_to_buffer(buffer, item.type());
-    append_to_buffer(buffer, uint24(body_buffer.size()));
-    buffer.insert(buffer.end(), body_buffer.begin(), body_buffer.end());
+inline void append_to_buffer(std::vector<uint8_t>& buffer, const handshake& item) {
+    append_to_buffer(buffer, item.type);
+    append_to_buffer(buffer, handshake::body_length_type(item.body.size()));
+    append_to_buffer(buffer, item.body);
+}
+
+template<typename BodyType>
+handshake make_handshake(const BodyType& body) {
+    std::vector<uint8_t> body_buffer;
+    append_to_buffer(body_buffer, body);
+    return handshake{BodyType::handshake_type, body_buffer};
 }
 
 template<unsigned BitCount, typename Underlying>
@@ -481,7 +495,45 @@ inline void from_bytes(certificate& item, util::buffer_view& buffer) {
     item.certificate_list = std::move(certificate_list);
 }
 
-handshake handshake_from_bytes(util::buffer_view& buffer);
+inline void from_bytes(server_dh_params& item, util::buffer_view& buffer) {
+    from_bytes(item.dh_p, buffer);
+    from_bytes(item.dh_g, buffer);
+    from_bytes(item.dh_Ys, buffer);
+}
+
+inline void from_bytes(server_key_exchange_dhe& item, util::buffer_view& buffer) {
+    from_bytes(item.params, buffer);
+    from_bytes(item.hash_algorithm, buffer);
+    from_bytes(item.signature_algorithm, buffer);
+    from_bytes(item.signature, buffer);
+}
+
+inline void from_bytes(handshake& item, util::buffer_view& buffer) {
+    handshake_type              type;
+    handshake::body_length_type body_length;
+    std::vector<uint8>          body;
+    from_bytes(type, buffer);
+    from_bytes(body_length, buffer);
+    body.resize(body_length);
+    if (body_length) {
+        buffer.read(&body[0], body.size());
+    }
+    item = handshake{type, body};
+}
+
+template<typename HandshakeType>
+inline HandshakeType get_as(const handshake& h) {
+    if (h.type != HandshakeType::handshake_type) {
+        throw std::runtime_error("Expected handshake of type " + std::to_string(int(HandshakeType::handshake_type)) + " got " + std::to_string(int(h.type)));
+    }
+    if (h.body.empty()) {
+        throw std::runtime_error("Empty handshake of type " + std::to_string(int(HandshakeType::handshake_type)));
+    }
+    util::buffer_view body_buffer{&h.body[0], h.body.size()};
+    HandshakeType inner;
+    from_bytes(inner, body_buffer);
+    return inner;
+}
 
 // TODO: remove
 std::vector<uint8_t> vec_concat(const std::vector<uint8_t>& a, const std::vector<uint8_t>& b);
