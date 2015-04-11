@@ -64,12 +64,6 @@ funtls::x509::name::attr_type parse_name_attributes(const funtls::asn1::der_enco
                 oss << "Unsupported attribute type " << attribute_type;
                 FUNTLS_CHECK_FAILURE(oss.str());
             }
-            auto find_attr = [&] (const x509::name::attr_type::value_type& a) { return a.first == attribute_type; };
-            if (std::find_if(res.begin(), res.end(), find_attr) != res.end()) {
-                std::ostringstream oss;
-                oss << "Duplicate attribute type " << attribute_type;
-                FUNTLS_CHECK_FAILURE(oss.str());
-            }
             res.push_back(std::make_pair(attribute_type, text));
             if (av_pair.has_next()) {
                 FUNTLS_CHECK_FAILURE("Excess data in X509 name attribute type/value pair");

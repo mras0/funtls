@@ -764,8 +764,36 @@ private:
 
 int main(int argc, char* argv[])
 {
-    const char* const host = argc > 1 ? argv[1] : "localhost";
-    const char* const port = argc > 2 ? argv[2] : "443";
+    if (argc != 2) {
+        std::cout << "Usage: " << argv[0] << " https-uri\n";
+        return 0;
+    }
+
+    // Lame URI parsing
+    std::string uri(argv[1]);
+    const auto expected_scheme = std::string("https://");
+    FUNTLS_CHECK_BINARY(expected_scheme, ==, uri.substr(0, expected_scheme.size()), "Invalid HTTPS-URI: '" + uri + "'");
+    uri = uri.substr(expected_scheme.size());
+
+    std::string full_host, path;
+    auto end_of_host = uri.find_first_of('/');
+    if (end_of_host != std::string::npos) {
+        full_host = uri.substr(0, end_of_host);
+        path = uri.substr(end_of_host);
+    } else {
+        full_host = uri;
+        path = "/";
+    }
+    std::string port = "443";
+    std::string host = full_host;
+    const auto colon_pos = host.find_first_of(':');
+    if (colon_pos != std::string::npos) {
+        host = full_host.substr(0, colon_pos);
+        port = full_host.substr(colon_pos+1);
+    }
+
+    std::cout << "host: " << host << ":" << port << std::endl;
+    std::cout << "path: " << path << std::endl;
 
     //const tls::cipher_suite wanted_cipher = tls::cipher_suite::rsa_with_rc4_128_md5;
     //const tls::cipher_suite wanted_cipher = tls::cipher_suite::rsa_with_rc4_128_sha;
@@ -791,7 +819,7 @@ int main(int argc, char* argv[])
 
         std::cout << "Completed handshake!\n";
 
-        const auto data = std::string("GET / HTTP/1.1\r\nHost: ")+host+"\r\n\r\n";
+        const auto data = "GET "+path+" HTTP/1.1\r\nHost: "+host+"\r\n\r\n";
         ts.send_app_data(std::vector<uint8_t>(data.begin(), data.end()));
 
         for (;;) {
