@@ -85,10 +85,11 @@ std::ostream& operator<<(std::ostream& os, prf_algorithm e)
 std::ostream& operator<<(std::ostream& os, bulk_cipher_algorithm e)
 {
     switch (e) {
-    case bulk_cipher_algorithm::null:  return os << "NULL";
-    case bulk_cipher_algorithm::rc4:   return os << "RC4";
-    case bulk_cipher_algorithm::_3des: return os << "3DES";
-    case bulk_cipher_algorithm::aes:   return os << "AES";
+    case bulk_cipher_algorithm::null:    return os << "NULL";
+    case bulk_cipher_algorithm::rc4:     return os << "RC4";
+    case bulk_cipher_algorithm::_3des:   return os << "3DES";
+    case bulk_cipher_algorithm::aes_cbc: return os << "AES-CBC";
+    case bulk_cipher_algorithm::aes_gcm: return os << "AES-GCM";
     }
     assert(false);
     return os << "Unknown TLS bulk cipher algorithm " << static_cast<unsigned>(e);
@@ -132,8 +133,8 @@ std::ostream& operator<<(std::ostream& os, mac_algorithm e)
         f(dhe_rsa_with_aes_128_cbc_sha);\
         f(dhe_rsa_with_aes_256_cbc_sha);\
         f(dhe_rsa_with_aes_128_cbc_sha256);\
-        f(dhe_rsa_with_aes_256_cbc_sha256)
-
+        f(dhe_rsa_with_aes_256_cbc_sha256);\
+        f(rsa_with_aes_128_gcm_sha256)
 
 cipher_suite_parameters parameters_from_suite(cipher_suite suite)
 {
@@ -151,13 +152,15 @@ std::ostream& operator<<(std::ostream& os, cipher_suite suite)
 {
     const auto csp = parameters_from_suite(suite);
     os << "TLS_" << csp.key_exchange_algorithm;
-    os << "_WITH_" << csp.bulk_cipher_algorithm;
+    os << "_WITH_";
     if (csp.bulk_cipher_algorithm == bulk_cipher_algorithm::rc4) {
-        os << "_" << 8*csp.key_length;
+        os << "RC4_" << 8*csp.key_length;
     } else if (csp.bulk_cipher_algorithm == bulk_cipher_algorithm::_3des) {
-        os << "_EDE_CBC";
-    } else if (csp.bulk_cipher_algorithm == bulk_cipher_algorithm::aes) {
-        os << "_" << 8*csp.key_length << "_CBC";
+        os << "3DES_EDE_CBC";
+    } else if (csp.bulk_cipher_algorithm == bulk_cipher_algorithm::aes_cbc) {
+        os << "AES_" << 8*csp.key_length << "_CBC";
+    } else if (csp.bulk_cipher_algorithm == bulk_cipher_algorithm::aes_gcm) {
+        os << "AES_" << 8*csp.key_length << "_GCM";
     } else {
         assert(csp.bulk_cipher_algorithm == bulk_cipher_algorithm::null);
     }
@@ -202,11 +205,17 @@ std::istream& operator>>(std::istream& is, cipher_suite& suite)
     } else if (try_consume(text, "3des_ede_cbc_") || try_consume(text, "des_cbc3_")) {
         cipher_algo = bulk_cipher_algorithm::_3des;
         bits = 192;
-    } else if (try_consume(text, "aes_128_cbc_") || try_consume(text, "aes128_")) {
-        cipher_algo = bulk_cipher_algorithm::aes;
+    } else if (try_consume(text, "aes_128_gcm_") || try_consume(text, "aes128_gcm_")) {
+        cipher_algo = bulk_cipher_algorithm::aes_gcm;
         bits = 128;
+    } else if (try_consume(text, "aes_128_cbc_") || try_consume(text, "aes128_")) {
+        cipher_algo = bulk_cipher_algorithm::aes_cbc;
+        bits = 128;
+    } else if (try_consume(text, "aes_256_gcm_") || try_consume(text, "aes256_gcm_")) {
+        cipher_algo = bulk_cipher_algorithm::aes_gcm;
+        bits = 256;
     } else if (try_consume(text, "aes_256_cbc_") || try_consume(text, "aes256_")) {
-        cipher_algo = bulk_cipher_algorithm::aes;
+        cipher_algo = bulk_cipher_algorithm::aes_cbc;
         bits = 256;
     } else {
         FUNTLS_CHECK_FAILURE("Could not parse block cipher algorithm from " + saved_text);

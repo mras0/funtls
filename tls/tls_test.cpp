@@ -47,34 +47,51 @@ void test_cipher_traits()
         const auto csp   = tls::parameters_from_suite(suite);
         std::cout << csp << std::endl;
 
-        FUNTLS_ASSERT_EQUAL(suite,                              csp.cipher_suite);
-        FUNTLS_ASSERT_EQUAL(tls::key_exchange_algorithm::rsa,   csp.key_exchange_algorithm);
-        FUNTLS_ASSERT_EQUAL(tls::prf_algorithm::tls_prf_sha256, csp.prf_algorithm);
-        FUNTLS_ASSERT_EQUAL(tls::bulk_cipher_algorithm::aes,    csp.bulk_cipher_algorithm);
-        FUNTLS_ASSERT_EQUAL(tls::cipher_type::block,            csp.cipher_type);
-        FUNTLS_ASSERT_EQUAL(128/8,                              csp.key_length);
-        FUNTLS_ASSERT_EQUAL(128/8,                              csp.block_length);
-        FUNTLS_ASSERT_EQUAL(128/8,                              csp.iv_length);
-        FUNTLS_ASSERT_EQUAL(tls::mac_algorithm::hmac_sha1,      csp.mac_algorithm);
-        FUNTLS_ASSERT_EQUAL(160/8,                              csp.mac_length);
-        FUNTLS_ASSERT_EQUAL(160/8,                              csp.mac_key_length);
+        FUNTLS_ASSERT_EQUAL(suite,                               csp.cipher_suite);
+        FUNTLS_ASSERT_EQUAL(tls::key_exchange_algorithm::rsa,    csp.key_exchange_algorithm);
+        FUNTLS_ASSERT_EQUAL(tls::prf_algorithm::tls_prf_sha256,  csp.prf_algorithm);
+        FUNTLS_ASSERT_EQUAL(tls::bulk_cipher_algorithm::aes_cbc, csp.bulk_cipher_algorithm);
+        FUNTLS_ASSERT_EQUAL(tls::cipher_type::block,             csp.cipher_type);
+        FUNTLS_ASSERT_EQUAL(128/8,                               csp.key_length);
+        FUNTLS_ASSERT_EQUAL(128/8,                               csp.block_length);
+        FUNTLS_ASSERT_EQUAL(128/8,                               csp.iv_length);
+        FUNTLS_ASSERT_EQUAL(tls::mac_algorithm::hmac_sha1,       csp.mac_algorithm);
+        FUNTLS_ASSERT_EQUAL(160/8,                               csp.mac_length);
+        FUNTLS_ASSERT_EQUAL(160/8,                               csp.mac_key_length);
     }
     {
         const auto suite = tls::cipher_suite::rsa_with_aes_256_cbc_sha256;
         const auto csp   = tls::parameters_from_suite(suite);
         std::cout << csp << std::endl;
 
-        FUNTLS_ASSERT_EQUAL(suite,                              csp.cipher_suite);
-        FUNTLS_ASSERT_EQUAL(tls::key_exchange_algorithm::rsa,   csp.key_exchange_algorithm);
-        FUNTLS_ASSERT_EQUAL(tls::prf_algorithm::tls_prf_sha256, csp.prf_algorithm);
-        FUNTLS_ASSERT_EQUAL(tls::bulk_cipher_algorithm::aes,    csp.bulk_cipher_algorithm);
-        FUNTLS_ASSERT_EQUAL(tls::cipher_type::block,            csp.cipher_type);
-        FUNTLS_ASSERT_EQUAL(256/8,                              csp.key_length);
-        FUNTLS_ASSERT_EQUAL(128/8,                              csp.block_length);
-        FUNTLS_ASSERT_EQUAL(128/8,                              csp.iv_length);
-        FUNTLS_ASSERT_EQUAL(tls::mac_algorithm::hmac_sha256,    csp.mac_algorithm);
-        FUNTLS_ASSERT_EQUAL(256/8,                              csp.mac_length);
-        FUNTLS_ASSERT_EQUAL(256/8,                              csp.mac_key_length);
+        FUNTLS_ASSERT_EQUAL(suite,                               csp.cipher_suite);
+        FUNTLS_ASSERT_EQUAL(tls::key_exchange_algorithm::rsa,    csp.key_exchange_algorithm);
+        FUNTLS_ASSERT_EQUAL(tls::prf_algorithm::tls_prf_sha256,  csp.prf_algorithm);
+        FUNTLS_ASSERT_EQUAL(tls::bulk_cipher_algorithm::aes_cbc, csp.bulk_cipher_algorithm);
+        FUNTLS_ASSERT_EQUAL(tls::cipher_type::block,             csp.cipher_type);
+        FUNTLS_ASSERT_EQUAL(256/8,                               csp.key_length);
+        FUNTLS_ASSERT_EQUAL(128/8,                               csp.block_length);
+        FUNTLS_ASSERT_EQUAL(128/8,                               csp.iv_length);
+        FUNTLS_ASSERT_EQUAL(tls::mac_algorithm::hmac_sha256,     csp.mac_algorithm);
+        FUNTLS_ASSERT_EQUAL(256/8,                               csp.mac_length);
+        FUNTLS_ASSERT_EQUAL(256/8,                               csp.mac_key_length);
+    }
+    {
+        const auto suite = tls::cipher_suite::rsa_with_aes_128_gcm_sha256;
+        const auto csp   = tls::parameters_from_suite(suite);
+        std::cout << csp << std::endl;
+
+        FUNTLS_ASSERT_EQUAL(suite,                               csp.cipher_suite);
+        FUNTLS_ASSERT_EQUAL(tls::key_exchange_algorithm::rsa,    csp.key_exchange_algorithm);
+        FUNTLS_ASSERT_EQUAL(tls::prf_algorithm::tls_prf_sha256,  csp.prf_algorithm);
+        FUNTLS_ASSERT_EQUAL(tls::bulk_cipher_algorithm::aes_gcm, csp.bulk_cipher_algorithm);
+        FUNTLS_ASSERT_EQUAL(tls::cipher_type::aead,              csp.cipher_type);
+        FUNTLS_ASSERT_EQUAL(128/8,                               csp.key_length);
+        FUNTLS_ASSERT_EQUAL(128/8,                               csp.block_length);
+        FUNTLS_ASSERT_EQUAL(128/8,                               csp.iv_length);
+        FUNTLS_ASSERT_EQUAL(tls::mac_algorithm::hmac_sha256,     csp.mac_algorithm);
+        FUNTLS_ASSERT_EQUAL(256/8,                               csp.mac_length);
+        FUNTLS_ASSERT_EQUAL(256/8,                               csp.mac_key_length);
     }
 }
 
@@ -100,6 +117,7 @@ void test_cipher_parsing()
     TEST_IN(dhe_rsa_with_aes_128_cbc_sha,    "TLS_DHE_RSA_WITH_AES_128_CBC_SHA");
     TEST_IN(dhe_rsa_with_aes_256_cbc_sha,    "DHE-RSA-AES256-sha");
     TEST_IN(rsa_with_aes_256_cbc_sha256,     "aes256-SHA256");
+    TEST_IN(rsa_with_aes_128_gcm_sha256,     "AES128-GCM-SHA256");
 #undef TEST_IN
 }
 

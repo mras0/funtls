@@ -64,8 +64,8 @@ private:
 
 class aes_cipher : public cipher {
 public:
-    static constexpr size_t iv_length = aes_traits<256>::iv_length;
-    static_assert(aes_traits<256>::iv_length == aes_traits<128>::iv_length, "");
+    static constexpr size_t iv_length = aes_cbc_traits<256>::iv_length;
+    static_assert(aes_cbc_traits<256>::iv_length == aes_cbc_traits<128>::iv_length, "");
 
     enum operation { decrypt = 0, encrypt = 1 };
     explicit aes_cipher(operation op, const std::vector<uint8_t>& key) : operation_(op), key_(key) {}
@@ -477,7 +477,7 @@ private:
         if (cipher_param.bulk_cipher_algorithm == tls::bulk_cipher_algorithm::rc4) {
             encrypt_cipher.reset(new tls::rc4_cipher(client_enc_key));
             decrypt_cipher.reset(new tls::rc4_cipher(server_enc_key));
-        } else if (cipher_param.bulk_cipher_algorithm == tls::bulk_cipher_algorithm::aes) {
+        } else if (cipher_param.bulk_cipher_algorithm == tls::bulk_cipher_algorithm::aes_cbc) {
             encrypt_cipher.reset(new tls::aes_cipher(tls::aes_cipher::encrypt, client_enc_key));
             decrypt_cipher.reset(new tls::aes_cipher(tls::aes_cipher::decrypt, server_enc_key));
         } else if (cipher_param.bulk_cipher_algorithm == tls::bulk_cipher_algorithm::_3des) {
@@ -620,7 +620,7 @@ private:
     std::vector<uint8_t> bulk_decrypt(const std::vector<uint8_t>& dec_key, const std::vector<uint8_t>& iv, const std::vector<uint8_t>& content) {
         const auto cipher_param = tls::parameters_from_suite(current_cipher);
         if (cipher_param.bulk_cipher_algorithm == tls::bulk_cipher_algorithm::rc4) {
-        } else if (cipher_param.bulk_cipher_algorithm == tls::bulk_cipher_algorithm::aes) {
+        } else if (cipher_param.bulk_cipher_algorithm == tls::bulk_cipher_algorithm::aes_cbc) {
             return aes::aes_decrypt_cbc(dec_key, iv, content);
         } else {
             assert(cipher_param.bulk_cipher_algorithm == tls::bulk_cipher_algorithm::null);

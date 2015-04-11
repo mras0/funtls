@@ -48,6 +48,20 @@ enum class cipher_suite : uint16_t {
     dh_anon_with_aes_256_cbc_sha    = 0x003A,
     dh_anon_with_aes_128_cbc_sha256 = 0x006C,
     dh_anon_with_aes_256_cbc_sha256 = 0x006D,
+
+    // http://tools.ietf.org/html/rfc5288
+    rsa_with_aes_128_gcm_sha256     = 0x009C,
+    rsa_with_aes_256_gcm_sha384     = 0x009D,
+    dhe_rsa_with_aes_128_gcm_sha256 = 0x009E,
+    dhe_rsa_with_aes_256_gcm_sha384 = 0x009F,
+    dh_rsa_with_aes_128_gcm_sha256  = 0x00A0,
+    dh_rsa_with_aes_256_gcm_sha384  = 0x00A1,
+    dhe_dss_with_aes_128_gcm_sha256 = 0x00A2,
+    dhe_dss_with_aes_256_gcm_sha384 = 0x00A3,
+    dh_dss_with_aes_128_gcm_sha256  = 0x00A4,
+    dh_dss_with_aes_256_gcm_sha384  = 0x00A5,
+    dh_anon_with_aes_128_gcm_sha256 = 0x00A6,
+    dh_anon_with_aes_256_gcm_sha384 = 0x00A7,
 };
 
 enum class key_exchange_algorithm {
@@ -68,7 +82,8 @@ enum class bulk_cipher_algorithm {
     null,
     rc4,
     _3des,
-    aes
+    aes_cbc,
+    aes_gcm
 };
 
 enum class cipher_type {
@@ -118,10 +133,20 @@ struct _3des_traits {
 };
 
 template<unsigned aes_key_length_bits>
-struct aes_traits {
+struct aes_cbc_traits {
     static_assert(aes_key_length_bits == 128 || aes_key_length_bits == 192 || aes_key_length_bits == 256, "Invalid AES key length");
-    static constexpr auto bulk_cipher_algorithm  = tls::bulk_cipher_algorithm::aes;
+    static constexpr auto bulk_cipher_algorithm  = tls::bulk_cipher_algorithm::aes_cbc;
     static constexpr auto cipher_type            = tls::cipher_type::block;
+    static constexpr uint8_t key_length          = aes_key_length_bits / 8;
+    static constexpr uint8_t block_length        = 128/8;
+    static constexpr uint8_t iv_length           = 128/8;
+};
+
+template<unsigned aes_key_length_bits>
+struct aes_gcm_traits {
+    static_assert(aes_key_length_bits == 128 || aes_key_length_bits == 192 || aes_key_length_bits == 256, "Invalid AES key length");
+    static constexpr auto bulk_cipher_algorithm  = tls::bulk_cipher_algorithm::aes_gcm;
+    static constexpr auto cipher_type            = tls::cipher_type::aead;
     static constexpr uint8_t key_length          = aes_key_length_bits / 8;
     static constexpr uint8_t block_length        = 128/8;
     static constexpr uint8_t iv_length           = 128/8;
@@ -170,123 +195,32 @@ struct cipher_suite_traits_base {
 
 } // namespace detail
 
-template<>
-struct cipher_suite_traits<cipher_suite::null_with_null_null>
-    : public detail::cipher_suite_traits_base<
-        cipher_suite::null_with_null_null,
-        key_exchange_algorithm::null,
-        null_bulk_algo_traits,
-        null_mac_algo_triats> {
-};
+#define CS_TRAITS_SPEC(n, kex, bulk, mac)        \
+template<>                                       \
+struct cipher_suite_traits<cipher_suite::n>      \
+    : public detail::cipher_suite_traits_base<   \
+        cipher_suite::n,                         \
+        key_exchange_algorithm::kex,             \
+        bulk,                                    \
+        mac> {}
 
-template<>
-struct cipher_suite_traits<cipher_suite::rsa_with_rc4_128_md5>
-    : public detail::cipher_suite_traits_base<
-        cipher_suite::rsa_with_rc4_128_sha,
-        key_exchange_algorithm::rsa,
-        rc4_traits,
-        hmac_md5_algo_traits> {
-};
+CS_TRAITS_SPEC(null_with_null_null, null, null_bulk_algo_traits, null_mac_algo_triats);
+CS_TRAITS_SPEC(rsa_with_rc4_128_md5, rsa, rc4_traits, hmac_md5_algo_traits);
+CS_TRAITS_SPEC(rsa_with_rc4_128_sha, rsa, rc4_traits, hmac_sha_algo_traits);
+CS_TRAITS_SPEC(rsa_with_3des_ede_cbc_sha, rsa, _3des_traits, hmac_sha_algo_traits);
+CS_TRAITS_SPEC(rsa_with_aes_128_cbc_sha, rsa, aes_cbc_traits<128>, hmac_sha_algo_traits);
+CS_TRAITS_SPEC(rsa_with_aes_256_cbc_sha, rsa, aes_cbc_traits<256>, hmac_sha_algo_traits);
+CS_TRAITS_SPEC(rsa_with_aes_128_cbc_sha256, rsa, aes_cbc_traits<128>, hmac_sha256_algo_traits);
+CS_TRAITS_SPEC(rsa_with_aes_256_cbc_sha256, rsa, aes_cbc_traits<256>, hmac_sha256_algo_traits);
+CS_TRAITS_SPEC(dhe_rsa_with_3des_ede_cbc_sha, dhe_rsa, _3des_traits, hmac_sha_algo_traits);
+CS_TRAITS_SPEC(dhe_rsa_with_aes_128_cbc_sha, dhe_rsa, aes_cbc_traits<128>, hmac_sha_algo_traits);
+CS_TRAITS_SPEC(dhe_rsa_with_aes_256_cbc_sha, dhe_rsa, aes_cbc_traits<256>, hmac_sha_algo_traits);
+CS_TRAITS_SPEC(dhe_rsa_with_aes_128_cbc_sha256, dhe_rsa, aes_cbc_traits<128>, hmac_sha256_algo_traits);
+CS_TRAITS_SPEC(dhe_rsa_with_aes_256_cbc_sha256, dhe_rsa, aes_cbc_traits<256>, hmac_sha256_algo_traits);
 
-template<>
-struct cipher_suite_traits<cipher_suite::rsa_with_rc4_128_sha>
-    : public detail::cipher_suite_traits_base<
-        cipher_suite::rsa_with_rc4_128_sha,
-        key_exchange_algorithm::rsa,
-        rc4_traits,
-        hmac_sha_algo_traits> {
-};
+CS_TRAITS_SPEC(rsa_with_aes_128_gcm_sha256, rsa, aes_gcm_traits<128>, hmac_sha256_algo_traits);
 
-template<>
-struct cipher_suite_traits<cipher_suite::rsa_with_3des_ede_cbc_sha>
-    : public detail::cipher_suite_traits_base<
-        cipher_suite::rsa_with_3des_ede_cbc_sha,
-        key_exchange_algorithm::rsa,
-        _3des_traits,
-        hmac_sha_algo_traits> {
-};
-
-template<>
-struct cipher_suite_traits<cipher_suite::rsa_with_aes_128_cbc_sha>
-    : public detail::cipher_suite_traits_base<
-        cipher_suite::rsa_with_aes_128_cbc_sha,
-        key_exchange_algorithm::rsa,
-        aes_traits<128>,
-        hmac_sha_algo_traits> {
-};
-
-template<>
-struct cipher_suite_traits<cipher_suite::rsa_with_aes_256_cbc_sha>
-    : public detail::cipher_suite_traits_base<
-        cipher_suite::rsa_with_aes_128_cbc_sha,
-        key_exchange_algorithm::rsa,
-        aes_traits<256>,
-        hmac_sha_algo_traits> {
-};
-
-
-template<>
-struct cipher_suite_traits<cipher_suite::rsa_with_aes_128_cbc_sha256>
-    : public detail::cipher_suite_traits_base<
-        cipher_suite::rsa_with_aes_128_cbc_sha256,
-        key_exchange_algorithm::rsa,
-        aes_traits<128>,
-        hmac_sha256_algo_traits> {
-};
-
-template<>
-struct cipher_suite_traits<cipher_suite::rsa_with_aes_256_cbc_sha256>
-    : public detail::cipher_suite_traits_base<
-        cipher_suite::rsa_with_aes_256_cbc_sha256,
-        key_exchange_algorithm::rsa,
-        aes_traits<256>,
-        hmac_sha256_algo_traits> {
-};
-
-template<>
-struct cipher_suite_traits<cipher_suite::dhe_rsa_with_3des_ede_cbc_sha>
-    : public detail::cipher_suite_traits_base<
-        cipher_suite::dhe_rsa_with_3des_ede_cbc_sha,
-        key_exchange_algorithm::dhe_rsa,
-        _3des_traits,
-        hmac_sha_algo_traits> {
-};
-
-template<>
-struct cipher_suite_traits<cipher_suite::dhe_rsa_with_aes_128_cbc_sha>
-    : public detail::cipher_suite_traits_base<
-        cipher_suite::dhe_rsa_with_aes_128_cbc_sha,
-        key_exchange_algorithm::dhe_rsa,
-        aes_traits<128>,
-        hmac_sha_algo_traits> {
-};
-
-template<>
-struct cipher_suite_traits<cipher_suite::dhe_rsa_with_aes_256_cbc_sha>
-    : public detail::cipher_suite_traits_base<
-        cipher_suite::dhe_rsa_with_aes_256_cbc_sha,
-        key_exchange_algorithm::dhe_rsa,
-        aes_traits<256>,
-        hmac_sha_algo_traits> {
-};
-
-template<>
-struct cipher_suite_traits<cipher_suite::dhe_rsa_with_aes_128_cbc_sha256>
-    : public detail::cipher_suite_traits_base<
-        cipher_suite::dhe_rsa_with_aes_128_cbc_sha,
-        key_exchange_algorithm::dhe_rsa,
-        aes_traits<128>,
-        hmac_sha256_algo_traits> {
-};
-
-template<>
-struct cipher_suite_traits<cipher_suite::dhe_rsa_with_aes_256_cbc_sha256>
-    : public detail::cipher_suite_traits_base<
-        cipher_suite::dhe_rsa_with_aes_256_cbc_sha,
-        key_exchange_algorithm::dhe_rsa,
-        aes_traits<256>,
-        hmac_sha256_algo_traits> {
-};
+#undef CS_TRAITS_SPEC
 
 struct cipher_suite_parameters {
     const tls::cipher_suite           cipher_suite;
