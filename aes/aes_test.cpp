@@ -303,9 +303,11 @@ void process_with_padding(state& X, const state& H, const std::vector<uint8_t>& 
         one_block(X, H, state{&in[i]});
     }
     const size_t remaining = in.size() - i;
-    assert(remaining < aes::block_size_bytes);
     if (remaining) {
-        assert(false);
+        assert(remaining < aes::block_size_bytes);
+        state last;
+        memcpy(&last[0], &in[i], remaining);
+        one_block(X, H, last);
     }
 }
 
@@ -376,7 +378,6 @@ std::pair<std::vector<uint8_t>, std::vector<uint8_t>> aes_cgm(const std::vector<
         assert(Y[15] == 0);
         Y[15] |= 1;
     } else {
-        assert(!"Untested");
         Y = ghash(H, std::vector<uint8_t>{}, IV);
     }
     const auto Y0 = Y.as_vector();
@@ -384,11 +385,17 @@ std::pair<std::vector<uint8_t>, std::vector<uint8_t>> aes_cgm(const std::vector<
     std::cout << "H =  " << util::base16_encode(H) << std::endl;
     std::cout << "Y0 = " << util::base16_encode(Y0) << std::endl;
 
-    assert(P.size() % aes::block_size_bytes == 0); // lazy for now
     std::vector<uint8_t> C(P.size());
     for (unsigned i = 0; i < P.size(); i += aes::block_size_bytes) {
+        unsigned remaining = P.size() - i;
+        state c;
+        if (remaining >= aes::block_size_bytes) {
+            remaining = aes::block_size_bytes;
+            c = state{&P[i]};
+        } else {
+            memcpy(&c[0], &P[i], remaining);
+        }
         incr32(Y);
-        state c{&P[i]};
         std::cout << "Iter " << (1+i/aes::block_size_bytes) << std::endl;
         std::cout << "P  = " << util::base16_encode(c.as_vector()) << std::endl;
         std::cout << "Y  = " << util::base16_encode(Y.as_vector()) << std::endl;
@@ -396,7 +403,7 @@ std::pair<std::vector<uint8_t>, std::vector<uint8_t>> aes_cgm(const std::vector<
         std::cout << "EY = " << util::base16_encode(E_K_Y.as_vector()) << std::endl;
         c ^= E_K_Y;
         std::cout << "C  = " << util::base16_encode(c.as_vector()) << std::endl;
-        std::copy(c.begin(), c.end(), &C[i]);
+        std::copy(c.begin(), c.begin() + remaining, &C[i]);
     }
 
     // T = MSB_t(GHASH(H, A, C) ^ E(K, Y0))
@@ -408,49 +415,91 @@ std::pair<std::vector<uint8_t>, std::vector<uint8_t>> aes_cgm(const std::vector<
 // http://csrc.nist.gov/groups/ST/toolkit/BCM/documents/proposedmodes/gcm/gcm-spec.pdf
 void test_cgm_aes()
 {
-   {
-    // Test case 1
-    const auto K  = util::base16_decode("00000000000000000000000000000000");
-    const auto IV = util::base16_decode("000000000000000000000000");
-    const auto P  = util::base16_decode("");
-    const auto A  = util::base16_decode("");
+    static const struct {
+        const std::string k;
+        const std::string p;
+        const std::string a;
+        const std::string iv;
+        const std::string c;
+        const std::string t;
+    } tests[] = {
+        // Test case 1
+        {
+            "00000000000000000000000000000000",
+            "",
+            "",
+            "000000000000000000000000",
+            "",
+            "58e2fccefa7e3061367f1d57a4e7455a"
+        },
+        // Test case 2
+        {
+            "00000000000000000000000000000000",
+            "00000000000000000000000000000000",
+            "",
+            "000000000000000000000000",
+            "0388dace60b6a392f328c2b971b2fe78",
+            "ab6e47d42cec13bdf53a67b21257bddf",
+        },
+        // Test case 3
+        {
+            // K
+            "feffe9928665731c6d6a8f9467308308",
+            // P
+            "d9313225f88406e5a55909c5aff5269a"
+            "86a7a9531534f7da2e4c303d8a318a72"
+            "1c3c0c95956809532fcf0e2449a6b525"
+            "b16aedf5aa0de657ba637b391aafd255",
+            // A
+            "",
+            // IV
+            "cafebabefacedbaddecaf888",
+            // C
+            "42831ec2217774244b7221b784d0d49c"
+            "e3aa212f2c02a4e035c17e2329aca12e"
+            "21d514b25466931c7d8f6a5aac84aa05"
+            "1ba30b396a0aac973d58e091473f5985",
+            // T
+            "4d5c2af327cd64a62cf35abd2ba6fab4",
+        },
+        // Test case 4
+        {
+            // K
+            "feffe9928665731c6d6a8f9467308308",
+            // P
+            "d9313225f88406e5a55909c5aff5269a"
+            "86a7a9531534f7da2e4c303d8a318a72"
+            "1c3c0c95956809532fcf0e2449a6b525"
+            "b16aedf5aa0de657ba637b39",
+            // A
+            "feedfacedeadbeeffeedfacedeadbeef"
+            "abaddad2",
+            // IV
+            "cafebabefacedbaddecaf888",
+            // C
+            "42831ec2217774244b7221b784d0d49c"
+            "e3aa212f2c02a4e035c17e2329aca12e"
+            "21d514b25466931c7d8f6a5aac84aa05"
+            "1ba30b396a0aac973d58e091",
+            // T
+            "5bc94fbc3221a5db94fae95ae7121a47",
+        }
+    };
 
-    auto res = aes_cgm(K, IV, P, A);
-#if 0
-    std::cout << "\nExpected:\n";
-    std::cout << "H  66e94bd4ef8a2c3b884cfa59ca342b2e\n";
-    std::cout << "Y0 00000000000000000000000000000001\n";
-    std::cout << "E(K, Y0) =\n    58e2fccefa7e3061367f1d57a4e7455a\n";
-    std::cout << "len(A)|len(C) =\n   00000000000000000000000000000000\n";
-    std::cout << "GHASH(H,A,C) =\n   00000000000000000000000000000000\n";
-#endif
-    const auto& C = res.first;
-    const auto& T = res.second;
-    FUNTLS_ASSERT_EQUAL(P.size(), C.size());
-    FUNTLS_ASSERT_EQUAL(0U, C.size());
-    FUNTLS_ASSERT_EQUAL(util::base16_decode("58e2fccefa7e3061367f1d57a4e7455a"), T);
+    for (const auto& t : tests) {
+        const auto K  = util::base16_decode(t.k);
+        const auto IV = util::base16_decode(t.iv);
+        const auto P  = util::base16_decode(t.p);
+        const auto A  = util::base16_decode(t.a);
+
+        const auto res = aes_cgm(K, IV, P, A);
+        const auto& C = res.first;
+        const auto& T = res.second;
+        FUNTLS_ASSERT_EQUAL(P.size(), C.size());
+        FUNTLS_ASSERT_EQUAL(util::base16_decode(t.c), C);
+        FUNTLS_ASSERT_EQUAL(util::base16_decode(t.t), T);
     }
-
-   std::cout << "\n\n\n\n";
-    {
-    // Test case 2
-    const auto K  = util::base16_decode("00000000000000000000000000000000");
-    const auto IV = util::base16_decode("000000000000000000000000");
-    const auto P  = util::base16_decode("00000000000000000000000000000000");
-    const auto A  = util::base16_decode("");
-
-    auto res = aes_cgm(K, IV, P, A);
-
-    const auto& C = res.first;
-    const auto& T = res.second;
-    std::cout << "\nOutput:\n";
-    std::cout << "C  " << util::base16_encode(C) << std::endl;
-    std::cout << "T  " << util::base16_encode(T) << std::endl;
-    FUNTLS_ASSERT_EQUAL(P.size(), C.size());
-    FUNTLS_ASSERT_EQUAL(util::base16_decode("0388dace60b6a392f328c2b971b2fe78"), C);
-    FUNTLS_ASSERT_EQUAL(util::base16_decode("ab6e47d42cec13bdf53a67b21257bddf"), T);
-    }
- }
+}
 
 int main()
 {
