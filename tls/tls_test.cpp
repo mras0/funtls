@@ -78,6 +78,31 @@ void test_cipher_traits()
     }
 }
 
+void test_cipher_parsing()
+{
+    using namespace tls;
+#define TEST_IN(expected, text) do {\
+    std::istringstream iss(text);\
+    tls::cipher_suite cs;\
+    FUNTLS_ASSERT_EQUAL(true, bool(iss >> cs));\
+    FUNTLS_ASSERT_EQUAL(cipher_suite::expected, cs);\
+} while (0)
+    TEST_IN(rsa_with_rc4_128_md5,            "rsa_with_rc4_128_md5");
+    TEST_IN(rsa_with_rc4_128_sha,            "rsa_with_rc4_128_sha");
+    TEST_IN(rsa_with_3des_ede_cbc_sha,       "rsa_with_3des_ede_cbc_sha");
+    TEST_IN(rsa_with_aes_128_cbc_sha,        "rsa_with_aes_128_cbc_sha");
+    TEST_IN(rsa_with_aes_128_cbc_sha256,     "rsa_with_aes_128_cbc_sha256");
+    TEST_IN(rsa_with_aes_256_cbc_sha,        "rsa_with_aes_256_cbc_sha");
+    TEST_IN(rsa_with_aes_256_cbc_sha256,     "rsa_with_aes_256_cbc_sha256");
+    TEST_IN(dhe_rsa_with_3des_ede_cbc_sha,   "dhe_rsa_with_3des_ede_cbc_sha");
+    TEST_IN(dhe_rsa_with_3des_ede_cbc_sha,   "dhe_rsa_with_3des_ede_cbc_sha");
+    TEST_IN(dhe_rsa_with_aes_256_cbc_sha256, "dhe_rsa_with_aes_256_cbc_sha256");
+    TEST_IN(dhe_rsa_with_aes_128_cbc_sha,    "TLS_DHE_RSA_WITH_AES_128_CBC_SHA");
+    TEST_IN(dhe_rsa_with_aes_256_cbc_sha,    "DHE-RSA-AES256-sha");
+    TEST_IN(rsa_with_aes_256_cbc_sha256,     "aes256-SHA256");
+#undef TEST_IN
+}
+
 int main()
 {
     const auto secret = util::base16_decode("01234567");
@@ -86,4 +111,5 @@ int main()
             util::base16_encode(tls::P_hash(secret,seed,40)));
 
     test_cipher_traits();
+    test_cipher_parsing();
 }

@@ -311,6 +311,7 @@ std::ostream& operator<<(std::ostream& os, bulk_cipher_algorithm e);
 std::ostream& operator<<(std::ostream& os, cipher_type e);
 std::ostream& operator<<(std::ostream& os, mac_algorithm e);
 std::ostream& operator<<(std::ostream& os, cipher_suite suite);
+std::istream& operator>>(std::istream& is, cipher_suite& suite);
 std::ostream& operator<<(std::ostream& os, const cipher_suite_parameters& csp);
 
 } } // namespace funtls::tls

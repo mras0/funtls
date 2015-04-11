@@ -764,8 +764,8 @@ private:
 
 int main(int argc, char* argv[])
 {
-    if (argc != 2) {
-        std::cout << "Usage: " << argv[0] << " https-uri\n";
+    if (argc != 2 && argc != 3) {
+        std::cout << "Usage: " << argv[0] << " https-uri [cipher]\n";
         return 0;
     }
 
@@ -795,17 +795,13 @@ int main(int argc, char* argv[])
     std::cout << "host: " << host << ":" << port << std::endl;
     std::cout << "path: " << path << std::endl;
 
-    //const tls::cipher_suite wanted_cipher = tls::cipher_suite::rsa_with_rc4_128_md5;
-    //const tls::cipher_suite wanted_cipher = tls::cipher_suite::rsa_with_rc4_128_sha;
-    //const tls::cipher_suite wanted_cipher = tls::cipher_suite::rsa_with_3des_ede_cbc_sha;
-    //const tls::cipher_suite wanted_cipher = tls::cipher_suite::rsa_with_aes_128_cbc_sha;
-    //const tls::cipher_suite wanted_cipher = tls::cipher_suite::rsa_with_aes_128_cbc_sha256;
-    //const tls::cipher_suite wanted_cipher = tls::cipher_suite::rsa_with_aes_256_cbc_sha;
-    //const tls::cipher_suite wanted_cipher = tls::cipher_suite::rsa_with_aes_256_cbc_sha256;
-    //const tls::cipher_suite wanted_cipher = tls::cipher_suite::dhe_rsa_with_3des_ede_cbc_sha;
-    //const tls::cipher_suite wanted_cipher = tls::cipher_suite::dhe_rsa_with_3des_ede_cbc_sha;
-    const tls::cipher_suite wanted_cipher = tls::cipher_suite::dhe_rsa_with_aes_256_cbc_sha256;
-    std::cout << "Wanted cipher:\n" << tls::parameters_from_suite(wanted_cipher) << std::endl;
+    const std::string wanted_cipher_txt = argc >= 3 ? argv[2] : "rsa_with_aes_256_cbc_sha256";
+    tls::cipher_suite wanted_cipher = tls::cipher_suite::null_with_null_null;
+    FUNTLS_CHECK_BINARY(bool(std::istringstream(wanted_cipher_txt)>>wanted_cipher), !=, false, "Invalid cipher " + wanted_cipher_txt);
+    FUNTLS_CHECK_BINARY(wanted_cipher, !=, tls::cipher_suite::null_with_null_null, "Invalid cipher " + wanted_cipher_txt);
+
+
+    std::cout << "Cipher suite: " << tls::parameters_from_suite(wanted_cipher) << std::endl;
     try {
         boost::asio::io_service         io_service;
         boost::asio::ip::tcp::socket    socket(io_service);
@@ -822,9 +818,18 @@ int main(int argc, char* argv[])
         const auto data = "GET "+path+" HTTP/1.1\r\nHost: "+host+"\r\n\r\n";
         ts.send_app_data(std::vector<uint8_t>(data.begin(), data.end()));
 
+        // Ugly!
+        bool got_app_data = false;
         for (;;) {
-            const auto res = ts.next_app_data();
-            std::cout << std::string(res.begin(), res.end()) << std::endl;
+            try {
+                const auto res = ts.next_app_data();
+                std::cout << std::string(res.begin(), res.end()) << std::endl;
+                got_app_data = true;
+            } catch (const std::exception& e) {
+                if (!got_app_data) throw;
+                std::cout << e.what() << std::endl;
+                break;
+            }
         }
 
     } catch (const std::exception& e) {

@@ -31,6 +31,15 @@ funtls::tls::cipher_suite_parameters from_suite_impl()
     };
 }
 
+bool try_consume(std::string& in, const std::string& t)
+{
+    if (in.substr(0, t.size()) == t) {
+        in = in.substr(t.size());
+        return true;
+    }
+    return false;
+}
+
 } // unnamed namespace
 
 namespace funtls { namespace tls {
@@ -110,23 +119,27 @@ std::ostream& operator<<(std::ostream& os, mac_algorithm e)
     return os << "Unknown TLS MAC algorithm " << static_cast<unsigned>(e);
 }
 
+#define ALL_SUPPORTED_SUITES(f) \
+        f(null_with_null_null);\
+        f(rsa_with_rc4_128_md5);\
+        f(rsa_with_rc4_128_sha);\
+        f(rsa_with_3des_ede_cbc_sha);\
+        f(rsa_with_aes_128_cbc_sha);\
+        f(rsa_with_aes_256_cbc_sha);\
+        f(rsa_with_aes_128_cbc_sha256);\
+        f(rsa_with_aes_256_cbc_sha256);\
+        f(dhe_rsa_with_3des_ede_cbc_sha);\
+        f(dhe_rsa_with_aes_128_cbc_sha);\
+        f(dhe_rsa_with_aes_256_cbc_sha);\
+        f(dhe_rsa_with_aes_128_cbc_sha256);\
+        f(dhe_rsa_with_aes_256_cbc_sha256)
+
+
 cipher_suite_parameters parameters_from_suite(cipher_suite suite)
 {
     switch (suite) {
 #define PARAMETERS_FROM_SUITE_CASE(cs) case cipher_suite::cs: return from_suite_impl<cipher_suite::cs>()
-        PARAMETERS_FROM_SUITE_CASE(null_with_null_null);
-        PARAMETERS_FROM_SUITE_CASE(rsa_with_rc4_128_md5);
-        PARAMETERS_FROM_SUITE_CASE(rsa_with_rc4_128_sha);
-        PARAMETERS_FROM_SUITE_CASE(rsa_with_3des_ede_cbc_sha);
-        PARAMETERS_FROM_SUITE_CASE(rsa_with_aes_128_cbc_sha);
-        PARAMETERS_FROM_SUITE_CASE(rsa_with_aes_256_cbc_sha);
-        PARAMETERS_FROM_SUITE_CASE(rsa_with_aes_128_cbc_sha256);
-        PARAMETERS_FROM_SUITE_CASE(rsa_with_aes_256_cbc_sha256);
-        PARAMETERS_FROM_SUITE_CASE(dhe_rsa_with_3des_ede_cbc_sha);
-        PARAMETERS_FROM_SUITE_CASE(dhe_rsa_with_aes_128_cbc_sha);
-        PARAMETERS_FROM_SUITE_CASE(dhe_rsa_with_aes_256_cbc_sha);
-        PARAMETERS_FROM_SUITE_CASE(dhe_rsa_with_aes_128_cbc_sha256);
-        PARAMETERS_FROM_SUITE_CASE(dhe_rsa_with_aes_256_cbc_sha256);
+        ALL_SUPPORTED_SUITES(PARAMETERS_FROM_SUITE_CASE);
 #undef PARAMETERS_FROM_SUITE_CASE
         default: // TODO: REMOVE
         break;
@@ -150,6 +163,87 @@ std::ostream& operator<<(std::ostream& os, cipher_suite suite)
     }
     os << "_" << csp.mac_algorithm;
     return os;
+}
+
+std::istream& operator>>(std::istream& is, cipher_suite& suite)
+{
+    std::string text;
+    if (!(is >> text)) {
+        return is;
+    }
+    const auto saved_text = text;
+    // Convert to lowercase and replace - with _
+    for (auto& c : text) {
+        if (c >= 'A' && c <= 'Z') {
+            c += 'a'-'A';
+        } else if (c == '-') {
+            c = '_';
+        }
+    }
+    // skip (optional) TLS_ prefix
+    (void) try_consume(text, "tls_");
+
+    // Parse key exchange algorithm
+    key_exchange_algorithm kex_algo = key_exchange_algorithm::rsa;
+    if (try_consume(text, "rsa_")) {
+    } else if (try_consume(text, "dhe_rsa_")) {
+        kex_algo = key_exchange_algorithm::dhe_rsa;
+    }
+
+    // Skip (optional) with_
+    (void) try_consume(text, "with_");
+
+    // Parse bulk cipher algorithm
+    bulk_cipher_algorithm cipher_algo = bulk_cipher_algorithm::null;
+    unsigned bits = 0;
+    if (try_consume(text, "rc4_128_") || try_consume(text, "rc4_")) {
+        cipher_algo = bulk_cipher_algorithm::rc4;
+        bits = 128;
+    } else if (try_consume(text, "3des_ede_cbc_") || try_consume(text, "des_cbc3_")) {
+        cipher_algo = bulk_cipher_algorithm::_3des;
+        bits = 192;
+    } else if (try_consume(text, "aes_128_cbc_") || try_consume(text, "aes128_")) {
+        cipher_algo = bulk_cipher_algorithm::aes;
+        bits = 128;
+    } else if (try_consume(text, "aes_256_cbc_") || try_consume(text, "aes256_")) {
+        cipher_algo = bulk_cipher_algorithm::aes;
+        bits = 256;
+    } else {
+        FUNTLS_CHECK_FAILURE("Could not parse block cipher algorithm from " + saved_text);
+    }
+    FUNTLS_CHECK_BINARY(cipher_algo, !=, bulk_cipher_algorithm::null, "Invalid bulk cipher algorithm specified");
+
+    // Parse MAC algorithm
+    mac_algorithm mac_algo = mac_algorithm::null;
+    if (try_consume(text, "sha256")) {
+        mac_algo = mac_algorithm::hmac_sha256;
+    } else if (try_consume(text, "sha")) {
+        mac_algo = mac_algorithm::hmac_sha1;
+    } else if (try_consume(text, "md5")) {
+        mac_algo = mac_algorithm::hmac_md5;
+    } else {
+        FUNTLS_CHECK_FAILURE("Could not parse MAC algorithm from " + saved_text);
+    }
+    FUNTLS_CHECK_BINARY(mac_algo, !=, mac_algorithm::null, "Invalid MAC algorithm");
+
+    FUNTLS_CHECK_BINARY(text.size(), ==, 0, "Unparsed found in cipher suite '" + saved_text + "'");
+
+#define MATCH_SUITE(cs) do {\
+    using t = cipher_suite_traits<cipher_suite::cs>;\
+    if (kex_algo != t::key_exchange_algorithm) break;\
+    if (cipher_algo != t::bulk_cipher_algorithm) break;\
+    if (bits/8 != t::key_length) break;\
+    if (mac_algo != t::mac_algorithm) break;\
+    suite = cipher_suite::cs;\
+    return is;\
+} while(0)
+    ALL_SUPPORTED_SUITES(MATCH_SUITE);
+#undef MATCH_SUITE
+    std::ostringstream oss;
+    oss << "KEX=" << kex_algo << " Cipher=" << cipher_algo << " bits=" << bits << " MAC=" << mac_algo;
+    FUNTLS_CHECK_FAILURE("Not implemented for " + oss.str());
+    suite = cipher_suite::null_with_null_null;
+    return is;
 }
 
 std::ostream& operator<<(std::ostream& os, const cipher_suite_parameters& csp)
