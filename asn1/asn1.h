@@ -31,6 +31,7 @@ public:
         sequence                = 0x10,
         set                     = 0x11,
         printable_string        = 0x13,
+        t61_string              = 0x14,
         utc_time                = 0x17,
         constructed_sequence    = sequence | constructed_bit,
         constructed_set         = set      | constructed_bit,
@@ -299,6 +300,7 @@ using bit_string = string_base<identifier::bit_string>;
 using octet_string = string_base<identifier::octet_string>;
 using utf8_string = string_base<identifier::utf8_string>;
 using printable_string = string_base<identifier::printable_string>;
+using t61_string = string_base<identifier::t61_string>;
 
 } } // namespace funtls::asn1
 

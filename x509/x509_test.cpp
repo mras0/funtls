@@ -89,8 +89,6 @@ std::vector<uint8_t> read_file(const std::string& filename)
     return buffer;
 }
 
-#include "test_cert0.h"
-
 std::vector<uint8_t> read_pem_cert(std::istream& is)
 {
     static const char* const begin_line = "-----BEGIN CERTIFICATE-----";
@@ -139,7 +137,10 @@ x509::v3_certificate certificate_from_pem_string(const std::string& pem_data)
     assert(cert_der_data.size());
     util::buffer_view cert_buf(&cert_der_data[0], cert_der_data.size());
     return x509::v3_certificate::parse(asn1::read_der_encoded_value(cert_buf));
- }
+}
+
+#include "test_cert0.h"
+#include "test_cert1.h"
 
 int main()
 {
@@ -174,4 +175,7 @@ int main()
     // asn1::bit_string cert0.certificate().subject_public_key;
     FUNTLS_ASSERT_EQUAL(x509::sha256WithRSAEncryption, cert0.signature_algorithm());
     // asn1::bit_string cert0.signature
+
+    const auto cert1 = certificate_from_pem_string(test_cert1);
+    print_x509_v3(cert1);
 }

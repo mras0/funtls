@@ -58,10 +58,12 @@ funtls::x509::name::attr_type parse_name_attributes(const funtls::asn1::der_enco
                 text = asn1::printable_string{value}.as_string();
             } else if (value.id() == asn1::identifier::utf8_string) {
                 text = asn1::utf8_string{value}.as_string();
+            } else if (value.id() == asn1::identifier::t61_string) {
+                text = asn1::t61_string{value}.as_string();
             } else {
                 // Only TeletexString, UniversalString or BMPString allowed here
                 std::ostringstream oss;
-                oss << "Unsupported attribute type " << attribute_type;
+                oss << "Unsupported value type " << value.id() << " for attribute type " << attribute_type;
                 FUNTLS_CHECK_FAILURE(oss.str());
             }
             res.push_back(std::make_pair(attribute_type, text));
@@ -95,22 +97,13 @@ attribute_type::attribute_type(const asn1::der_encoded_value& repr)
 std::ostream& operator<<(std::ostream& os, const attribute_type& attr)
 {
     switch (attr) {
-    case attribute_type::common_name:
-        os << "CN";
-        break;
-    case attribute_type::country_name:
-        os << "C";
-        break;
-    case attribute_type::state_or_province_name:
-        os << "ST";
-        break;
-    case attribute_type::organization_name:
-        os << "O";
-        break;
-    default:
-        os << "Unknown " << static_cast<uint32_t>(attr);
-        break;
+    case attribute_type::common_name:            return os << "CN";
+    case attribute_type::country_name:           return os << "C";
+    case attribute_type::locality_name:          return os << "L";
+    case attribute_type::state_or_province_name: return os << "ST";
+    case attribute_type::organization_name:      return os << "O";
     }
+    return os << "Unknown " << static_cast<uint32_t>(attr);
     return os;
 }
 

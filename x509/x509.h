@@ -21,7 +21,7 @@ public:
         //surname = 4,
         //serialNumber = 5,
         country_name = 6,
-        //localityName = 7,
+        locality_name = 7,
         state_or_province_name = 8,
         //streetAddress = 9,
         organization_name = 10,
@@ -69,7 +69,7 @@ public:
         //supportedAlgorithms = 52,
         //deltaRevocationList = 53,
         //    Attribute Certificate attribute (attributeCertificate) = 58
-        pseudonym = 65,
+        //pseudonym = 65,
     };
 
     attribute_type(const asn1::der_encoded_value& repr);
