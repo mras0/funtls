@@ -16,10 +16,20 @@ static constexpr unsigned block_size_bits  = 128;
 static constexpr unsigned block_size_bytes = block_size_bits / 8;
 
 std::vector<uint8_t> aes_encrypt_ecb(const std::vector<uint8_t>& key, const std::vector<uint8_t>& input);
-std::vector<uint8_t> aes_encrypt_cbc(const std::vector<uint8_t>& key, const std::vector<uint8_t>& iv, const std::vector<uint8_t>& input);
-
 std::vector<uint8_t> aes_decrypt_ecb(const std::vector<uint8_t>& key, const std::vector<uint8_t>& input);
+
+std::vector<uint8_t> aes_encrypt_cbc(const std::vector<uint8_t>& key, const std::vector<uint8_t>& iv, const std::vector<uint8_t>& input);
 std::vector<uint8_t> aes_decrypt_cbc(const std::vector<uint8_t>& key, const std::vector<uint8_t>& iv, const std::vector<uint8_t>& input);
+
+// K:  secret key, whose length is appropriate for the underlying block cipher
+// IV: initialization vector
+// P:  plaintext
+// A:  additional data
+//
+// returns C (cipher text), T (authentication tag)
+std::pair<std::vector<uint8_t>, std::vector<uint8_t>> aes_encrypt_cgm(const std::vector<uint8_t>& K, const std::vector<uint8_t>& IV, const std::vector<uint8_t>& P, const std::vector<uint8_t>& A);
+
+std::vector<uint8_t> aes_decrypt_cgm(const std::vector<uint8_t>& K, const std::vector<uint8_t>& IV, const std::vector<uint8_t>& C, const std::vector<uint8_t>& A, const std::vector<uint8_t>& T);
 } } // namespace funtls::aes
 
 #endif

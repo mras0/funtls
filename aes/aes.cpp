@@ -4,6 +4,7 @@
 #include <string>
 
 #include <util/test.h>
+#include <util/base_conversion.h>
 
 #include "aes_impl.cpp"
 
@@ -15,6 +16,15 @@
 #endif
 
 using namespace funtls;
+
+namespace {
+
+std::ostream& operator<<(std::ostream& os, const std::vector<uint8_t>& v)
+{
+    return os << util::base16_encode(v);
+}
+
+} // unnamed namespace
 
 namespace funtls { namespace aes {
 
@@ -168,6 +178,43 @@ std::vector<uint8_t> aes_decrypt_cbc(const std::vector<uint8_t>& key, const std:
     }
 
     return output;
+}
+
+std::pair<std::vector<uint8_t>, std::vector<uint8_t>> aes_encrypt_cgm(const std::vector<uint8_t>& K, const std::vector<uint8_t>& IV, const std::vector<uint8_t>& P, const std::vector<uint8_t>& A)
+{
+    using namespace funtls::aes;
+
+    auto E_K = [&](const std::vector<uint8_t>& input) { return aes_encrypt_ecb(K, input); };
+
+    const auto H = E_K(std::vector<uint8_t>(block_size_bytes)); // H=E(K, 0_128);
+    state Y = initial_y(H, IV);
+    const auto Y0 = Y.as_vector();
+
+    auto C = aes_cgm_inner(E_K, Y, P);
+
+    // T = MSB_t(GHASH(H, A, C) ^ E(K, Y0))
+    auto T_s = ghash(H, A, C);
+    T_s ^= E_K(Y0);
+    return std::make_pair(std::move(C), std::vector<uint8_t>(T_s.begin(), T_s.end()));
+}
+
+std::vector<uint8_t> aes_decrypt_cgm(const std::vector<uint8_t>& K, const std::vector<uint8_t>& IV, const std::vector<uint8_t>& C, const std::vector<uint8_t>& A, const std::vector<uint8_t>& T)
+{
+    using namespace funtls::aes;
+
+    auto E_K = [&](const std::vector<uint8_t>& input) { return aes_encrypt_ecb(K, input); };
+
+    const auto H = E_K(std::vector<uint8_t>(block_size_bytes)); // H=E(K, 0_128);
+    state Y = initial_y(H, IV);
+    const auto Y0 = Y.as_vector();
+
+    // T' = MSB_t(GHASH(H, A, C) ^ E(K, Y0))
+    auto T_calced = ghash(H, A, C);
+    T_calced ^= E_K(Y0);
+
+    FUNTLS_CHECK_BINARY(T, ==, T_calced.as_vector(), "Signature check failed");
+
+    return aes_cgm_inner(E_K, Y, C);
 }
 
 } } // namespace funtls::aes

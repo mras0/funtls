@@ -329,4 +329,123 @@ std::vector<uint8_t> KeyExpansion(const std::vector<uint8_t>& key) // KeyExpansi
     return w;
 } // end
 
+// AES-CGM stuff
+// http://csrc.nist.gov/publications/nistpubs/800-38D/SP-800-38D.pdf
+
+bool bit_set(const state& s, int count)
+{
+    assert(count >= 0 && count < 128);
+    return ((s[count/8] >> (7 - count % 8)) & 1) != 0;
+}
+
+state blockmul(const state& x, const state& y)
+{
+    state z{};
+    state v = y;
+    for (int i = 0; i < 128; ++i) {
+        if (bit_set(x, i)) {
+            z ^= v;
+        }
+        if (bit_set(v, 127)) {
+            v >>= 1;
+            v[0] ^= 0xE1; // v ^= r; r = 11100001 || 0_120
+        } else {
+            v >>= 1;
+        }
+    }
+    return z;
+}
+
+void one_block(state& X, const state& H, const state& in)
+{
+    X ^= in;
+    X = blockmul(X, H);
+}
+
+void process_with_padding(state& X, const state& H, const std::vector<uint8_t>& in)
+{
+    size_t i = 0;
+    for (; i + funtls::aes::block_size_bytes - 1 < in.size(); i += funtls::aes::block_size_bytes) {
+        one_block(X, H, state{&in[i]});
+    }
+    const size_t remaining = in.size() - i;
+    if (remaining) {
+        assert(remaining < funtls::aes::block_size_bytes);
+        state last;
+        memcpy(&last[0], &in[i], remaining);
+        one_block(X, H, last);
+    }
+}
+
+state ghash(const std::vector<uint8_t>& H, const std::vector<uint8_t>& A, const std::vector<uint8_t>& C)
+{
+    // GHASH(H, A, C) = X_{m+n+1} where A has size m, C size n
+    state X{};
+
+    process_with_padding(X, H, A);
+    process_with_padding(X, H, C);
+    std::vector<uint8_t> l(funtls::aes::block_size_bytes);
+    for (int i = 7; i >= 0; i--) {
+        l[7-i] = static_cast<uint8_t>((A.size()*8)>>(8*i));
+        l[15-i] = static_cast<uint8_t>((C.size()*8)>>(8*i));
+    }
+    process_with_padding(X, H, l); // len(A)||len(C)
+
+    return X;
+}
+
+void incr32(state& s)
+{
+    ++s[15];
+    if (!s[15]) {
+        ++s[14];
+        if (!s[14]) {
+            ++s[13];
+            if (!s[13]) {
+                ++s[12];
+            }
+        }
+    }
+}
+
+template<typename E_K_type>
+std::vector<uint8_t> aes_cgm_inner(E_K_type E_K, state& Y, const std::vector<uint8_t>& P)
+{
+    std::vector<uint8_t> C(P.size());
+    for (unsigned i = 0; i < P.size(); i += funtls::aes::block_size_bytes) {
+        unsigned remaining = P.size() - i;
+        state c;
+        if (remaining >= funtls::aes::block_size_bytes) {
+            remaining = funtls::aes::block_size_bytes;
+            c = state{&P[i]};
+        } else {
+            memcpy(&c[0], &P[i], remaining);
+        }
+        incr32(Y);
+        const auto E_K_Y = state{E_K(Y.as_vector())};
+        c ^= E_K_Y;
+        std::copy(c.begin(), c.begin() + remaining, &C[i]);
+    }
+    return C;
+}
+
+state initial_y(const std::vector<uint8_t>& H, const std::vector<uint8_t>& IV)
+{
+    state Y;
+    if (IV.size() == 96/8) {
+        // Y_0 = IV || 0_31 || 1_1
+        std::copy(IV.begin(), IV.end(), Y.begin());
+        assert(Y[12] == 0);
+        assert(Y[13] == 0);
+        assert(Y[14] == 0);
+        assert(Y[15] == 0);
+        Y[15] |= 1;
+    } else {
+        Y = ghash(H, std::vector<uint8_t>{}, IV);
+    }
+
+    return Y;
+}
+
+
 } // unnamed namespace
