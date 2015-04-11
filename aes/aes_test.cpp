@@ -243,6 +243,215 @@ void test_cbc_aes256() // F.2.5
     AES_CBC_TEST();
 }
 
+// http://csrc.nist.gov/publications/nistpubs/800-38D/SP-800-38D.pdf
+
+bool bit_set(const state& s, int count)
+{
+    assert(count >= 0 && count < 128);
+    return ((s[count/8] >> (7 - count % 8)) & 1) != 0;
+}
+
+state blockmul(const state& x, const state& y)
+{
+    state z{};
+    state v = y;
+    for (int i = 0; i < 128; ++i) {
+        if (bit_set(x, i)) {
+            z ^= v;
+        }
+        if (bit_set(v, 127)) {
+            v >>= 1;
+            v[0] ^= 0xE1; // v ^= r; r = 11100001 || 0_120
+        } else {
+            v >>= 1;
+        }
+    }
+    return z;
+}
+
+#if 0
+state ghash_h(const std::vector<uint8_t>& H, const std::vector<uint8_t>& X)
+{
+    assert(H.size() == aes::block_size_bytes);
+    assert(X.size() % aes::block_size_bytes == 0);
+
+    state Y; // start with zero block
+    for (size_t i = 0; i < X.size(); i += aes::block_size_bytes) {
+        // Y_i = (Y_{i-1} ^ X_i) * H
+        Y ^= state{&X[i]};
+        Y = blockmul(Y, state{H});
+    }
+    return Y;
+}
+#endif
+
+void one_block(state& X, const state& H, const state& in)
+{
+    std::cout << "one_block()\n";
+    std::cout << "  X = " << util::base16_encode(X.as_vector()) << std::endl;
+    std::cout << "  H = " << util::base16_encode(H.as_vector()) << std::endl;
+    std::cout << "  i = " << util::base16_encode(in.as_vector()) << std::endl;
+    X ^= in;
+    X = blockmul(X, H);
+    std::cout << "  o = " << util::base16_encode(X.as_vector()) << std::endl;
+}
+
+void process_with_padding(state& X, const state& H, const std::vector<uint8_t>& in)
+{
+    size_t i = 0;
+    for (; i + aes::block_size_bytes - 1 < in.size(); i += aes::block_size_bytes) {
+        one_block(X, H, state{&in[i]});
+    }
+    const size_t remaining = in.size() - i;
+    assert(remaining < aes::block_size_bytes);
+    if (remaining) {
+        assert(false);
+    }
+}
+
+state ghash(const std::vector<uint8_t>& H, const std::vector<uint8_t>& A, const std::vector<uint8_t>& C)
+{
+    // GHASH(H, A, C) = X_{m+n+1} where A has size m, C size n
+    std::cout << "GHASH\n";
+    std::cout << "H  " << util::base16_encode(H) << std::endl;
+    std::cout << "A  " << util::base16_encode(A) << std::endl;
+    std::cout << "C  " << util::base16_encode(C) << std::endl;
+    state X{};
+
+    process_with_padding(X, H, A);
+    process_with_padding(X, H, C);
+    std::vector<uint8_t> l(aes::block_size_bytes);
+    for (int i = 7; i >= 0; i--) {
+        l[7-i] = static_cast<uint8_t>((A.size()*8)>>(8*i));
+        l[15-i] = static_cast<uint8_t>((C.size()*8)>>(8*i));
+    }
+    std::cout << "L  " << util::base16_encode(l) << std::endl;
+    process_with_padding(X, H, l); // len(A)||len(C)
+
+    std::cout << "X  " << util::base16_encode(X.as_vector()) << std::endl;
+    return X;
+}
+
+void incr32(state& s)
+{
+    ++s[15];
+    if (!s[15]) {
+        ++s[14];
+        if (!s[14]) {
+            ++s[13];
+            if (!s[13]) {
+                ++s[12];
+            }
+        }
+    }
+}
+
+// K:  secret key, whose length is appropriate for the underlying block cipher
+// IV: initialization vector
+// P:  plaintext
+// A:  additional data
+//
+// returns C (cipher text), T (authentication tag)
+std::pair<std::vector<uint8_t>, std::vector<uint8_t>> aes_cgm(const std::vector<uint8_t>& K, const std::vector<uint8_t>& IV, const std::vector<uint8_t>& P, const std::vector<uint8_t>& A)
+{
+    using namespace funtls::aes;
+
+    std::cout << "Input\n";
+    std::cout << "K  " << util::base16_encode(K) << std::endl;
+    std::cout << "IV " << util::base16_encode(IV) << std::endl;
+    std::cout << "P  " << util::base16_encode(P) << std::endl;
+    std::cout << "A  " << util::base16_encode(A) << std::endl;
+    std::cout << "\n";
+
+    auto E_K = [&](const std::vector<uint8_t>& input) { return aes_encrypt_ecb(K, input); };
+
+    const auto H = E_K(std::vector<uint8_t>(block_size_bytes)); // H=E(K, 0_128);
+    state Y;
+    if (IV.size() == 96/8) {
+        // Y_0 = IV || 0_31 || 1_1
+        std::copy(IV.begin(), IV.end(), Y.begin());
+        assert(Y[12] == 0);
+        assert(Y[13] == 0);
+        assert(Y[14] == 0);
+        assert(Y[15] == 0);
+        Y[15] |= 1;
+    } else {
+        assert(!"Untested");
+        Y = ghash(H, std::vector<uint8_t>{}, IV);
+    }
+    const auto Y0 = Y.as_vector();
+
+    std::cout << "H =  " << util::base16_encode(H) << std::endl;
+    std::cout << "Y0 = " << util::base16_encode(Y0) << std::endl;
+
+    assert(P.size() % aes::block_size_bytes == 0); // lazy for now
+    std::vector<uint8_t> C(P.size());
+    for (unsigned i = 0; i < P.size(); i += aes::block_size_bytes) {
+        incr32(Y);
+        state c{&P[i]};
+        std::cout << "Iter " << (1+i/aes::block_size_bytes) << std::endl;
+        std::cout << "P  = " << util::base16_encode(c.as_vector()) << std::endl;
+        std::cout << "Y  = " << util::base16_encode(Y.as_vector()) << std::endl;
+        const auto E_K_Y = state{E_K(Y.as_vector())};
+        std::cout << "EY = " << util::base16_encode(E_K_Y.as_vector()) << std::endl;
+        c ^= E_K_Y;
+        std::cout << "C  = " << util::base16_encode(c.as_vector()) << std::endl;
+        std::copy(c.begin(), c.end(), &C[i]);
+    }
+
+    // T = MSB_t(GHASH(H, A, C) ^ E(K, Y0))
+    auto T_s = ghash(H, A, C);
+    T_s ^= E_K(Y0);
+    return std::make_pair(std::move(C), std::vector<uint8_t>(T_s.begin(), T_s.end()));
+}
+
+// http://csrc.nist.gov/groups/ST/toolkit/BCM/documents/proposedmodes/gcm/gcm-spec.pdf
+void test_cgm_aes()
+{
+   {
+    // Test case 1
+    const auto K  = util::base16_decode("00000000000000000000000000000000");
+    const auto IV = util::base16_decode("000000000000000000000000");
+    const auto P  = util::base16_decode("");
+    const auto A  = util::base16_decode("");
+
+    auto res = aes_cgm(K, IV, P, A);
+#if 0
+    std::cout << "\nExpected:\n";
+    std::cout << "H  66e94bd4ef8a2c3b884cfa59ca342b2e\n";
+    std::cout << "Y0 00000000000000000000000000000001\n";
+    std::cout << "E(K, Y0) =\n    58e2fccefa7e3061367f1d57a4e7455a\n";
+    std::cout << "len(A)|len(C) =\n   00000000000000000000000000000000\n";
+    std::cout << "GHASH(H,A,C) =\n   00000000000000000000000000000000\n";
+#endif
+    const auto& C = res.first;
+    const auto& T = res.second;
+    FUNTLS_ASSERT_EQUAL(P.size(), C.size());
+    FUNTLS_ASSERT_EQUAL(0U, C.size());
+    FUNTLS_ASSERT_EQUAL(util::base16_decode("58e2fccefa7e3061367f1d57a4e7455a"), T);
+    }
+
+   std::cout << "\n\n\n\n";
+    {
+    // Test case 2
+    const auto K  = util::base16_decode("00000000000000000000000000000000");
+    const auto IV = util::base16_decode("000000000000000000000000");
+    const auto P  = util::base16_decode("00000000000000000000000000000000");
+    const auto A  = util::base16_decode("");
+
+    auto res = aes_cgm(K, IV, P, A);
+
+    const auto& C = res.first;
+    const auto& T = res.second;
+    std::cout << "\nOutput:\n";
+    std::cout << "C  " << util::base16_encode(C) << std::endl;
+    std::cout << "T  " << util::base16_encode(T) << std::endl;
+    FUNTLS_ASSERT_EQUAL(P.size(), C.size());
+    FUNTLS_ASSERT_EQUAL(util::base16_decode("0388dace60b6a392f328c2b971b2fe78"), C);
+    FUNTLS_ASSERT_EQUAL(util::base16_decode("ab6e47d42cec13bdf53a67b21257bddf"), T);
+    }
+ }
+
 int main()
 {
     tests_aes_internals();
@@ -252,4 +461,6 @@ int main()
     test_cbc_aes128();
     test_cbc_aes192();
     test_cbc_aes256();
+
+    test_cgm_aes();
 }

@@ -78,10 +78,19 @@ uint8_t multiply(uint8_t a, uint8_t b) {
 
 class state {
 public:
-    state() {}
+    state() {
+        memset(data_, 0, sizeof(data_));
+    }
+    explicit state(const uint8_t* src) {
+        memcpy(data_, src, sizeof(data_));
+    }
     state(const std::vector<uint8_t>& v) {
         assert(v.size() == sizeof(data_));
         memcpy(data_, &v[0], sizeof(data_));
+    }
+
+    std::vector<uint8_t> as_vector() const {
+        return std::vector<uint8_t>(begin(), end());
     }
 
     uint8_t& operator[](unsigned index) {
@@ -104,6 +113,27 @@ public:
         assert(row < 4);
         assert(col < Nb);
         return (*this)[row + col*4];
+    }
+
+    state& operator^=(const state& rhs) {
+        for (unsigned i = 0; i < sizeof(data_); ++i) {
+            data_[i] ^= rhs.data_[i];
+        }
+        return *this;
+    }
+
+    state& operator>>=(int n) {
+        assert(n >= 0);
+        while (n--) {
+            uint8_t carry = 0;
+            for (unsigned i = 0; i < sizeof(data_); ++i) {
+                uint8_t next_carry = data_[i] & 1;
+                data_[i] >>= 1;
+                data_[i] |= carry << 7;
+                carry = next_carry;
+            }
+        }
+        return *this;
     }
 
     uint8_t* begin() { return data_; }
