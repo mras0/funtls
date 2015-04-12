@@ -24,7 +24,8 @@ funtls::tls::cipher_suite_parameters from_suite_impl()
         t::cipher_type,
         t::key_length,
         t::block_length,
-        t::iv_length,
+        t::fixed_iv_length,
+        t::record_iv_length,
         t::mac_algorithm,
         t::mac_length,
         t::mac_key_length
@@ -264,7 +265,8 @@ std::ostream& operator<<(std::ostream& os, const cipher_suite_parameters& csp)
     os << "cipher_type            = " << csp.cipher_type << '\n';
     os << "key_length             = " << static_cast<unsigned>(csp.key_length) << '\n';
     os << "block_length           = " << static_cast<unsigned>(csp.block_length) << '\n';
-    os << "iv_length              = " << static_cast<unsigned>(csp.iv_length) << '\n';
+    os << "fixed_iv_length        = " << static_cast<unsigned>(csp.fixed_iv_length) << '\n';
+    os << "record_iv_length       = " << static_cast<unsigned>(csp.record_iv_length) << '\n';
     os << "mac_algorithm          = " << csp.mac_algorithm << '\n';
     os << "mac_length             = " << static_cast<unsigned>(csp.mac_length) << '\n';
     os << "mac_key_length         = " << static_cast<unsigned>(csp.mac_key_length) << ' ';

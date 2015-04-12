@@ -113,7 +113,8 @@ struct null_bulk_algo_traits {
     static constexpr auto cipher_type            = tls::cipher_type::stream;
     static constexpr uint8_t key_length          = 0;
     static constexpr uint8_t block_length        = 0; // N/A
-    static constexpr uint8_t iv_length           = 0;
+    static constexpr uint8_t fixed_iv_length     = 0;
+    static constexpr uint8_t record_iv_length    = 0;
 };
 
 struct rc4_traits {
@@ -121,7 +122,8 @@ struct rc4_traits {
     static constexpr auto cipher_type            = tls::cipher_type::stream;
     static constexpr uint8_t key_length          = 128/8;
     static constexpr uint8_t block_length        = 0; // N/A
-    static constexpr uint8_t iv_length           = 0;
+    static constexpr uint8_t fixed_iv_length     = 0;
+    static constexpr uint8_t record_iv_length    = 0;
 };
 
 struct _3des_traits {
@@ -129,7 +131,8 @@ struct _3des_traits {
     static constexpr auto cipher_type            = tls::cipher_type::block;
     static constexpr uint8_t key_length          = 192/8;
     static constexpr uint8_t block_length        = 64/8;
-    static constexpr uint8_t iv_length           = 64/8;
+    static constexpr uint8_t fixed_iv_length     = 0;
+    static constexpr uint8_t record_iv_length    = 64/8;
 };
 
 template<unsigned aes_key_length_bits>
@@ -139,7 +142,8 @@ struct aes_cbc_traits {
     static constexpr auto cipher_type            = tls::cipher_type::block;
     static constexpr uint8_t key_length          = aes_key_length_bits / 8;
     static constexpr uint8_t block_length        = 128/8;
-    static constexpr uint8_t iv_length           = 128/8;
+    static constexpr uint8_t fixed_iv_length     = 0;
+    static constexpr uint8_t record_iv_length    = 128/8;
 };
 
 template<unsigned aes_key_length_bits>
@@ -149,7 +153,8 @@ struct aes_gcm_traits {
     static constexpr auto cipher_type            = tls::cipher_type::aead;
     static constexpr uint8_t key_length          = aes_key_length_bits / 8;
     static constexpr uint8_t block_length        = 128/8;
-    static constexpr uint8_t iv_length           = 128/8;
+    static constexpr uint8_t fixed_iv_length     = 4;
+    static constexpr uint8_t record_iv_length    = 8;
 };
 
 struct null_mac_algo_triats {
@@ -187,7 +192,8 @@ struct cipher_suite_traits_base {
     static constexpr auto cipher_type            = bulk_cipher_algo_traits::cipher_type;
     static constexpr uint8_t key_length          = bulk_cipher_algo_traits::key_length;
     static constexpr uint8_t block_length        = bulk_cipher_algo_traits::block_length;
-    static constexpr uint8_t iv_length           = bulk_cipher_algo_traits::iv_length;
+    static constexpr uint8_t fixed_iv_length     = bulk_cipher_algo_traits::fixed_iv_length;
+    static constexpr uint8_t record_iv_length    = bulk_cipher_algo_traits::record_iv_length;
     static constexpr auto mac_algorithm          = mac_algo_traits::mac_algorithm;
     static constexpr uint8_t mac_length          = mac_algo_traits::mac_length;
     static constexpr uint8_t mac_key_length      = mac_algo_traits::mac_key_length;
@@ -230,7 +236,8 @@ struct cipher_suite_parameters {
     const tls::cipher_type            cipher_type;
     const uint8_t                     key_length;
     const uint8_t                     block_length;
-    const uint8_t                     iv_length;
+    const uint8_t                     fixed_iv_length;
+    const uint8_t                     record_iv_length;
     const tls::mac_algorithm          mac_algorithm;
     const uint8_t                     mac_length;
     const uint8_t                     mac_key_length;

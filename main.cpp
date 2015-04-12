@@ -64,8 +64,10 @@ private:
 
 class aes_cipher : public cipher {
 public:
-    static constexpr size_t iv_length = aes_cbc_traits<256>::iv_length;
-    static_assert(aes_cbc_traits<256>::iv_length == aes_cbc_traits<128>::iv_length, "");
+    static constexpr size_t iv_length = aes_cbc_traits<256>::record_iv_length;
+    static_assert(aes_cbc_traits<256>::fixed_iv_length == 0, "");
+    static_assert(aes_cbc_traits<256>::fixed_iv_length == aes_cbc_traits<128>::fixed_iv_length, "");
+    static_assert(aes_cbc_traits<256>::record_iv_length == aes_cbc_traits<128>::record_iv_length, "");
 
     enum operation { decrypt = 0, encrypt = 1 };
     explicit aes_cipher(operation op, const std::vector<uint8_t>& key) : operation_(op), key_(key) {}
@@ -98,7 +100,8 @@ private:
 
 class _3des_cipher : public cipher {
 public:
-    static constexpr size_t iv_length = _3des_traits::iv_length;
+    static_assert(_3des_traits::fixed_iv_length == 0, "");
+    static constexpr size_t iv_length = _3des_traits::record_iv_length;
 
     enum operation { decrypt = 0, encrypt = 1 };
     explicit _3des_cipher(operation op, const std::vector<uint8_t>& key) : operation_(op), key_(key) {
@@ -200,8 +203,6 @@ private:
 
     std::vector<uint8_t>            client_mac_key;
     std::vector<uint8_t>            server_mac_key;
-    std::vector<uint8_t>            client_enc_key;
-    std::vector<uint8_t>            server_enc_key;
 
     // TODO: This only works when the payload isn't encrypted/compressed
     template<typename Payload>
@@ -464,10 +465,10 @@ private:
         auto key_block = tls::PRF(master_secret, "key expansion", tls::vec_concat(server_random.as_vector(), client_random.as_vector()), key_block_length);
 
         size_t i = 0;
-        client_mac_key = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.mac_key_length]}; i += cipher_param.mac_key_length;
-        server_mac_key = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.mac_key_length]}; i += cipher_param.mac_key_length;
-        client_enc_key = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.key_length]}; i += cipher_param.key_length;
-        server_enc_key = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.key_length]}; i += cipher_param.key_length;
+        client_mac_key      = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.mac_key_length]}; i += cipher_param.mac_key_length;
+        server_mac_key      = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.mac_key_length]}; i += cipher_param.mac_key_length;
+        auto client_enc_key = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.key_length]}; i += cipher_param.key_length;
+        auto server_enc_key = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.key_length]}; i += cipher_param.key_length;
         // Only used for TLS v1.1 and earlier
         //client_iv      = std::vector<uint8_t>{&key_block[i], &key_block[i+fixed_iv_length]}; i += fixed_iv_length;
         //server_iv      = std::vector<uint8_t>{&key_block[i], &key_block[i+fixed_iv_length]}; i += fixed_iv_length;
@@ -717,7 +718,7 @@ private:
         // TODO: improve really lazy parsing/validation
         const auto cipher_param = tls::parameters_from_suite(current_cipher);
 
-        FUNTLS_CHECK_BINARY(buffer.size(), >=, cipher_param.iv_length, "Message too small"); // needs work..
+        FUNTLS_CHECK_BINARY(buffer.size(), >=, cipher_param.record_iv_length, "Message too small"); // needs work..
 
         const auto decrypted = decrypt_cipher->process(buffer);
 

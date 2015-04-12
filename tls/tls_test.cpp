@@ -20,7 +20,8 @@ void test_cipher_traits()
         FUNTLS_ASSERT_EQUAL(tls::cipher_type::stream,           csp.cipher_type);
         FUNTLS_ASSERT_EQUAL(0,                                  csp.key_length);
         FUNTLS_ASSERT_EQUAL(0,                                  csp.block_length);
-        FUNTLS_ASSERT_EQUAL(0,                                  csp.iv_length);
+        FUNTLS_ASSERT_EQUAL(0,                                  csp.fixed_iv_length);
+        FUNTLS_ASSERT_EQUAL(0,                                  csp.record_iv_length);
         FUNTLS_ASSERT_EQUAL(tls::mac_algorithm::null,           csp.mac_algorithm);
         FUNTLS_ASSERT_EQUAL(0,                                  csp.mac_length);
         FUNTLS_ASSERT_EQUAL(0,                                  csp.mac_key_length);
@@ -37,7 +38,8 @@ void test_cipher_traits()
         FUNTLS_ASSERT_EQUAL(tls::cipher_type::stream,           csp.cipher_type);
         FUNTLS_ASSERT_EQUAL(16,                                 csp.key_length);
         FUNTLS_ASSERT_EQUAL(0,                                  csp.block_length);
-        FUNTLS_ASSERT_EQUAL(0,                                  csp.iv_length);
+        FUNTLS_ASSERT_EQUAL(0,                                  csp.fixed_iv_length);
+        FUNTLS_ASSERT_EQUAL(0,                                  csp.record_iv_length);
         FUNTLS_ASSERT_EQUAL(tls::mac_algorithm::hmac_sha1,      csp.mac_algorithm);
         FUNTLS_ASSERT_EQUAL(20,                                 csp.mac_length);
         FUNTLS_ASSERT_EQUAL(20,                                 csp.mac_key_length);
@@ -54,7 +56,8 @@ void test_cipher_traits()
         FUNTLS_ASSERT_EQUAL(tls::cipher_type::block,             csp.cipher_type);
         FUNTLS_ASSERT_EQUAL(128/8,                               csp.key_length);
         FUNTLS_ASSERT_EQUAL(128/8,                               csp.block_length);
-        FUNTLS_ASSERT_EQUAL(128/8,                               csp.iv_length);
+        FUNTLS_ASSERT_EQUAL(0,                                   csp.fixed_iv_length);
+        FUNTLS_ASSERT_EQUAL(128/8,                               csp.record_iv_length);
         FUNTLS_ASSERT_EQUAL(tls::mac_algorithm::hmac_sha1,       csp.mac_algorithm);
         FUNTLS_ASSERT_EQUAL(160/8,                               csp.mac_length);
         FUNTLS_ASSERT_EQUAL(160/8,                               csp.mac_key_length);
@@ -71,7 +74,8 @@ void test_cipher_traits()
         FUNTLS_ASSERT_EQUAL(tls::cipher_type::block,             csp.cipher_type);
         FUNTLS_ASSERT_EQUAL(256/8,                               csp.key_length);
         FUNTLS_ASSERT_EQUAL(128/8,                               csp.block_length);
-        FUNTLS_ASSERT_EQUAL(128/8,                               csp.iv_length);
+        FUNTLS_ASSERT_EQUAL(0,                                   csp.fixed_iv_length);
+        FUNTLS_ASSERT_EQUAL(128/8,                               csp.record_iv_length);
         FUNTLS_ASSERT_EQUAL(tls::mac_algorithm::hmac_sha256,     csp.mac_algorithm);
         FUNTLS_ASSERT_EQUAL(256/8,                               csp.mac_length);
         FUNTLS_ASSERT_EQUAL(256/8,                               csp.mac_key_length);
@@ -88,7 +92,8 @@ void test_cipher_traits()
         FUNTLS_ASSERT_EQUAL(tls::cipher_type::aead,              csp.cipher_type);
         FUNTLS_ASSERT_EQUAL(128/8,                               csp.key_length);
         FUNTLS_ASSERT_EQUAL(128/8,                               csp.block_length);
-        FUNTLS_ASSERT_EQUAL(128/8,                               csp.iv_length);
+        FUNTLS_ASSERT_EQUAL(4,                                   csp.fixed_iv_length);
+        FUNTLS_ASSERT_EQUAL(8,                                   csp.record_iv_length);
         FUNTLS_ASSERT_EQUAL(tls::mac_algorithm::hmac_sha256,     csp.mac_algorithm);
         FUNTLS_ASSERT_EQUAL(256/8,                               csp.mac_length);
         FUNTLS_ASSERT_EQUAL(256/8,                               csp.mac_key_length);
