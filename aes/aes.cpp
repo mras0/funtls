@@ -180,7 +180,7 @@ std::vector<uint8_t> aes_decrypt_cbc(const std::vector<uint8_t>& key, const std:
     return output;
 }
 
-std::pair<std::vector<uint8_t>, std::vector<uint8_t>> aes_encrypt_cgm(const std::vector<uint8_t>& K, const std::vector<uint8_t>& IV, const std::vector<uint8_t>& P, const std::vector<uint8_t>& A)
+std::pair<std::vector<uint8_t>, std::vector<uint8_t>> aes_encrypt_gcm(const std::vector<uint8_t>& K, const std::vector<uint8_t>& IV, const std::vector<uint8_t>& P, const std::vector<uint8_t>& A)
 {
     using namespace funtls::aes;
 
@@ -190,7 +190,7 @@ std::pair<std::vector<uint8_t>, std::vector<uint8_t>> aes_encrypt_cgm(const std:
     state Y = initial_y(H, IV);
     const auto Y0 = Y.as_vector();
 
-    auto C = aes_cgm_inner(E_K, Y, P);
+    auto C = aes_gcm_inner(E_K, Y, P);
 
     // T = MSB_t(GHASH(H, A, C) ^ E(K, Y0))
     auto T_s = ghash(H, A, C);
@@ -198,7 +198,7 @@ std::pair<std::vector<uint8_t>, std::vector<uint8_t>> aes_encrypt_cgm(const std:
     return std::make_pair(std::move(C), std::vector<uint8_t>(T_s.begin(), T_s.end()));
 }
 
-std::vector<uint8_t> aes_decrypt_cgm(const std::vector<uint8_t>& K, const std::vector<uint8_t>& IV, const std::vector<uint8_t>& C, const std::vector<uint8_t>& A, const std::vector<uint8_t>& T)
+std::vector<uint8_t> aes_decrypt_gcm(const std::vector<uint8_t>& K, const std::vector<uint8_t>& IV, const std::vector<uint8_t>& C, const std::vector<uint8_t>& A, const std::vector<uint8_t>& T)
 {
     using namespace funtls::aes;
 
@@ -214,7 +214,7 @@ std::vector<uint8_t> aes_decrypt_cgm(const std::vector<uint8_t>& K, const std::v
 
     FUNTLS_CHECK_BINARY(T, ==, T_calced.as_vector(), "Signature check failed");
 
-    return aes_cgm_inner(E_K, Y, C);
+    return aes_gcm_inner(E_K, Y, C);
 }
 
 } } // namespace funtls::aes

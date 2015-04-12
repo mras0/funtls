@@ -409,7 +409,7 @@ void incr32(state& s)
 }
 
 template<typename E_K_type>
-std::vector<uint8_t> aes_cgm_inner(E_K_type E_K, state& Y, const std::vector<uint8_t>& P)
+std::vector<uint8_t> aes_gcm_inner(E_K_type E_K, state& Y, const std::vector<uint8_t>& P)
 {
     std::vector<uint8_t> C(P.size());
     for (unsigned i = 0; i < P.size(); i += funtls::aes::block_size_bytes) {

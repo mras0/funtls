@@ -27,9 +27,9 @@ std::vector<uint8_t> aes_decrypt_cbc(const std::vector<uint8_t>& key, const std:
 // A:  additional data
 //
 // returns C (cipher text), T (authentication tag)
-std::pair<std::vector<uint8_t>, std::vector<uint8_t>> aes_encrypt_cgm(const std::vector<uint8_t>& K, const std::vector<uint8_t>& IV, const std::vector<uint8_t>& P, const std::vector<uint8_t>& A);
+std::pair<std::vector<uint8_t>, std::vector<uint8_t>> aes_encrypt_gcm(const std::vector<uint8_t>& K, const std::vector<uint8_t>& IV, const std::vector<uint8_t>& P, const std::vector<uint8_t>& A);
 
-std::vector<uint8_t> aes_decrypt_cgm(const std::vector<uint8_t>& K, const std::vector<uint8_t>& IV, const std::vector<uint8_t>& C, const std::vector<uint8_t>& A, const std::vector<uint8_t>& T);
+std::vector<uint8_t> aes_decrypt_gcm(const std::vector<uint8_t>& K, const std::vector<uint8_t>& IV, const std::vector<uint8_t>& C, const std::vector<uint8_t>& A, const std::vector<uint8_t>& T);
 } } // namespace funtls::aes
 
 #endif

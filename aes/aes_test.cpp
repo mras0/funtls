@@ -571,19 +571,19 @@ void test_cgm_aes()
         const auto P  = util::base16_decode(t.p);
         const auto A  = util::base16_decode(t.a);
 
-        const auto res = aes_encrypt_cgm(K, IV, P, A);
+        const auto res = aes_encrypt_gcm(K, IV, P, A);
         const auto& C = res.first;
         const auto& T = res.second;
         FUNTLS_ASSERT_EQUAL(P.size(), C.size());
         FUNTLS_ASSERT_EQUAL(util::base16_decode(t.c), C);
         FUNTLS_ASSERT_EQUAL(util::base16_decode(t.t), T);
 
-        const auto decrypted = aes_decrypt_cgm(K, IV, C, A, T);
+        const auto decrypted = aes_decrypt_gcm(K, IV, C, A, T);
         FUNTLS_ASSERT_EQUAL(P, decrypted);
 
         std::vector<uint8_t> bad_t = T;
         bad_t[0]^=0x01;
-        FUNTLS_ASSERT_THROWS(aes_decrypt_cgm(K, IV, C, A, bad_t), std::runtime_error);
+        FUNTLS_ASSERT_THROWS(aes_decrypt_gcm(K, IV, C, A, bad_t), std::runtime_error);
     }
 }
 
