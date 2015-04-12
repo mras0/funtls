@@ -38,13 +38,18 @@ enum class connection_end { server, client };
 class cipher {
 public:
     virtual ~cipher() {}
-    virtual std::vector<uint8_t> process(const std::vector<uint8_t>& data) = 0;
+    std::vector<uint8_t> process(const std::vector<uint8_t>& data) {
+        return do_process(data);
+    }
+
+private:
+    virtual std::vector<uint8_t> do_process(const std::vector<uint8_t>& data) = 0;
 };
 
 class null_cipher : public cipher {
 public:
     null_cipher() {}
-    virtual std::vector<uint8_t> process(const std::vector<uint8_t>& data) override {
+    virtual std::vector<uint8_t> do_process(const std::vector<uint8_t>& data) override {
         return data;
     }
 };
@@ -53,7 +58,7 @@ class rc4_cipher : public cipher {
 public:
     explicit rc4_cipher(const std::vector<uint8_t>& key) : rc4_(key) {}
 
-    virtual std::vector<uint8_t> process(const std::vector<uint8_t>& data) override {
+    virtual std::vector<uint8_t> do_process(const std::vector<uint8_t>& data) override {
         auto buffer = data;
         rc4_.process(buffer);
         return buffer;
@@ -72,7 +77,7 @@ public:
     }
 
     // TODO: Unify GenericBlockCipher stuff with aes_cipher
-    virtual std::vector<uint8_t> process(const std::vector<uint8_t>& data) override {
+    virtual std::vector<uint8_t> do_process(const std::vector<uint8_t>& data) override {
         if (operation_ == decrypt) {
             FUNTLS_CHECK_BINARY(data.size(), >, iv_length, "Message too small");
             // Extract initialization vector
@@ -109,7 +114,7 @@ public:
     // content, mac and padding.
     //
 
-    virtual std::vector<uint8_t> process(const std::vector<uint8_t>& data) override {
+    virtual std::vector<uint8_t> do_process(const std::vector<uint8_t>& data) override {
         if (operation_ == decrypt) {
             FUNTLS_CHECK_BINARY(data.size(), >, iv_length, "Message too small");
             // Extract initialization vector
@@ -145,7 +150,7 @@ public:
         assert(salt.size() == fixed_iv_length);
     }
 
-    virtual std::vector<uint8_t> process(const std::vector<uint8_t>& data) override {
+    virtual std::vector<uint8_t> do_process(const std::vector<uint8_t>& data) override {
         std::cerr << __PRETTY_FUNCTION__ << " not implemented correctly\n";
         std::vector<uint8_t> A;
         if (operation_ == decrypt) {
@@ -245,7 +250,8 @@ private:
     tls::session_id                 sesion_id;
     std::vector<uint8_t>            master_secret;
     hash::sha256                    handshake_message_digest;
-    uint64_t                        sequence_number = 0; // TODO: A seperate sequence number is used for each connection end
+    uint64_t                        server_sequence_number = 0;
+    uint64_t                        client_sequence_number = 0;
 
     std::vector<uint8_t>            client_mac_key;
     std::vector<uint8_t>            server_mac_key;
@@ -614,8 +620,8 @@ private:
         //                  TLSCompressed.length +
         //                  TLSCompressed.fragment);
         auto hash_algo = tls::get_hmac(cipher_param.mac_algorithm, client_mac_key);
-        assert(sequence_number < 256);
-        hash_algo.input(std::vector<uint8_t>{0,0,0,0,0,0,0,static_cast<uint8_t>(sequence_number)});
+        assert(client_sequence_number < 256);
+        hash_algo.input(std::vector<uint8_t>{0,0,0,0,0,0,0,static_cast<uint8_t>(client_sequence_number)});
         hash_algo.input(static_cast<const void*>(&content_type), 1);
         hash_algo.input(&current_protocol_version.major, 1);
         hash_algo.input(&current_protocol_version.minor, 1);
@@ -660,6 +666,7 @@ private:
         auto fragment = encrypt_cipher->process(content_and_mac);
 
         assert(fragment.size() < ((1<<14)+2048) && "Payload of TLSCiphertext MUST NOT exceed 2^14 + 2048");
+        ++client_sequence_number;
         return fragment;
     }
 
@@ -793,8 +800,8 @@ private:
 
         // Check MAC -- TODO: Unify with do_send
         auto hash_algo = tls::get_hmac(cipher_param.mac_algorithm, server_mac_key);
-        assert(sequence_number < 256);
-        hash_algo.input(std::vector<uint8_t>{0,0,0,0,0,0,0,static_cast<uint8_t>(sequence_number)});
+        assert(server_sequence_number < 256);
+        hash_algo.input(std::vector<uint8_t>{0,0,0,0,0,0,0,static_cast<uint8_t>(server_sequence_number)});
         hash_algo.input(static_cast<const void*>(&record_type), 1);
         hash_algo.input(&current_protocol_version.major, 1);
         hash_algo.input(&current_protocol_version.minor, 1);
@@ -806,7 +813,7 @@ private:
         //std::cout << "Content\n" << util::base16_encode(content) << std::endl;
         assert(calced_mac == mac);
 
-        sequence_number++;
+        server_sequence_number++;
 
         buffer = std::move(content);
     }
