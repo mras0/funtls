@@ -14,6 +14,7 @@ std::ostream& operator<<(std::ostream& os, const std::vector<uint8_t>& v)
     return os << funtls::util::base16_encode(v);
 }
 
+#if 0
 std::ostream& operator<<(std::ostream& os, const state& s) {
     for (unsigned row = 0; row < 4; ++row) {
         os << '\n';
@@ -25,9 +26,15 @@ std::ostream& operator<<(std::ostream& os, const state& s) {
     }
     return os;
 }
+#endif
 
 void tests_aes_internals()
 {
+    // Untested:
+    (void) AddRoundKey;
+    (void) initial_y;
+    (void) incr32;
+
     //
     // Key expansion
     //

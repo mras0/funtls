@@ -140,9 +140,11 @@ public:
         assert(octet_count() > 0);
         check<IntType>(octet_count());
         IntType res = static_cast<int8_t>(octet(0));
-        for (size_t i = 1; i < octet_count(); ++i) {
-            res <<= 8;
-            res |= octet(i);
+        if (sizeof(IntType) > 1) {
+            for (size_t i = 1; i < octet_count(); ++i) {
+                res <<= 8;
+                res |= octet(i);
+            }
         }
         return res;
     }
