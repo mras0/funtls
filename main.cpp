@@ -28,6 +28,24 @@ using namespace funtls;
 
 
 namespace {
+static std::vector<uint8_t> verification_buffer(uint64_t seq_no, tls::content_type content_type, tls::protocol_version version, uint16_t length) {
+    std::vector<uint8_t> buffer;
+    buffer.resize(8 + 1 + 2 + 2);
+    buffer[0]  = static_cast<uint8_t>(seq_no>>56);
+    buffer[1]  = static_cast<uint8_t>(seq_no>>48);
+    buffer[2]  = static_cast<uint8_t>(seq_no>>40);
+    buffer[3]  = static_cast<uint8_t>(seq_no>>32);
+    buffer[4]  = static_cast<uint8_t>(seq_no>>24);
+    buffer[5]  = static_cast<uint8_t>(seq_no>>16);
+    buffer[6]  = static_cast<uint8_t>(seq_no>>8);
+    buffer[7]  = static_cast<uint8_t>(seq_no);
+    buffer[8]  = static_cast<uint8_t>(content_type);
+    buffer[9]  = version.major;
+    buffer[10] = version.minor;
+    buffer[11] = static_cast<uint8_t>(length >> 8);
+    buffer[12] = static_cast<uint8_t>(length);
+    return buffer;
+}
 
 } // unnamed namespace
 
@@ -607,11 +625,21 @@ private:
         boost::asio::write(socket, boost::asio::buffer(fragment));
     }
 
+    std::vector<uint8_t> encrypt_aead(tls::content_type content_type, const std::vector<uint8_t>& content) {
+        (void) content_type; (void) content;
+        assert(tls::parameters_from_suite(current_cipher).cipher_type == tls::cipher_type::aead);
+        assert(!"Not implemented");
+        return {};
+    }
+
     std::vector<uint8_t> encrypt(tls::content_type content_type, const std::vector<uint8_t>& content) {
         if (current_cipher == tls::cipher_suite::null_with_null_null) {
             return content;
         }
         const auto cipher_param = tls::parameters_from_suite(current_cipher);
+        if (cipher_param.cipher_type == tls::cipher_type::aead) {
+            return encrypt_aead(content_type, content);
+        }
 
         // The MAC is generated as:
         // MAC(MAC_write_key, seq_num +
@@ -621,11 +649,7 @@ private:
         //                  TLSCompressed.fragment);
         auto hash_algo = tls::get_hmac(cipher_param.mac_algorithm, client_mac_key);
         assert(client_sequence_number < 256);
-        hash_algo.input(std::vector<uint8_t>{0,0,0,0,0,0,0,static_cast<uint8_t>(client_sequence_number)});
-        hash_algo.input(static_cast<const void*>(&content_type), 1);
-        hash_algo.input(&current_protocol_version.major, 1);
-        hash_algo.input(&current_protocol_version.minor, 1);
-        hash_algo.input(std::vector<uint8_t>{uint8_t(content.size()>>8),uint8_t(content.size())});
+        hash_algo.input(verification_buffer(client_sequence_number, content_type, current_protocol_version, content.size()));
         hash_algo.input(content);
         const auto mac = hash_algo.result();
         std::cout << "MAC: " << util::base16_encode(mac) << std::endl;
@@ -800,12 +824,7 @@ private:
 
         // Check MAC -- TODO: Unify with do_send
         auto hash_algo = tls::get_hmac(cipher_param.mac_algorithm, server_mac_key);
-        assert(server_sequence_number < 256);
-        hash_algo.input(std::vector<uint8_t>{0,0,0,0,0,0,0,static_cast<uint8_t>(server_sequence_number)});
-        hash_algo.input(static_cast<const void*>(&record_type), 1);
-        hash_algo.input(&current_protocol_version.major, 1);
-        hash_algo.input(&current_protocol_version.minor, 1);
-        hash_algo.input(std::vector<uint8_t>{uint8_t(content.size()>>8),uint8_t(content.size())});
+        hash_algo.input(verification_buffer(server_sequence_number, record_type, current_protocol_version, content.size()));
         hash_algo.input(content);
         const auto calced_mac = hash_algo.result();
         //std::cout << "MAC\n" << util::base16_encode(mac) << std::endl;

@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 2.8)
 project(funtls)
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS 1) # For YouCompleteMe support (see https://github.com/Valloric/YouCompleteMe)
+
 enable_testing()
 # http://stackoverflow.com/questions/16158091/cmake-setting-an-environmental-variable-for-ctest-or-otherwise-getting-failed
 add_custom_target(check COMMAND ${CMAKE_CTEST_COMMAND} --force-new-ctest-process --output-on-failure)
