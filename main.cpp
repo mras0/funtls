@@ -158,6 +158,7 @@ class aes_gcm_cipher : public cipher {
 public:
     static constexpr size_t fixed_iv_length  = aes_gcm_traits<256>::fixed_iv_length;
     static constexpr size_t record_iv_length = aes_gcm_traits<256>::record_iv_length;
+    static constexpr size_t tag_length       = 16;
     static_assert(fixed_iv_length == 4, "");
     static_assert(record_iv_length == 8, "");
     static_assert(aes_gcm_traits<256>::fixed_iv_length == aes_gcm_traits<128>::fixed_iv_length, "");
@@ -168,27 +169,51 @@ public:
         assert(salt.size() == fixed_iv_length);
     }
 
+    // XXX: HACK
+    void additional_data(const std::vector<uint8_t>& additional_data) {
+        assert(additional_data_.empty() || additional_data_.size() == additional_data.size());
+        additional_data_ = additional_data;
+    }
+
     virtual std::vector<uint8_t> do_process(const std::vector<uint8_t>& data) override {
-        std::cerr << __PRETTY_FUNCTION__ << " not implemented correctly\n";
-        std::vector<uint8_t> A;
+        assert(additional_data_.size() == 13);
         if (operation_ == decrypt) {
-            std::vector<uint8_t> T;
-            FUNTLS_CHECK_BINARY(data.size(), >, record_iv_length, "Message too small");
+            FUNTLS_CHECK_BINARY(data.size(), >, record_iv_length + tag_length, "Message too small");
             // Extract initialization vector
             std::vector<uint8_t> iv = salt_;
             tls::append_to_buffer(iv, std::vector<uint8_t>(&data[0],&data[record_iv_length]));
             assert(iv.size() == fixed_iv_length + record_iv_length);
-            const std::vector<uint8_t> encrypted(&data[record_iv_length],&data[data.size()]);
-            return aes::aes_decrypt_gcm(key_, iv, encrypted, A, T);
+            const std::vector<uint8_t> encrypted(&data[record_iv_length],&data[data.size()-tag_length]);
+            const std::vector<uint8_t> tag(&data[data.size()-tag_length],&data[data.size()]);
+
+            //std::cout << "Calling aes_decrypt_gcm.\n";
+            //std::cout << "Key  " << util::base16_encode(key_) << "\n";
+            //std::cout << "IV   " << util::base16_encode(iv) << "\n";
+            //std::cout << "C    " << util::base16_encode(encrypted) << "\n";
+            //std::cout << "A    " << util::base16_encode(additional_data_) << std::endl;
+            //std::cout << "T    " << util::base16_encode(tag) << std::endl;
+            auto out = aes::aes_decrypt_gcm(key_, iv, encrypted, additional_data_, tag);
+            //std::cout << "P->  " << util::base16_encode(out) << std::endl;
+            return out;
         } else {
             assert(operation_ == encrypt);
             // Generate initialization vector
             std::vector<uint8_t> message(record_iv_length);
             tls::get_random_bytes(&message[0], message.size());
             std::vector<uint8_t> iv = salt_;
-            tls::append_to_buffer(iv, message);
-            auto res = aes::aes_encrypt_gcm(key_, iv, data, A);
-            tls::append_to_buffer(message, res.first); // C
+            tls::append_to_buffer(iv, message); // IV = salt || nonce_explicit
+            //std::cout << "Calling aes_encrypt_gcm.\n";
+            //std::cout << "Key  " << util::base16_encode(key_) << "\n";
+            //std::cout << "IV   " << util::base16_encode(iv) << "\n";
+            //std::cout << "data " << util::base16_encode(data) << "\n";
+            //std::cout << "A    " << util::base16_encode(additional_data_) << std::endl;
+            auto res = aes::aes_encrypt_gcm(key_, iv, data, additional_data_);
+            assert(res.second.size() == tag_length); // Auth tag (16 bytes for AES_128_GCM)
+            tls::append_to_buffer(message, res.first); // C (cipher text)
+            tls::append_to_buffer(message, res.second); // T (tag)
+            //std::cout << "C    " << util::base16_encode(res.first) << std::endl;
+            //std::cout << "T    " << util::base16_encode(res.second) << std::endl;
+
             //T = res.second;
             return message;
         }
@@ -197,6 +222,7 @@ private:
     operation            operation_;
     std::vector<uint8_t> key_;
     std::vector<uint8_t> salt_;
+    std::vector<uint8_t> additional_data_;
 };
 
 } } // namespace funtls::tls
@@ -528,15 +554,23 @@ private:
         assert(master_secret.size() == master_secret_size);
         std::cout << "Master secret: " << util::base16_encode(master_secret) << std::endl;
 
+        auto mac_key_length = cipher_param.mac_key_length;
+        if (cipher_param.cipher_type == tls::cipher_type::aead) {
+            // HACK - AEAD mode ciphers don't use a MAC key
+            mac_key_length = 0;
+        }
+
         // Now do Key Calculation http://tools.ietf.org/html/rfc5246#section-6.3
         // key_block = PRF(SecurityParameters.master_secret, "key expansion",
         // SecurityParameters.server_random + SecurityParameters.client_random)
-        const size_t key_block_length  = 2 * cipher_param.mac_key_length + 2 * cipher_param.key_length + 2 * cipher_param.fixed_iv_length;
+        const size_t key_block_length  = 2 * mac_key_length + 2 * cipher_param.key_length + 2 * cipher_param.fixed_iv_length;
         auto key_block = tls::PRF(master_secret, "key expansion", tls::vec_concat(server_random.as_vector(), client_random.as_vector()), key_block_length);
 
+        std::cout << "Keyblock:\n" << util::base16_encode(key_block) << "\n";
+
         size_t i = 0;
-        client_mac_key      = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.mac_key_length]}; i += cipher_param.mac_key_length;
-        server_mac_key      = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.mac_key_length]}; i += cipher_param.mac_key_length;
+        client_mac_key      = std::vector<uint8_t>{&key_block[i], &key_block[i+mac_key_length]}; i += mac_key_length;
+        server_mac_key      = std::vector<uint8_t>{&key_block[i], &key_block[i+mac_key_length]}; i += mac_key_length;
         auto client_enc_key = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.key_length]}; i += cipher_param.key_length;
         auto server_enc_key = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.key_length]}; i += cipher_param.key_length;
 
@@ -553,6 +587,7 @@ private:
         } else if (cipher_param.bulk_cipher_algorithm == tls::bulk_cipher_algorithm::aes_gcm) {
             auto client_iv = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.fixed_iv_length]}; i += cipher_param.fixed_iv_length;
             auto server_iv = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.fixed_iv_length]}; i += cipher_param.fixed_iv_length;
+            assert(mac_key_length == 0);
             assert(cipher_param.cipher_type == tls::cipher_type::aead);
             encrypt_cipher.reset(new tls::aes_gcm_cipher(tls::aes_gcm_cipher::encrypt, client_enc_key, client_iv));
             decrypt_cipher.reset(new tls::aes_gcm_cipher(tls::aes_gcm_cipher::decrypt, server_enc_key, server_iv));
@@ -625,20 +660,18 @@ private:
         boost::asio::write(socket, boost::asio::buffer(fragment));
     }
 
-    std::vector<uint8_t> encrypt_aead(tls::content_type content_type, const std::vector<uint8_t>& content) {
-        (void) content_type; (void) content;
-        assert(tls::parameters_from_suite(current_cipher).cipher_type == tls::cipher_type::aead);
-        assert(!"Not implemented");
-        return {};
-    }
-
     std::vector<uint8_t> encrypt(tls::content_type content_type, const std::vector<uint8_t>& content) {
         if (current_cipher == tls::cipher_suite::null_with_null_null) {
             return content;
         }
         const auto cipher_param = tls::parameters_from_suite(current_cipher);
+        const auto ver_buffer = verification_buffer(client_sequence_number, content_type, current_protocol_version, content.size());
+        ++client_sequence_number;
         if (cipher_param.cipher_type == tls::cipher_type::aead) {
-            return encrypt_aead(content_type, content);
+            // additional_data = seq_num + TLSCompressed.type + TLSCompressed.version + TLSCompressed.length = ver_buffer
+            // XXX: HACK
+            dynamic_cast<tls::aes_gcm_cipher&>(*encrypt_cipher).additional_data(ver_buffer);
+            return encrypt_cipher->process(content);
         }
 
         // The MAC is generated as:
@@ -648,8 +681,7 @@ private:
         //                  TLSCompressed.length +
         //                  TLSCompressed.fragment);
         auto hash_algo = tls::get_hmac(cipher_param.mac_algorithm, client_mac_key);
-        assert(client_sequence_number < 256);
-        hash_algo.input(verification_buffer(client_sequence_number, content_type, current_protocol_version, content.size()));
+        hash_algo.input(ver_buffer);
         hash_algo.input(content);
         const auto mac = hash_algo.result();
         std::cout << "MAC: " << util::base16_encode(mac) << std::endl;
@@ -690,7 +722,6 @@ private:
         auto fragment = encrypt_cipher->process(content_and_mac);
 
         assert(fragment.size() < ((1<<14)+2048) && "Payload of TLSCiphertext MUST NOT exceed 2^14 + 2048");
-        ++client_sequence_number;
         return fragment;
     }
 
@@ -798,6 +829,18 @@ private:
         // TODO: improve really lazy parsing/validation
         const auto cipher_param = tls::parameters_from_suite(current_cipher);
 
+        if (cipher_param.cipher_type == tls::cipher_type::aead) {
+            // additional_data = seq_num + TLSCompressed.type + TLSCompressed.version + TLSCompressed.length = ver_buffer
+            // XXX: HACK
+            auto& c = dynamic_cast<tls::aes_gcm_cipher&>(*decrypt_cipher);
+            const auto ver_buffer = verification_buffer(server_sequence_number, record_type, current_protocol_version, buffer.size() - c.tag_length - 8);
+            c.additional_data(ver_buffer);
+            buffer = c.process(buffer);
+            server_sequence_number++;
+            return;
+        }
+
+
         FUNTLS_CHECK_BINARY(buffer.size(), >=, cipher_param.record_iv_length, "Message too small"); // needs work..
 
         const auto decrypted = decrypt_cipher->process(buffer);
@@ -871,7 +914,7 @@ int main(int argc, char* argv[])
     std::cout << "host: " << host << ":" << port << std::endl;
     std::cout << "path: " << path << std::endl;
 
-    const std::string wanted_cipher_txt = argc >= 3 ? argv[2] : "rsa_with_aes_256_cbc_sha256";
+    const std::string wanted_cipher_txt = argc >= 3 ? argv[2] : "rsa_with_aes_128_gcm_sha256";//"rsa_with_aes_256_cbc_sha256";
     tls::cipher_suite wanted_cipher = tls::cipher_suite::null_with_null_null;
     FUNTLS_CHECK_BINARY(bool(std::istringstream(wanted_cipher_txt)>>wanted_cipher), !=, false, "Invalid cipher " + wanted_cipher_txt);
     FUNTLS_CHECK_BINARY(wanted_cipher, !=, tls::cipher_suite::null_with_null_null, "Invalid cipher " + wanted_cipher_txt);
@@ -891,7 +934,7 @@ int main(int argc, char* argv[])
 
         std::cout << "Completed handshake!\n";
 
-        const auto data = "GET "+path+" HTTP/1.1\r\nHost: "+host+"\r\n\r\n";
+        const auto data = "GET "+path+" HTTP/1.1\r\nHost: "+host+"\r\nConnection: close\r\n\r\n";
         ts.send_app_data(std::vector<uint8_t>(data.begin(), data.end()));
 
         // Ugly!
