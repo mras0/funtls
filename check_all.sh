@@ -12,7 +12,7 @@ supported_ciphers=\
 "dhe_rsa_with_aes_128_cbc_sha "\
 "dhe_rsa_with_aes_256_cbc_sha "\
 "dhe_rsa_with_aes_128_cbc_sha256 "\
-"dhe_rsa_with_aes_256_cbc_sha256 "
+"dhe_rsa_with_aes_256_cbc_sha256 "\
 "rsa_with_aes_128_gcm_sha256"
 
 uri=https://localhost:4433/

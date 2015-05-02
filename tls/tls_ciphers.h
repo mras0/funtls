@@ -3,7 +3,13 @@
 
 #include <iosfwd>
 #include <cstdint>
+#include <cassert>
+#include <memory>
 #include <hash/hash.h>
+
+namespace funtls { namespace rc4 {
+    class rc4;
+} }
 
 namespace funtls { namespace tls {
 
@@ -254,6 +260,134 @@ std::ostream& operator<<(std::ostream& os, mac_algorithm e);
 std::ostream& operator<<(std::ostream& os, cipher_suite suite);
 std::istream& operator>>(std::istream& is, cipher_suite& suite);
 std::ostream& operator<<(std::ostream& os, const cipher_suite_parameters& csp);
+
+class cipher_parameters {
+public:
+    enum operation { decrypt = 0, encrypt = 1 };
+
+    cipher_parameters(operation op, const cipher_suite_parameters& suite_parameters, const std::vector<uint8_t>& mac_key, const std::vector<uint8_t>& enc_key, const std::vector<uint8_t>& fixed_iv);
+
+    enum operation operation() const {
+        return operation_;
+    }
+
+    hash::hash_algorithm hmac() const {
+        assert(!mac_key().empty());
+        return tls::get_hmac(suite_parameters_.mac_algorithm, mac_key());
+    }
+
+    const cipher_suite_parameters& suite_parameters() const {
+        return suite_parameters_;
+    }
+
+    const std::vector<uint8_t>& mac_key() const {
+        return mac_key_;
+    }
+
+    const std::vector<uint8_t>& enc_key() const {
+        return enc_key_;
+    }
+
+    const std::vector<uint8_t>& fixed_iv() const {
+        return fixed_iv_;
+    }
+
+private:
+    enum operation          operation_;
+    cipher_suite_parameters suite_parameters_;
+    std::vector<uint8_t>    mac_key_;
+    std::vector<uint8_t>    enc_key_;
+    std::vector<uint8_t>    fixed_iv_;
+};
+
+static const cipher_parameters null_cipher_parameters_e{cipher_parameters::encrypt, tls::parameters_from_suite(tls::cipher_suite::null_with_null_null), {}, {}, {}};
+static const cipher_parameters null_cipher_parameters_d{cipher_parameters::decrypt, tls::parameters_from_suite(tls::cipher_suite::null_with_null_null), {}, {}, {}};
+
+class cipher {
+public:
+    explicit cipher(const cipher_parameters& parameters) : parameters_(parameters) {}
+    virtual ~cipher() {}
+
+    std::vector<uint8_t> process(const std::vector<uint8_t>& data, const std::vector<uint8_t>& verbuffer) {
+        assert(verbuffer.size() == 13);
+        return do_process(data, verbuffer);
+    }
+
+protected:
+    const cipher_parameters& parameters() const {
+        return parameters_;
+    }
+
+private:
+    cipher_parameters parameters_;
+
+    virtual std::vector<uint8_t> do_process(const std::vector<uint8_t>& data, const std::vector<uint8_t>& verbuffer) = 0;
+};
+
+class null_cipher : public cipher {
+public:
+    explicit null_cipher(const cipher_parameters& parameters) : cipher(parameters) {}
+    virtual std::vector<uint8_t> do_process(const std::vector<uint8_t>& data, const std::vector<uint8_t>& verbuffer) override {
+        (void) verbuffer;
+        return data;
+    }
+};
+
+class mac_checked_cipher : public cipher {
+public:
+    explicit mac_checked_cipher(const cipher_parameters& parameters) : cipher(parameters) {}
+
+private:
+    std::vector<uint8_t> calc_mac(const std::vector<uint8_t>& content, std::vector<uint8_t> verbuffer);
+    virtual std::vector<uint8_t> do_process(const std::vector<uint8_t>& data, const std::vector<uint8_t>& verbuffer) override;
+    virtual std::vector<uint8_t> do_process_content(const std::vector<uint8_t>& data) = 0;
+};
+
+class rc4_cipher : public mac_checked_cipher {
+public:
+    explicit rc4_cipher(const cipher_parameters& parameters);
+    ~rc4_cipher();
+private:
+    virtual std::vector<uint8_t> do_process_content(const std::vector<uint8_t>& data) override;
+    std::unique_ptr<rc4::rc4> rc4_;
+};
+
+class _3des_cipher : public mac_checked_cipher {
+public:
+    static_assert(_3des_traits::fixed_iv_length == 0, "");
+    static constexpr size_t iv_length = _3des_traits::record_iv_length;
+
+    _3des_cipher(const cipher_parameters& parameters) : mac_checked_cipher(parameters) {}
+private:
+    virtual std::vector<uint8_t> do_process_content(const std::vector<uint8_t>& data) override;
+};
+
+class aes_cbc_cipher : public mac_checked_cipher {
+public:
+    static constexpr size_t iv_length = aes_cbc_traits<256>::record_iv_length;
+    static_assert(aes_cbc_traits<256>::fixed_iv_length == 0, "");
+    static_assert(aes_cbc_traits<256>::fixed_iv_length == aes_cbc_traits<128>::fixed_iv_length, "");
+    static_assert(aes_cbc_traits<256>::record_iv_length == aes_cbc_traits<128>::record_iv_length, "");
+
+    aes_cbc_cipher(const cipher_parameters& parameters) : mac_checked_cipher(parameters) {}
+private:
+    virtual std::vector<uint8_t> do_process_content(const std::vector<uint8_t>& data) override;
+};
+
+class aes_gcm_cipher : public cipher {
+public:
+    static constexpr size_t fixed_iv_length  = aes_gcm_traits<256>::fixed_iv_length;
+    static constexpr size_t record_iv_length = aes_gcm_traits<256>::record_iv_length;
+    static constexpr size_t tag_length       = 16;
+    static_assert(fixed_iv_length == 4, "");
+    static_assert(record_iv_length == 8, "");
+    static_assert(aes_gcm_traits<256>::fixed_iv_length == aes_gcm_traits<128>::fixed_iv_length, "");
+    static_assert(aes_gcm_traits<256>::record_iv_length == aes_gcm_traits<128>::record_iv_length, "");
+
+    aes_gcm_cipher(const cipher_parameters& parameters) : cipher(parameters) {}
+private:
+    virtual std::vector<uint8_t> do_process(const std::vector<uint8_t>& data, const std::vector<uint8_t>& verbuffer) override;
+};
 
 } } // namespace funtls::tls
 

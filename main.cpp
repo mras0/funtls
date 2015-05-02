@@ -8,9 +8,6 @@
 #include <hash/hash.h>
 #include <x509/x509.h>
 #include <x509/x509_rsa.h>
-#include <aes/aes.h>
-#include <rc4/rc4.h>
-#include <3des/3des.h>
 #include <util/base_conversion.h>
 #include <util/test.h>
 #include <util/buffer.h>
@@ -48,184 +45,6 @@ static std::vector<uint8_t> verification_buffer(uint64_t seq_no, tls::content_ty
 }
 
 } // unnamed namespace
-
-namespace funtls { namespace tls {
-
-enum class connection_end { server, client };
-
-class cipher {
-public:
-    virtual ~cipher() {}
-    std::vector<uint8_t> process(const std::vector<uint8_t>& data) {
-        return do_process(data);
-    }
-
-private:
-    virtual std::vector<uint8_t> do_process(const std::vector<uint8_t>& data) = 0;
-};
-
-class null_cipher : public cipher {
-public:
-    null_cipher() {}
-    virtual std::vector<uint8_t> do_process(const std::vector<uint8_t>& data) override {
-        return data;
-    }
-};
-
-class rc4_cipher : public cipher {
-public:
-    explicit rc4_cipher(const std::vector<uint8_t>& key) : rc4_(key) {}
-
-    virtual std::vector<uint8_t> do_process(const std::vector<uint8_t>& data) override {
-        auto buffer = data;
-        rc4_.process(buffer);
-        return buffer;
-    }
-private:
-    rc4::rc4 rc4_;
-};
-
-class _3des_cipher : public cipher {
-public:
-    static_assert(_3des_traits::fixed_iv_length == 0, "");
-    static constexpr size_t iv_length = _3des_traits::record_iv_length;
-
-    enum operation { decrypt = 0, encrypt = 1 };
-    explicit _3des_cipher(operation op, const std::vector<uint8_t>& key) : operation_(op), key_(key) {
-    }
-
-    // TODO: Unify GenericBlockCipher stuff with aes_cipher
-    virtual std::vector<uint8_t> do_process(const std::vector<uint8_t>& data) override {
-        if (operation_ == decrypt) {
-            FUNTLS_CHECK_BINARY(data.size(), >, iv_length, "Message too small");
-            // Extract initialization vector
-            const std::vector<uint8_t> iv(&data[0],&data[iv_length]);
-            const std::vector<uint8_t> encrypted(&data[iv_length],&data[data.size()]);
-            return _3des::_3des_decrypt_cbc(key_, iv, encrypted);
-        } else {
-            assert(operation_ == encrypt);
-            // Generate initialization vector
-            std::vector<uint8_t> message(iv_length);
-            tls::get_random_bytes(&message[0], message.size());
-            tls::append_to_buffer(message, _3des::_3des_encrypt_cbc(key_, message, data));
-            return message;
-        }
-    }
-private:
-    operation            operation_;
-    std::vector<uint8_t> key_;
-
-};
-
-class aes_cbc_cipher : public cipher {
-public:
-    static constexpr size_t iv_length = aes_cbc_traits<256>::record_iv_length;
-    static_assert(aes_cbc_traits<256>::fixed_iv_length == 0, "");
-    static_assert(aes_cbc_traits<256>::fixed_iv_length == aes_cbc_traits<128>::fixed_iv_length, "");
-    static_assert(aes_cbc_traits<256>::record_iv_length == aes_cbc_traits<128>::record_iv_length, "");
-
-    enum operation { decrypt = 0, encrypt = 1 };
-    explicit aes_cbc_cipher(operation op, const std::vector<uint8_t>& key) : operation_(op), key_(key) {}
-
-    //
-    // A GenericBlockCipher consist of the initialization vector and block-ciphered
-    // content, mac and padding.
-    //
-
-    virtual std::vector<uint8_t> do_process(const std::vector<uint8_t>& data) override {
-        if (operation_ == decrypt) {
-            FUNTLS_CHECK_BINARY(data.size(), >, iv_length, "Message too small");
-            // Extract initialization vector
-            const std::vector<uint8_t> iv(&data[0],&data[iv_length]);
-            const std::vector<uint8_t> encrypted(&data[iv_length],&data[data.size()]);
-            return aes::aes_decrypt_cbc(key_, iv, encrypted);
-        } else {
-            assert(operation_ == encrypt);
-            // Generate initialization vector
-            std::vector<uint8_t> message(iv_length);
-            tls::get_random_bytes(&message[0], message.size());
-            tls::append_to_buffer(message, aes::aes_encrypt_cbc(key_, message, data));
-            return message;
-        }
-    }
-private:
-    operation            operation_;
-    std::vector<uint8_t> key_;
-};
-
-
-class aes_gcm_cipher : public cipher {
-public:
-    static constexpr size_t fixed_iv_length  = aes_gcm_traits<256>::fixed_iv_length;
-    static constexpr size_t record_iv_length = aes_gcm_traits<256>::record_iv_length;
-    static constexpr size_t tag_length       = 16;
-    static_assert(fixed_iv_length == 4, "");
-    static_assert(record_iv_length == 8, "");
-    static_assert(aes_gcm_traits<256>::fixed_iv_length == aes_gcm_traits<128>::fixed_iv_length, "");
-    static_assert(aes_gcm_traits<256>::record_iv_length == aes_gcm_traits<128>::record_iv_length, "");
-
-    enum operation { decrypt = 0, encrypt = 1 };
-    explicit aes_gcm_cipher(operation op, const std::vector<uint8_t>& key, const std::vector<uint8_t>& salt) : operation_(op), key_(key), salt_(salt) {
-        assert(salt.size() == fixed_iv_length);
-    }
-
-    // XXX: HACK
-    void additional_data(const std::vector<uint8_t>& additional_data) {
-        assert(additional_data_.empty() || additional_data_.size() == additional_data.size());
-        additional_data_ = additional_data;
-    }
-
-    virtual std::vector<uint8_t> do_process(const std::vector<uint8_t>& data) override {
-        assert(additional_data_.size() == 13);
-        if (operation_ == decrypt) {
-            FUNTLS_CHECK_BINARY(data.size(), >, record_iv_length + tag_length, "Message too small");
-            // Extract initialization vector
-            std::vector<uint8_t> iv = salt_;
-            tls::append_to_buffer(iv, std::vector<uint8_t>(&data[0],&data[record_iv_length]));
-            assert(iv.size() == fixed_iv_length + record_iv_length);
-            const std::vector<uint8_t> encrypted(&data[record_iv_length],&data[data.size()-tag_length]);
-            const std::vector<uint8_t> tag(&data[data.size()-tag_length],&data[data.size()]);
-
-            //std::cout << "Calling aes_decrypt_gcm.\n";
-            //std::cout << "Key  " << util::base16_encode(key_) << "\n";
-            //std::cout << "IV   " << util::base16_encode(iv) << "\n";
-            //std::cout << "C    " << util::base16_encode(encrypted) << "\n";
-            //std::cout << "A    " << util::base16_encode(additional_data_) << std::endl;
-            //std::cout << "T    " << util::base16_encode(tag) << std::endl;
-            auto out = aes::aes_decrypt_gcm(key_, iv, encrypted, additional_data_, tag);
-            //std::cout << "P->  " << util::base16_encode(out) << std::endl;
-            return out;
-        } else {
-            assert(operation_ == encrypt);
-            // Generate initialization vector
-            std::vector<uint8_t> message(record_iv_length);
-            tls::get_random_bytes(&message[0], message.size());
-            std::vector<uint8_t> iv = salt_;
-            tls::append_to_buffer(iv, message); // IV = salt || nonce_explicit
-            //std::cout << "Calling aes_encrypt_gcm.\n";
-            //std::cout << "Key  " << util::base16_encode(key_) << "\n";
-            //std::cout << "IV   " << util::base16_encode(iv) << "\n";
-            //std::cout << "data " << util::base16_encode(data) << "\n";
-            //std::cout << "A    " << util::base16_encode(additional_data_) << std::endl;
-            auto res = aes::aes_encrypt_gcm(key_, iv, data, additional_data_);
-            assert(res.second.size() == tag_length); // Auth tag (16 bytes for AES_128_GCM)
-            tls::append_to_buffer(message, res.first); // C (cipher text)
-            tls::append_to_buffer(message, res.second); // T (tag)
-            //std::cout << "C    " << util::base16_encode(res.first) << std::endl;
-            //std::cout << "T    " << util::base16_encode(res.second) << std::endl;
-
-            //T = res.second;
-            return message;
-        }
-    }
-private:
-    operation            operation_;
-    std::vector<uint8_t> key_;
-    std::vector<uint8_t> salt_;
-    std::vector<uint8_t> additional_data_;
-};
-
-} } // namespace funtls::tls
 
 class tls_socket {
 public:
@@ -573,24 +392,27 @@ private:
         server_mac_key      = std::vector<uint8_t>{&key_block[i], &key_block[i+mac_key_length]}; i += mac_key_length;
         auto client_enc_key = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.key_length]}; i += cipher_param.key_length;
         auto server_enc_key = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.key_length]}; i += cipher_param.key_length;
+        auto client_iv = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.fixed_iv_length]}; i += cipher_param.fixed_iv_length;
+        auto server_iv = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.fixed_iv_length]}; i += cipher_param.fixed_iv_length;
+
+        tls::cipher_parameters client_cipher_parameters{tls::cipher_parameters::encrypt, cipher_param, client_mac_key, client_enc_key, client_iv};
+        tls::cipher_parameters server_cipher_parameters{tls::cipher_parameters::decrypt, cipher_param, server_mac_key, server_enc_key, server_iv};
 
         // TODO: FIXME: handle ConnectionEnd stuff
         if (cipher_param.bulk_cipher_algorithm == tls::bulk_cipher_algorithm::rc4) {
-            encrypt_cipher.reset(new tls::rc4_cipher(client_enc_key));
-            decrypt_cipher.reset(new tls::rc4_cipher(server_enc_key));
+            encrypt_cipher.reset(new tls::rc4_cipher(client_cipher_parameters));
+            decrypt_cipher.reset(new tls::rc4_cipher(server_cipher_parameters));
         } else if (cipher_param.bulk_cipher_algorithm == tls::bulk_cipher_algorithm::_3des) {
-            encrypt_cipher.reset(new tls::_3des_cipher(tls::_3des_cipher::encrypt, client_enc_key));
-            decrypt_cipher.reset(new tls::_3des_cipher(tls::_3des_cipher::decrypt, server_enc_key));
+            encrypt_cipher.reset(new tls::_3des_cipher(client_cipher_parameters));
+            decrypt_cipher.reset(new tls::_3des_cipher(server_cipher_parameters));
         } else if (cipher_param.bulk_cipher_algorithm == tls::bulk_cipher_algorithm::aes_cbc) {
-            encrypt_cipher.reset(new tls::aes_cbc_cipher(tls::aes_cbc_cipher::encrypt, client_enc_key));
-            decrypt_cipher.reset(new tls::aes_cbc_cipher(tls::aes_cbc_cipher::decrypt, server_enc_key));
+            encrypt_cipher.reset(new tls::aes_cbc_cipher(client_cipher_parameters));
+            decrypt_cipher.reset(new tls::aes_cbc_cipher(server_cipher_parameters));
         } else if (cipher_param.bulk_cipher_algorithm == tls::bulk_cipher_algorithm::aes_gcm) {
-            auto client_iv = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.fixed_iv_length]}; i += cipher_param.fixed_iv_length;
-            auto server_iv = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.fixed_iv_length]}; i += cipher_param.fixed_iv_length;
             assert(mac_key_length == 0);
             assert(cipher_param.cipher_type == tls::cipher_type::aead);
-            encrypt_cipher.reset(new tls::aes_gcm_cipher(tls::aes_gcm_cipher::encrypt, client_enc_key, client_iv));
-            decrypt_cipher.reset(new tls::aes_gcm_cipher(tls::aes_gcm_cipher::decrypt, server_enc_key, server_iv));
+            encrypt_cipher.reset(new tls::aes_gcm_cipher(client_cipher_parameters));
+            decrypt_cipher.reset(new tls::aes_gcm_cipher(server_cipher_parameters));
         } else {
             FUNTLS_CHECK_FAILURE("Unsupported bulk_cipher_algorithm: " + std::to_string((int)cipher_param.bulk_cipher_algorithm));
         }
@@ -634,7 +456,7 @@ private:
         send_record(tls::content_type::handshake, content);
     }
 
-    void send_record(tls::content_type type, const std::vector<uint8_t>& plaintext) {
+    void send_record(tls::content_type content_type, const std::vector<uint8_t>& plaintext) {
         FUNTLS_CHECK_BINARY(plaintext.size(), >=, 1, "Illegal plain text size");
         FUNTLS_CHECK_BINARY(plaintext.size(), <=, tls::record::max_plaintext_length, "Illegal plain text size");
 
@@ -647,11 +469,18 @@ private:
         //
         // Do encryption
         //
-        auto fragment = encrypt(type, plaintext);
+        std::vector<uint8_t> fragment;
+        if (current_cipher != tls::cipher_suite::null_with_null_null) {
+            const auto ver_buffer = verification_buffer(client_sequence_number, content_type, current_protocol_version, plaintext.size());
+            ++client_sequence_number;
+            fragment = encrypt_cipher->process(plaintext, ver_buffer);
+        } else {
+            fragment = plaintext;
+        }
         FUNTLS_CHECK_BINARY(fragment.size(), <=, tls::record::max_ciphertext_length, "Illegal fragment size");
 
         std::vector<uint8_t> header;
-        tls::append_to_buffer(header, type);
+        tls::append_to_buffer(header, content_type);
         tls::append_to_buffer(header, current_protocol_version);
         tls::append_to_buffer(header, tls::uint16(fragment.size()));
         assert(header.size() == 5);
@@ -660,85 +489,9 @@ private:
         boost::asio::write(socket, boost::asio::buffer(fragment));
     }
 
-    std::vector<uint8_t> encrypt(tls::content_type content_type, const std::vector<uint8_t>& content) {
-        if (current_cipher == tls::cipher_suite::null_with_null_null) {
-            return content;
-        }
-        const auto cipher_param = tls::parameters_from_suite(current_cipher);
-        const auto ver_buffer = verification_buffer(client_sequence_number, content_type, current_protocol_version, content.size());
-        ++client_sequence_number;
-        if (cipher_param.cipher_type == tls::cipher_type::aead) {
-            // additional_data = seq_num + TLSCompressed.type + TLSCompressed.version + TLSCompressed.length = ver_buffer
-            // XXX: HACK
-            dynamic_cast<tls::aes_gcm_cipher&>(*encrypt_cipher).additional_data(ver_buffer);
-            return encrypt_cipher->process(content);
-        }
-
-        // The MAC is generated as:
-        // MAC(MAC_write_key, seq_num +
-        //                  TLSCompressed.type +
-        //                  TLSCompressed.version +
-        //                  TLSCompressed.length +
-        //                  TLSCompressed.fragment);
-        auto hash_algo = tls::get_hmac(cipher_param.mac_algorithm, client_mac_key);
-        hash_algo.input(ver_buffer);
-        hash_algo.input(content);
-        const auto mac = hash_algo.result();
-        std::cout << "MAC: " << util::base16_encode(mac) << std::endl;
-
-        // 
-        // Assemble content, mac and padding
-        //
-        // opaque content[TLSCompressed.length];
-        // opaque MAC[SecurityParameters.mac_length];
-        // uint8 padding[GenericBlockCipher.padding_length];
-        // uint8 padding_length;
-        //
-        std::vector<uint8_t> content_and_mac;
-        tls::append_to_buffer(content_and_mac, content);
-        tls::append_to_buffer(content_and_mac, mac);
-        //
-        // padding:
-        //    Padding that is added to force the length of the plaintext to be
-        //    an integral multiple of the block cipher's block length.
-        // padding_length:
-        //    The padding length MUST be such that the total size of the
-        //    GenericBlockCipher structure is a multiple of the cipher's block
-        //    length.  Legal values range from zero to 255, inclusive.  This
-        //    length specifies the length of the padding field exclusive of the
-        //    padding_length field itself.
-        const auto block_length = cipher_param.block_length;
-        if (block_length) {
-            assert(cipher_param.cipher_type == tls::cipher_type::block);
-            uint8_t padding_length = block_length - (content_and_mac.size()+1) % block_length;
-            for (unsigned i = 0; i < padding_length + 1U; ++i) {
-                content_and_mac.push_back(padding_length);
-            }
-            assert(content_and_mac.size() % block_length == 0);
-        } else {
-            assert(cipher_param.cipher_type == tls::cipher_type::stream);
-        }
-
-        auto fragment = encrypt_cipher->process(content_and_mac);
-
-        assert(fragment.size() < ((1<<14)+2048) && "Payload of TLSCiphertext MUST NOT exceed 2^14 + 2048");
-        return fragment;
-    }
-
     // HACK HACK HACK FIXME TODO XXX
-    std::unique_ptr<tls::cipher> encrypt_cipher = std::unique_ptr<tls::cipher>(new tls::null_cipher{});
-    std::unique_ptr<tls::cipher> decrypt_cipher = std::unique_ptr<tls::cipher>(new tls::null_cipher{});
-
-    std::vector<uint8_t> bulk_decrypt(const std::vector<uint8_t>& dec_key, const std::vector<uint8_t>& iv, const std::vector<uint8_t>& content) {
-        const auto cipher_param = tls::parameters_from_suite(current_cipher);
-        if (cipher_param.bulk_cipher_algorithm == tls::bulk_cipher_algorithm::rc4) {
-        } else if (cipher_param.bulk_cipher_algorithm == tls::bulk_cipher_algorithm::aes_cbc) {
-            return aes::aes_decrypt_cbc(dec_key, iv, content);
-        } else {
-            assert(cipher_param.bulk_cipher_algorithm == tls::bulk_cipher_algorithm::null);
-        }
-        return content;
-    }
+    std::unique_ptr<tls::cipher> encrypt_cipher = std::unique_ptr<tls::cipher>(new tls::null_cipher{tls::null_cipher_parameters_e});
+    std::unique_ptr<tls::cipher> decrypt_cipher = std::unique_ptr<tls::cipher>(new tls::null_cipher{tls::null_cipher_parameters_d});
 
     void read_change_cipher_spec(){
         auto record = read_record();
@@ -793,7 +546,10 @@ private:
         // Decrypt
         //
         if (current_cipher != tls::cipher_suite::null_with_null_null) {
-            decrypt(content_type, buffer);
+            assert(buffer.size() <= tls::record::max_ciphertext_length);
+            const auto ver_buffer = verification_buffer(server_sequence_number, content_type, current_protocol_version, 0 /* filled in later */);
+            server_sequence_number++;
+            buffer = decrypt_cipher->process(buffer, ver_buffer);
         }
 
         //
@@ -821,63 +577,6 @@ private:
         }
 
         return tls::record{content_type, protocol_version, std::move(buffer)};
-    }
-
-    void decrypt(tls::content_type record_type, std::vector<uint8_t>& buffer) {
-        assert(buffer.size() <= tls::record::max_ciphertext_length);
-
-        // TODO: improve really lazy parsing/validation
-        const auto cipher_param = tls::parameters_from_suite(current_cipher);
-
-        if (cipher_param.cipher_type == tls::cipher_type::aead) {
-            // additional_data = seq_num + TLSCompressed.type + TLSCompressed.version + TLSCompressed.length = ver_buffer
-            // XXX: HACK
-            auto& c = dynamic_cast<tls::aes_gcm_cipher&>(*decrypt_cipher);
-            const auto ver_buffer = verification_buffer(server_sequence_number, record_type, current_protocol_version, buffer.size() - c.tag_length - 8);
-            c.additional_data(ver_buffer);
-            buffer = c.process(buffer);
-            server_sequence_number++;
-            return;
-        }
-
-
-        FUNTLS_CHECK_BINARY(buffer.size(), >=, cipher_param.record_iv_length, "Message too small"); // needs work..
-
-        const auto decrypted = decrypt_cipher->process(buffer);
-
-        // check padding
-        size_t padding_length = 0;
-        size_t mac_index = 0;
-        if (cipher_param.cipher_type == tls::cipher_type::block) {
-            // TODO: FIX
-            padding_length = decrypted[decrypted.size()-1];
-            mac_index = decrypted.size()-1-padding_length-cipher_param.mac_length;
-            assert(decrypted.size() % cipher_param.block_length == 0);
-            assert(padding_length + 1U < decrypted.size()); // Padding+Padding length byte musn't be sole contents
-            for (unsigned i = 0; i < padding_length; ++i) assert(decrypted[decrypted.size()-1-padding_length] == padding_length);
-        } else {
-            assert(cipher_param.cipher_type == tls::cipher_type::stream);
-            mac_index = decrypted.size()-cipher_param.mac_length;
-        }
-
-        // Extract MAC + Content
-        const std::vector<uint8_t> mac{&decrypted[mac_index],&decrypted[mac_index+cipher_param.mac_length]};
-
-        const std::vector<uint8_t> content{&decrypted[0],&decrypted[mac_index]};
-
-        // Check MAC -- TODO: Unify with do_send
-        auto hash_algo = tls::get_hmac(cipher_param.mac_algorithm, server_mac_key);
-        hash_algo.input(verification_buffer(server_sequence_number, record_type, current_protocol_version, content.size()));
-        hash_algo.input(content);
-        const auto calced_mac = hash_algo.result();
-        //std::cout << "MAC\n" << util::base16_encode(mac) << std::endl;
-        //std::cout << "Calculated MAC\n" << util::base16_encode(calced_mac) << std::endl;
-        //std::cout << "Content\n" << util::base16_encode(content) << std::endl;
-        assert(calced_mac == mac);
-
-        server_sequence_number++;
-
-        buffer = std::move(content);
     }
 };
 

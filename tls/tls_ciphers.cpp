@@ -1,6 +1,10 @@
 #include "tls_ciphers.h"
+#include "tls.h"
 #include <util/base_conversion.h>
 #include <util/test.h>
+#include <rc4/rc4.h>
+#include <3des/3des.h>
+#include <aes/aes.h>
 #include <ostream>
 #include <cassert>
 
@@ -271,6 +275,214 @@ std::ostream& operator<<(std::ostream& os, const cipher_suite_parameters& csp)
     os << "mac_length             = " << static_cast<unsigned>(csp.mac_length) << '\n';
     os << "mac_key_length         = " << static_cast<unsigned>(csp.mac_key_length) << ' ';
     return os;
+}
+
+cipher_parameters::cipher_parameters(enum operation op, const cipher_suite_parameters& suite_parameters, const std::vector<uint8_t>& mac_key, const std::vector<uint8_t>& enc_key, const std::vector<uint8_t>& fixed_iv)
+    : operation_(op)
+    , suite_parameters_(suite_parameters)
+    , mac_key_(mac_key)
+    , enc_key_(enc_key)
+    , fixed_iv_(fixed_iv) {
+    if (suite_parameters_.cipher_type != cipher_type::aead) { // This check shouldn't be needed
+        FUNTLS_CHECK_BINARY(mac_key_.size(),  ==, suite_parameters_.mac_key_length, "Invalid MAC key length");
+    }
+    FUNTLS_CHECK_BINARY(enc_key_.size(),  ==, suite_parameters_.key_length, "Invalid encryption key length");
+    FUNTLS_CHECK_BINARY(fixed_iv_.size(), ==, suite_parameters_.fixed_iv_length, "Invalid fixed IV length");
+}
+
+std::vector<uint8_t> mac_checked_cipher::calc_mac(const std::vector<uint8_t>& content, std::vector<uint8_t> verbuffer) {
+    assert(verbuffer.size() == 13);
+    verbuffer[11] = static_cast<uint16_t>(content.size() >> 8);
+    verbuffer[12] = static_cast<uint16_t>(content.size());
+    // The MAC is generated as:
+    // MAC(MAC_write_key, seq_num +
+    //                  TLSCompressed.type +
+    //                  TLSCompressed.version +
+    //                  TLSCompressed.length +
+    //                  TLSCompressed.fragment);
+    auto hash_algo = parameters().hmac();
+    hash_algo.input(verbuffer);
+    hash_algo.input(content);
+    return hash_algo.result();
+}
+
+std::vector<uint8_t> mac_checked_cipher::do_process(const std::vector<uint8_t>& data, const std::vector<uint8_t>& verbuffer) {
+    if (parameters().operation() == cipher_parameters::encrypt) {
+        auto mac = calc_mac(data, verbuffer);
+
+        // 
+        // Assemble content, mac and padding
+        //
+        // opaque content[TLSCompressed.length];
+        // opaque MAC[SecurityParameters.mac_length];
+        // uint8 padding[GenericBlockCipher.padding_length];
+        // uint8 padding_length;
+        //
+        std::vector<uint8_t> content_and_mac;
+        tls::append_to_buffer(content_and_mac, data);
+        tls::append_to_buffer(content_and_mac, mac);
+        //
+        // padding:
+        //    Padding that is added to force the length of the plaintext to be
+        //    an integral multiple of the block cipher's block length.
+        // padding_length:
+        //    The padding length MUST be such that the total size of the
+        //    GenericBlockCipher structure is a multiple of the cipher's block
+        //    length.  Legal values range from zero to 255, inclusive.  This
+        //    length specifies the length of the padding field exclusive of the
+        //    padding_length field itself.
+        const auto block_length = parameters().suite_parameters().block_length;
+        if (block_length) {
+            assert(parameters().suite_parameters().cipher_type == tls::cipher_type::block);
+            uint8_t padding_length = block_length - (content_and_mac.size()+1) % block_length;
+            for (unsigned i = 0; i < padding_length + 1U; ++i) {
+                content_and_mac.push_back(padding_length);
+            }
+            assert(content_and_mac.size() % block_length == 0);
+        } else {
+            assert(parameters().suite_parameters().cipher_type == tls::cipher_type::stream);
+        }
+
+        auto fragment = do_process_content(content_and_mac);
+
+        return fragment;
+    } else {
+        const auto decrypted = do_process_content(data);
+
+        const auto cipher_param = parameters().suite_parameters();
+
+        // check padding
+        size_t padding_length = 0;
+        size_t mac_index = 0;
+        if (cipher_param.cipher_type == tls::cipher_type::block) {
+            // TODO: FIX verification..
+            padding_length = decrypted[decrypted.size()-1];
+            //std::cout << "Decrypted.size() = " << decrypted.size() << std::endl;
+            //std::cout << "mac_length = " << cipher_param.mac_length << std::endl;
+            //std::cout << "Padding length = " << (int)padding_length << std::endl;
+            mac_index = decrypted.size()-1-padding_length-cipher_param.mac_length;
+            assert(decrypted.size() % cipher_param.block_length == 0);
+            assert(padding_length + 1U < decrypted.size()); // Padding+Padding length byte musn't be sole contents
+            for (unsigned i = 0; i < padding_length; ++i) assert(decrypted[decrypted.size()-1-padding_length] == padding_length);
+        } else {
+            assert(cipher_param.cipher_type == tls::cipher_type::stream);
+            mac_index = decrypted.size()-cipher_param.mac_length;
+        }
+
+        // Extract MAC + Content
+        const std::vector<uint8_t> mac{&decrypted[mac_index],&decrypted[mac_index+cipher_param.mac_length]};
+
+        const std::vector<uint8_t> content{&decrypted[0],&decrypted[mac_index]};
+
+        // Check MAC -- TODO: Unify with do_send
+        const auto calced_mac = calc_mac(content, verbuffer);
+        if (calced_mac != mac) {
+            std::ostringstream msg;
+            msg << "MAC check failed. Expected " << util::base16_encode(mac) << " got '" << util::base16_encode(calced_mac);
+            FUNTLS_CHECK_FAILURE(msg.str());
+        }
+
+        return content;
+    }
+}
+
+rc4_cipher::rc4_cipher(const cipher_parameters& parameters) : mac_checked_cipher(parameters), rc4_(new rc4::rc4(parameters.enc_key())) {
+}
+
+rc4_cipher::~rc4_cipher() = default;
+
+std::vector<uint8_t> rc4_cipher::do_process_content(const std::vector<uint8_t>& data) {
+    auto buffer = data;
+    rc4_->process(buffer);
+    return buffer;
+}
+
+// TODO: Unify GenericBlockCipher stuff with aes_cipher
+std::vector<uint8_t> _3des_cipher::do_process_content(const std::vector<uint8_t>& data) {
+    if (parameters().operation() == cipher_parameters::decrypt) {
+        FUNTLS_CHECK_BINARY(data.size(), >, iv_length, "Message too small");
+        // Extract initialization vector
+        const std::vector<uint8_t> iv(&data[0],&data[iv_length]);
+        const std::vector<uint8_t> encrypted(&data[iv_length],&data[data.size()]);
+        return _3des::_3des_decrypt_cbc(parameters().enc_key(), iv, encrypted);
+    } else {
+        assert(parameters().operation() == cipher_parameters::encrypt);
+        // Generate initialization vector
+        std::vector<uint8_t> message(iv_length);
+        tls::get_random_bytes(&message[0], message.size());
+        tls::append_to_buffer(message, _3des::_3des_encrypt_cbc(parameters().enc_key(), message, data));
+        return message;
+    }
+}
+
+//
+// A GenericBlockCipher consist of the initialization vector and block-ciphered
+// content, mac and padding.
+//
+
+std::vector<uint8_t> aes_cbc_cipher::do_process_content(const std::vector<uint8_t>& data) {
+    if (parameters().operation() == cipher_parameters::decrypt) {
+        FUNTLS_CHECK_BINARY(data.size(), >, iv_length, "Message too small");
+        // Extract initialization vector
+        const std::vector<uint8_t> iv(&data[0],&data[iv_length]);
+        const std::vector<uint8_t> encrypted(&data[iv_length],&data[data.size()]);
+        return aes::aes_decrypt_cbc(parameters().enc_key(), iv, encrypted);
+    } else {
+        assert(parameters().operation() == cipher_parameters::encrypt);
+        // Generate initialization vector
+        std::vector<uint8_t> message(iv_length);
+        tls::get_random_bytes(&message[0], message.size());
+        tls::append_to_buffer(message, aes::aes_encrypt_cbc(parameters().enc_key(), message, data));
+        return message;
+    }
+}
+
+std::vector<uint8_t> aes_gcm_cipher::do_process(const std::vector<uint8_t>& data, const std::vector<uint8_t>& verbuffer) {
+    if (parameters().operation() == cipher_parameters::decrypt) {
+        FUNTLS_CHECK_BINARY(data.size(), >, record_iv_length + tag_length, "Message too small");
+        // Extract initialization vector
+        std::vector<uint8_t> iv = parameters().fixed_iv();
+        tls::append_to_buffer(iv, std::vector<uint8_t>(&data[0],&data[record_iv_length]));
+        assert(iv.size() == fixed_iv_length + record_iv_length);
+        const std::vector<uint8_t> encrypted(&data[record_iv_length],&data[data.size()-tag_length]);
+        const std::vector<uint8_t> tag(&data[data.size()-tag_length],&data[data.size()]);
+
+        auto vbuf = verbuffer;
+        assert(vbuf.size()==13);
+        vbuf[11] = static_cast<uint16_t>(encrypted.size()>>8);
+        vbuf[12] = static_cast<uint16_t>(encrypted.size());
+
+        //std::cout << "Calling aes_decrypt_gcm.\n";
+        //std::cout << "Key  " << util::base16_encode(key_) << "\n";
+        //std::cout << "IV   " << util::base16_encode(iv) << "\n";
+        //std::cout << "C    " << util::base16_encode(encrypted) << "\n";
+        //std::cout << "A    " << util::base16_encode(verbuffer) << std::endl;
+        //std::cout << "T    " << util::base16_encode(tag) << std::endl;
+        auto out = aes::aes_decrypt_gcm(parameters().enc_key(), iv, encrypted, vbuf, tag);
+        //std::cout << "P->  " << util::base16_encode(out) << std::endl;
+        return out;
+    } else {
+        assert(parameters().operation() == cipher_parameters::encrypt);
+        // Generate initialization vector
+        std::vector<uint8_t> message(record_iv_length);
+        tls::get_random_bytes(&message[0], message.size());
+        std::vector<uint8_t> iv = parameters().fixed_iv();
+        tls::append_to_buffer(iv, message); // IV = salt || nonce_explicit
+        //std::cout << "Calling aes_encrypt_gcm.\n";
+        //std::cout << "Key  " << util::base16_encode(key_) << "\n";
+        //std::cout << "IV   " << util::base16_encode(iv) << "\n";
+        //std::cout << "data " << util::base16_encode(data) << "\n";
+        //std::cout << "A    " << util::base16_encode(verbuffer) << std::endl;
+        auto res = aes::aes_encrypt_gcm(parameters().enc_key(), iv, data, verbuffer);
+        assert(res.second.size() == tag_length); // Auth tag (16 bytes for AES_128_GCM)
+        tls::append_to_buffer(message, res.first); // C (cipher text)
+        tls::append_to_buffer(message, res.second); // T (tag)
+        //std::cout << "C    " << util::base16_encode(res.first) << std::endl;
+        //std::cout << "T    " << util::base16_encode(res.second) << std::endl;
+
+        //T = res.second;
+        return message;
+    }
 }
 
 } } // namespace funtls::tls

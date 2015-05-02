@@ -46,7 +46,7 @@ add_subdirectory(tls)
 
 include_directories(${funtls_SOURCE_DIR})
 add_executable(funtls main.cpp)
-target_link_libraries(funtls boost util hash asn1 x509 aes rc4 3des tls)
+target_link_libraries(funtls boost util hash asn1 x509 tls)
 
 find_program(HAS_CTAGS ctags)
 if (HAS_CTAGS)
