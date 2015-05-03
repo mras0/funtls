@@ -6,8 +6,6 @@
 #include <boost/multiprecision/cpp_int.hpp>
 using int_type = boost::multiprecision::cpp_int;
 
-#include <iostream>
-
 namespace funtls { namespace x509 {
 
 rsa_public_key rsa_public_key::parse(const asn1::der_encoded_value& repr)
@@ -63,6 +61,49 @@ digest_info pkcs1_decode(const rsa_public_key& pk, const std::vector<uint8_t>& d
     FUNTLS_CHECK_BINARY(digest_info.has_next(), ==, false, "Invalid PKCS#1 1.5 signature");
 
     return x509::digest_info{digest_algo, digest};
+}
+
+std::vector<uint8_t> pkcs1_encode(const x509::rsa_public_key& key, const std::vector<uint8_t>& message, void (*get_random_bytes)(void*, size_t))
+{
+    const auto n = key.modolus.as<int_type>();
+    const auto e = key.public_exponent.as<int_type>();
+
+    // Perform RSAES-PKCS1-V1_5-ENCRYPT (http://tools.ietf.org/html/rfc3447 7.2.1)
+
+    // Get k=message length
+    const size_t k = key.key_length();
+
+    // Build message to encrypt: EM = 0x00 || 0x02 || PS || 0x00 || M
+    std::vector<uint8_t> EM(k-message.size());
+    EM[0] = 0x00;
+    EM[1] = 0x02;
+    // PS = at least 8 pseudo random characters (must be non-zero for type 0x02)
+    get_random_bytes(&EM[2], EM.size()-3);
+    for (size_t i = 2; i < EM.size()-1; ++i) {
+        while (!EM[i]) {
+            get_random_bytes(&EM[i], 1);
+        }
+    }
+    EM[EM.size()-1] = 0x00;
+    // M = message to encrypt
+    EM.insert(EM.end(), std::begin(message), std::end(message));
+    assert(EM.size()==k);
+
+    // 3.a
+    const auto m = x509::base256_decode<int_type>(EM); // m = OS2IP (EM)
+    assert(m < n); // Is the message too long?
+    //std::cout << "m (" << EM.size() << ") = " << util::base16_encode(EM) << std::dec << "\n";
+
+    // 3.b
+    const int_type c = powm(m, e, n); // c = RSAEP ((n, e), m)
+    //std::cout << "c:\n" << c << std::endl;
+
+    // 3.c Convert the ciphertext representative c to a ciphertext C of length k octets
+    // C = I2OSP (c, k)
+    const auto C = x509::base256_encode(c, k);
+    //std::cout << "C:\n" << util::base16_encode(C) << std::endl;
+
+    return C;
 }
 
 rsa_public_key rsa_public_key_from_certificate(const v3_certificate& cert)

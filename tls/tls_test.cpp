@@ -133,6 +133,9 @@ int main()
     FUNTLS_ASSERT_EQUAL("3E8464579C39D7334B5E0412A46125C848009EAEC8315139C5A965ADFDBD579FF8B1730AB8541457",
             util::base16_encode(tls::P_hash(secret,seed,40)));
 
+    FUNTLS_ASSERT_EQUAL("0123456789ABCDEF1403030002",
+            util::base16_encode(tls::verification_buffer(0x0123456789ABCDEF, tls::content_type::change_cipher_spec, tls::protocol_version_tls_1_2, 2)));
+
     test_cipher_traits();
     test_cipher_parsing();
 }

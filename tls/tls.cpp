@@ -210,6 +210,17 @@ std::vector<uint8_t> PRF(const std::vector<uint8_t>& secret, const std::string& 
     return P_hash(secret, vec_concat(std::vector<uint8_t>{label.begin(), label.end()}, seed), wanted_size);
 }
 
+std::vector<uint8_t> verification_buffer(uint64_t seq_no, content_type content_type, protocol_version version, uint16 length)
+{
+    std::vector<uint8_t> buffer;
+    buffer.reserve(8 + 1 + 2 + 2);
+    append_to_buffer(buffer, seq_no);
+    append_to_buffer(buffer, content_type);
+    append_to_buffer(buffer, version);
+    append_to_buffer(buffer, length);
+    return buffer;
+}
+
 std::ostream& operator<<(std::ostream& os, hash_algorithm h)
 {
     switch (h) {

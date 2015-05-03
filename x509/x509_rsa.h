@@ -38,6 +38,7 @@ struct digest_info {
 };
 
 digest_info pkcs1_decode(const rsa_public_key& pk, const std::vector<uint8_t>& data);
+std::vector<uint8_t> pkcs1_encode(const x509::rsa_public_key& key, const std::vector<uint8_t>& message, void (*get_random_bytes)(void*, size_t));
 
 rsa_public_key rsa_public_key_from_certificate(const v3_certificate& cert);
 

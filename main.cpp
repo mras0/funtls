@@ -23,29 +23,6 @@ using namespace funtls;
 // cat server_key.pem server_cert.pem >server.pem
 // openssl s_server
 
-
-namespace {
-static std::vector<uint8_t> verification_buffer(uint64_t seq_no, tls::content_type content_type, tls::protocol_version version, uint16_t length) {
-    std::vector<uint8_t> buffer;
-    buffer.resize(8 + 1 + 2 + 2);
-    buffer[0]  = static_cast<uint8_t>(seq_no>>56);
-    buffer[1]  = static_cast<uint8_t>(seq_no>>48);
-    buffer[2]  = static_cast<uint8_t>(seq_no>>40);
-    buffer[3]  = static_cast<uint8_t>(seq_no>>32);
-    buffer[4]  = static_cast<uint8_t>(seq_no>>24);
-    buffer[5]  = static_cast<uint8_t>(seq_no>>16);
-    buffer[6]  = static_cast<uint8_t>(seq_no>>8);
-    buffer[7]  = static_cast<uint8_t>(seq_no);
-    buffer[8]  = static_cast<uint8_t>(content_type);
-    buffer[9]  = version.major;
-    buffer[10] = version.minor;
-    buffer[11] = static_cast<uint8_t>(length >> 8);
-    buffer[12] = static_cast<uint8_t>(length);
-    return buffer;
-}
-
-} // unnamed namespace
-
 class tls_socket {
 public:
     explicit tls_socket(boost::asio::ip::tcp::socket& socket)
@@ -260,50 +237,6 @@ private:
         }
     }
 
-    std::vector<uint8_t> rsa_client_kex_data(const std::vector<uint8_t>& pre_master_secret) const {
-        assert(server_public_key);
-        const auto& s_pk = *server_public_key;
-        const auto n = s_pk.modolus.as<int_type>();
-        const auto e = s_pk.public_exponent.as<int_type>();
-
-        // Perform RSAES-PKCS1-V1_5-ENCRYPT (http://tools.ietf.org/html/rfc3447 7.2.1)
-
-        // Get k=message length
-        const size_t k = s_pk.key_length();
-
-        // Build message to encrypt: EM = 0x00 || 0x02 || PS || 0x00 || M
-        std::vector<uint8_t> EM(k-pre_master_secret.size());
-        EM[0] = 0x00;
-        EM[1] = 0x02;
-        // PS = at least 8 pseudo random characters (must be non-zero for type 0x02)
-        tls::get_random_bytes(&EM[2], EM.size()-3);
-        for (size_t i = 2; i < EM.size()-1; ++i) {
-            while (!EM[i]) {
-                tls::get_random_bytes(&EM[i], 1);
-            }
-        }
-        EM[EM.size()-1] = 0x00;
-        // M = message to encrypt
-        EM.insert(EM.end(), std::begin(pre_master_secret), std::end(pre_master_secret));
-        assert(EM.size()==k);
-
-        // 3.a
-        const auto m = x509::base256_decode<int_type>(EM); // m = OS2IP (EM)
-        assert(m < n); // Is the message too long?
-        //std::cout << "m (" << EM.size() << ") = " << util::base16_encode(EM) << std::dec << "\n";
-
-        // 3.b
-        const int_type c = powm(m, e, n); // c = RSAEP ((n, e), m)
-        //std::cout << "c:\n" << c << std::endl;
-
-        // 3.c Convert the ciphertext representative c to a ciphertext C of length k octets
-        // C = I2OSP (c, k)
-        const auto C = x509::base256_encode(c, k);
-        //std::cout << "C:\n" << util::base16_encode(C) << std::endl;
-
-        return C;
-    }
-
     std::vector<uint8_t> send_client_key_exchange_rsa() {
         // OK, now it's time to do ClientKeyExchange
         // Since we're doing RSA, we'll be sending the EncryptedPreMasterSecret
@@ -316,7 +249,8 @@ private:
 
         std::cout << "Pre-master secret: " << util::base16_encode(&pre_master_secret[2], pre_master_secret.size()-2) << std::endl;
 
-        const auto C = rsa_client_kex_data(pre_master_secret);
+        assert(server_public_key);
+        const auto C = x509::pkcs1_encode(*server_public_key, pre_master_secret, &tls::get_random_bytes);
         tls::client_key_exchange_rsa client_key_exchange{tls::vector<tls::uint8,0,(1<<16)-1>{C}};
         send_record(make_handshake(client_key_exchange));
         return pre_master_secret;
