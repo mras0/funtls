@@ -3,6 +3,7 @@
 #include <istream>
 #include <string>
 #include <sstream>
+#include <fstream>
 
 #include <util/base_conversion.h>
 #include <util/buffer.h>
@@ -81,10 +82,30 @@ v3_certificate read_pem_certificate(std::istream& is)
     return v3_certificate::parse(asn1::read_der_encoded_value(cert_buf));
 }
 
-v3_certificate read_pem_certificate(const std::string& s)
+v3_certificate read_pem_certificate_from_string(const std::string& s)
 {
     std::istringstream iss(s);
     return read_pem_certificate(iss);
+}
+
+v3_certificate read_pem_certificate_from_file(const std::string& filename)
+{
+    std::ifstream in(filename, std::ifstream::binary);
+
+    if (!in || !in.is_open()) {
+        FUNTLS_CHECK_FAILURE("Error opening '" + filename + "'");
+    }
+
+    auto cert = x509::read_pem_certificate(in);
+    if (!in) {
+        FUNTLS_CHECK_FAILURE("Error while reading from '" + filename + "'");
+    }
+
+    if (in.peek() != std::char_traits<char>::eof()) {
+        FUNTLS_CHECK_FAILURE("Error while reading from '" + filename + "'");
+    }
+
+    return cert;
 }
 
 void write_pem_certificate(std::ostream& os, const std::vector<uint8_t>& der_encoded_certificate)

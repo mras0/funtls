@@ -92,6 +92,7 @@ std::vector<uint8_t> base256_encode(IntType i, size_t byte_count)
 // Checks the signature of the X509 v3 certificate 'subject_cert' against the issuers certificate
 // 'issuer_cert' (Note: ONLY against this issuer, i.e. the validity of the issuers certificate is
 // NOT verified).
+// NOTE: validaty dates are not yet checked
 // Throws an exception if the verification failed.
 //
 void verify_x509_certificate(const v3_certificate& subject_cert, const v3_certificate& issuer_cert);
@@ -100,6 +101,7 @@ void verify_x509_certificate(const v3_certificate& subject_cert, const v3_certif
 // Checks the trust chain backwards from the last element of 'chain' to the first
 // Ending with a self-signed root certificate. NOTE: The chain must contain at least
 // 2 elements.
+// NOTE: validaty dates are not yet checked
 //
 void verify_x509_certificate_chain(const std::vector<v3_certificate>& chain);
 

@@ -70,6 +70,12 @@ public:
         //deltaRevocationList = 53,
         //    Attribute Certificate attribute (attributeCertificate) = 58
         //pseudonym = 65,
+
+        // XXX: HACK: FIXME:
+        // https://www.ietf.org/rfc/rfc2459
+        // pkcs-9 OBJECT IDENTIFIER   ::= { iso(1) member-body(2) us(840) rsadsi(113549) pkcs(1) 9 }
+        // emailAddress AttributeType ::= { pkcs-9 1 }
+        email_address = 1000+1,
     };
 
     attribute_type(const asn1::der_encoded_value& repr);

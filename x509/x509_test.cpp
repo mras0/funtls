@@ -83,7 +83,7 @@ void test_load_save(const std::vector<uint8_t>& der_data)
     FUNTLS_ASSERT_EQUAL(der_data, crude_get_pem_data(pem_data));
 
     // And can it be read?
-    auto cert = x509::read_pem_certificate(pem_data);
+    auto cert = x509::read_pem_certificate_from_string(pem_data);
 
     // Check it against the supplied data
     util::buffer_view buf{&der_data[0], der_data.size()};
@@ -117,7 +117,7 @@ int main()
 {
     // TODO: Check x509::name equals operations. Only exact matches should be allowed (with order being important) etc.
 
-    const auto cert0 = x509::read_pem_certificate(test_cert0);
+    const auto cert0 = x509::read_pem_certificate_from_string(test_cert0);
     x509::verify_x509_certificate(cert0, cert0);
     test_load_save(test_cert0);
     FUNTLS_ASSERT_EQUAL(int_type("11259235216357634699"), cert0.certificate().serial_number.as<int_type>());
@@ -150,13 +150,13 @@ int main()
     FUNTLS_ASSERT_EQUAL(x509::sha256WithRSAEncryption, cert0.signature_algorithm());
     // asn1::bit_string cert0.signature
 
-    const auto cert1 = x509::read_pem_certificate(test_cert1);
+    const auto cert1 = x509::read_pem_certificate_from_string(test_cert1);
     test_load_save(test_cert1);
     FUNTLS_ASSERT_NOT_EQUAL(cert1.certificate().issuer, cert1.certificate().subject);
     FUNTLS_ASSERT_THROWS(x509::verify_x509_certificate(cert1, cert1), std::runtime_error);
 
     {
-        const auto root_cert = x509::read_pem_certificate(test_cert_chain0_root);
+        const auto root_cert = x509::read_pem_certificate_from_string(test_cert_chain0_root);
         x509::verify_x509_certificate(root_cert, root_cert);
         test_load_save(test_cert_chain0_root);
         FUNTLS_ASSERT_EQUAL(root_cert.certificate().issuer, root_cert.certificate().subject);

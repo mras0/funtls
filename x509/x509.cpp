@@ -7,6 +7,11 @@ namespace {
 
 funtls::x509::attribute_type::tag attribute_tag_from_oid(const funtls::asn1::object_id& oid)
 {
+    // XXX: HACK: See header.
+    static const auto pkcs9_emailAddress = funtls::asn1::object_id{1,2,840,113549,1,9,1};
+    if (oid == pkcs9_emailAddress) {
+        return funtls::x509::attribute_type::tag::email_address;
+    }
     FUNTLS_CHECK_BINARY(oid.size(), ==, 4, "Invalid X509 attribute " + oid.as_string());
     FUNTLS_CHECK_BINARY(oid[0], ==, 2, "Invalid X509 attribute " + oid.as_string());
     FUNTLS_CHECK_BINARY(oid[1], ==, 5, "Invalid X509 attribute " + oid.as_string());
@@ -26,7 +31,7 @@ funtls::x509::version::tag version_tag_from_int(const funtls::asn1::integer& i)
     FUNTLS_CHECK_FAILURE("Unknown version int " + std::to_string(ival));
 }
 
-funtls::x509::version::tag read_tag(const funtls::asn1::der_encoded_value& repr)
+funtls::x509::version::tag read_version_tag(const funtls::asn1::der_encoded_value& repr)
 {
     FUNTLS_CHECK_BINARY(repr.id(), ==, funtls::asn1::identifier::context_specific_tag_0, "Expected X509 version element");
     auto ver_content = repr.content_view();
@@ -60,6 +65,8 @@ funtls::x509::name::attr_type parse_name_attributes(const funtls::asn1::der_enco
                 text = asn1::utf8_string{value}.as_string();
             } else if (value.id() == asn1::identifier::t61_string) {
                 text = asn1::t61_string{value}.as_string();
+            } else if (value.id() == asn1::identifier::ia5_string) {
+                text = asn1::ia5_string{value}.as_string();
             } else {
                 // Only TeletexString, UniversalString or BMPString allowed here
                 std::ostringstream oss;
@@ -103,13 +110,14 @@ std::ostream& operator<<(std::ostream& os, const attribute_type& attr)
     case attribute_type::state_or_province_name:   return os << "ST";
     case attribute_type::organization_name:        return os << "O";
     case attribute_type::organizational_unit_name: return os << "OU";
+    case attribute_type::email_address:            return os << "E";
     }
     return os << "Unknown " << static_cast<uint32_t>(attr);
     return os;
 }
 
 version::version(const asn1::der_encoded_value& repr)
-    : tag_(read_tag(repr))
+    : tag_(read_version_tag(repr))
 {
 }
 
