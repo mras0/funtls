@@ -2,6 +2,7 @@
 #include <util/base_conversion.h>
 #include <hash/hash.h> // TODO: remove from this file
 #include <sys/time.h> // gettimeofday
+#include <fstream>
 
 namespace {
 template<typename T>
@@ -21,13 +22,23 @@ uint32_t get_gmt_unix_time()
 
 namespace funtls { namespace tls {
 
-// "random"
 void get_random_bytes(void* dest, size_t count) {
+#if 1
+    std::ifstream urandom("/dev/urandom", std::ifstream::binary);
+    if (!urandom || !urandom.is_open()) {
+        throw std::runtime_error("Could not open /dev/urandom");
+    }
+    if (!urandom.read(reinterpret_cast<char*>(dest), count)) {
+        throw std::runtime_error("Could not read from /dev/urandom");
+    }
+#else
+    // "random" but reproducable results
     static uint8_t seed = 0;
     uint8_t* b = static_cast<uint8_t*>(dest);
     while (count--) {
         *b++ = seed++;
     }
+#endif
 }
 
 random make_random() {

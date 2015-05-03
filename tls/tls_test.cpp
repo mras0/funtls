@@ -96,7 +96,7 @@ void test_cipher_traits()
         FUNTLS_ASSERT_EQUAL(8,                                   csp.record_iv_length);
         FUNTLS_ASSERT_EQUAL(tls::mac_algorithm::hmac_sha256,     csp.mac_algorithm);
         FUNTLS_ASSERT_EQUAL(256/8,                               csp.mac_length);
-        FUNTLS_ASSERT_EQUAL(256/8,                               csp.mac_key_length);
+        FUNTLS_ASSERT_EQUAL(0,                                   csp.mac_key_length);
     }
 }
 

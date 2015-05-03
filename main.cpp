@@ -115,9 +115,8 @@ private:
     hash::sha256                    handshake_message_digest;
     uint64_t                        server_sequence_number = 0;
     uint64_t                        client_sequence_number = 0;
-
-    std::vector<uint8_t>            client_mac_key;
-    std::vector<uint8_t>            server_mac_key;
+    std::unique_ptr<tls::cipher>    encrypt_cipher = tls::make_cipher(tls::null_cipher_parameters_e);
+    std::unique_ptr<tls::cipher>    decrypt_cipher = tls::make_cipher(tls::null_cipher_parameters_d);
 
     // TODO: This only works when the payload isn't encrypted/compressed
     template<typename Payload>
@@ -373,50 +372,29 @@ private:
         assert(master_secret.size() == master_secret_size);
         std::cout << "Master secret: " << util::base16_encode(master_secret) << std::endl;
 
-        auto mac_key_length = cipher_param.mac_key_length;
-        if (cipher_param.cipher_type == tls::cipher_type::aead) {
-            // HACK - AEAD mode ciphers don't use a MAC key
-            mac_key_length = 0;
-        }
-
         // Now do Key Calculation http://tools.ietf.org/html/rfc5246#section-6.3
         // key_block = PRF(SecurityParameters.master_secret, "key expansion",
         // SecurityParameters.server_random + SecurityParameters.client_random)
-        const size_t key_block_length  = 2 * mac_key_length + 2 * cipher_param.key_length + 2 * cipher_param.fixed_iv_length;
+        const size_t key_block_length  = 2 * cipher_param.mac_key_length + 2 * cipher_param.key_length + 2 * cipher_param.fixed_iv_length;
         auto key_block = tls::PRF(master_secret, "key expansion", tls::vec_concat(server_random.as_vector(), client_random.as_vector()), key_block_length);
 
         std::cout << "Keyblock:\n" << util::base16_encode(key_block) << "\n";
 
         size_t i = 0;
-        client_mac_key      = std::vector<uint8_t>{&key_block[i], &key_block[i+mac_key_length]}; i += mac_key_length;
-        server_mac_key      = std::vector<uint8_t>{&key_block[i], &key_block[i+mac_key_length]}; i += mac_key_length;
-        auto client_enc_key = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.key_length]}; i += cipher_param.key_length;
-        auto server_enc_key = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.key_length]}; i += cipher_param.key_length;
-        auto client_iv = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.fixed_iv_length]}; i += cipher_param.fixed_iv_length;
-        auto server_iv = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.fixed_iv_length]}; i += cipher_param.fixed_iv_length;
+        auto client_mac_key = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.mac_key_length]};  i += cipher_param.mac_key_length;
+        auto server_mac_key = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.mac_key_length]};  i += cipher_param.mac_key_length;
+        auto client_enc_key = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.key_length]};      i += cipher_param.key_length;
+        auto server_enc_key = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.key_length]};      i += cipher_param.key_length;
+        auto client_iv      = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.fixed_iv_length]}; i += cipher_param.fixed_iv_length;
+        auto server_iv      = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.fixed_iv_length]}; i += cipher_param.fixed_iv_length;
+        assert(i == key_block.size());
 
         tls::cipher_parameters client_cipher_parameters{tls::cipher_parameters::encrypt, cipher_param, client_mac_key, client_enc_key, client_iv};
         tls::cipher_parameters server_cipher_parameters{tls::cipher_parameters::decrypt, cipher_param, server_mac_key, server_enc_key, server_iv};
 
-        // TODO: FIXME: handle ConnectionEnd stuff
-        if (cipher_param.bulk_cipher_algorithm == tls::bulk_cipher_algorithm::rc4) {
-            encrypt_cipher.reset(new tls::rc4_cipher(client_cipher_parameters));
-            decrypt_cipher.reset(new tls::rc4_cipher(server_cipher_parameters));
-        } else if (cipher_param.bulk_cipher_algorithm == tls::bulk_cipher_algorithm::_3des) {
-            encrypt_cipher.reset(new tls::_3des_cipher(client_cipher_parameters));
-            decrypt_cipher.reset(new tls::_3des_cipher(server_cipher_parameters));
-        } else if (cipher_param.bulk_cipher_algorithm == tls::bulk_cipher_algorithm::aes_cbc) {
-            encrypt_cipher.reset(new tls::aes_cbc_cipher(client_cipher_parameters));
-            decrypt_cipher.reset(new tls::aes_cbc_cipher(server_cipher_parameters));
-        } else if (cipher_param.bulk_cipher_algorithm == tls::bulk_cipher_algorithm::aes_gcm) {
-            assert(mac_key_length == 0);
-            assert(cipher_param.cipher_type == tls::cipher_type::aead);
-            encrypt_cipher.reset(new tls::aes_gcm_cipher(client_cipher_parameters));
-            decrypt_cipher.reset(new tls::aes_gcm_cipher(server_cipher_parameters));
-        } else {
-            FUNTLS_CHECK_FAILURE("Unsupported bulk_cipher_algorithm: " + std::to_string((int)cipher_param.bulk_cipher_algorithm));
-        }
-        assert(i == key_block.size());
+        // TODO: This should obviously be reversed if running as a server
+        encrypt_cipher = tls::make_cipher(client_cipher_parameters);
+        decrypt_cipher = tls::make_cipher(server_cipher_parameters);
      }
 
     void send_change_cipher_spec() {
@@ -488,10 +466,6 @@ private:
         boost::asio::write(socket, boost::asio::buffer(header));
         boost::asio::write(socket, boost::asio::buffer(fragment));
     }
-
-    // HACK HACK HACK FIXME TODO XXX
-    std::unique_ptr<tls::cipher> encrypt_cipher = std::unique_ptr<tls::cipher>(new tls::null_cipher{tls::null_cipher_parameters_e});
-    std::unique_ptr<tls::cipher> decrypt_cipher = std::unique_ptr<tls::cipher>(new tls::null_cipher{tls::null_cipher_parameters_d});
 
     void read_change_cipher_spec(){
         auto record = read_record();

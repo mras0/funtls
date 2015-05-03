@@ -7,10 +7,6 @@
 #include <memory>
 #include <hash/hash.h>
 
-namespace funtls { namespace rc4 {
-    class rc4;
-} }
-
 namespace funtls { namespace tls {
 
 enum class cipher_suite : uint16_t {
@@ -167,24 +163,28 @@ struct null_mac_algo_triats {
     static constexpr auto mac_algorithm          = tls::mac_algorithm::null;
     static constexpr uint8_t mac_length          = 0;
     static constexpr uint8_t mac_key_length      = 0;
+    static constexpr auto prf_algorithm          = tls::prf_algorithm::tls_prf_sha256;
 };
 
 struct hmac_md5_algo_traits {
     static constexpr auto mac_algorithm          = tls::mac_algorithm::hmac_md5;
     static constexpr uint8_t mac_length          = 128/8;
     static constexpr uint8_t mac_key_length      = 128/8;
+    static constexpr auto prf_algorithm          = tls::prf_algorithm::tls_prf_sha256;
 };
 
 struct hmac_sha_algo_traits {
     static constexpr auto mac_algorithm          = tls::mac_algorithm::hmac_sha1;
     static constexpr uint8_t mac_length          = 160/8;
     static constexpr uint8_t mac_key_length      = 160/8;
+    static constexpr auto prf_algorithm          = tls::prf_algorithm::tls_prf_sha256;
 };
 
 struct hmac_sha256_algo_traits {
     static constexpr auto mac_algorithm          = tls::mac_algorithm::hmac_sha256;
     static constexpr uint8_t mac_length          = 256/8;
     static constexpr uint8_t mac_key_length      = 256/8;
+    static constexpr auto prf_algorithm          = tls::prf_algorithm::tls_prf_sha256;
 };
 
 namespace detail {
@@ -193,7 +193,7 @@ template<cipher_suite suite, key_exchange_algorithm key_exchange_algo, typename 
 struct cipher_suite_traits_base {
     static constexpr auto cipher_suite           = suite;
     static constexpr auto key_exchange_algorithm = key_exchange_algo;
-    static constexpr auto prf_algorithm          = tls::prf_algorithm::tls_prf_sha256;
+    static constexpr auto prf_algorithm          = mac_algo_traits::prf_algorithm;
     static constexpr auto bulk_cipher_algorithm  = bulk_cipher_algo_traits::bulk_cipher_algorithm;
     static constexpr auto cipher_type            = bulk_cipher_algo_traits::cipher_type;
     static constexpr uint8_t key_length          = bulk_cipher_algo_traits::key_length;
@@ -230,7 +230,15 @@ CS_TRAITS_SPEC(dhe_rsa_with_aes_256_cbc_sha, dhe_rsa, aes_cbc_traits<256>, hmac_
 CS_TRAITS_SPEC(dhe_rsa_with_aes_128_cbc_sha256, dhe_rsa, aes_cbc_traits<128>, hmac_sha256_algo_traits);
 CS_TRAITS_SPEC(dhe_rsa_with_aes_256_cbc_sha256, dhe_rsa, aes_cbc_traits<256>, hmac_sha256_algo_traits);
 
-CS_TRAITS_SPEC(rsa_with_aes_128_gcm_sha256, rsa, aes_gcm_traits<128>, hmac_sha256_algo_traits);
+// GCM algorithms don't use 
+struct hmac_gcm_sha256_algo_traits {
+    static constexpr auto mac_algorithm          = tls::mac_algorithm::hmac_sha256;
+    static constexpr uint8_t mac_length          = 256/8;
+    static constexpr uint8_t mac_key_length      = 0;
+    static constexpr auto prf_algorithm          = tls::prf_algorithm::tls_prf_sha256;
+};
+
+CS_TRAITS_SPEC(rsa_with_aes_128_gcm_sha256, rsa, aes_gcm_traits<128>, hmac_gcm_sha256_algo_traits);
 
 #undef CS_TRAITS_SPEC
 
@@ -300,20 +308,28 @@ private:
     std::vector<uint8_t>    fixed_iv_;
 };
 
-static const cipher_parameters null_cipher_parameters_e{cipher_parameters::encrypt, tls::parameters_from_suite(tls::cipher_suite::null_with_null_null), {}, {}, {}};
-static const cipher_parameters null_cipher_parameters_d{cipher_parameters::decrypt, tls::parameters_from_suite(tls::cipher_suite::null_with_null_null), {}, {}, {}};
-
 class cipher {
 public:
     explicit cipher(const cipher_parameters& parameters) : parameters_(parameters) {}
     virtual ~cipher() {}
 
+    //
+    // Encrypt/Decrypt 'data'. 'verbuffer' must contain the concatenation of sequence_number, content_type, protocol_version and content_length
+    // For decryption the content length cannot be known in advance (this is the case with block ciphers) and must thus be filled out before
+    // use by the cipher
+    //
+    // For encryption a complete data block is returned (encrypted data + any record IV + authentication code)
+    // For decryption the decrypted data is returned or an exception is thrown if authentication/decryption failed.
+    //
     std::vector<uint8_t> process(const std::vector<uint8_t>& data, const std::vector<uint8_t>& verbuffer) {
         assert(verbuffer.size() == 13);
         return do_process(data, verbuffer);
     }
 
 protected:
+    //
+    // For now we won't allow others to access the cipher parameters. It can always be made public if necessary.
+    //
     const cipher_parameters& parameters() const {
         return parameters_;
     }
@@ -324,70 +340,10 @@ private:
     virtual std::vector<uint8_t> do_process(const std::vector<uint8_t>& data, const std::vector<uint8_t>& verbuffer) = 0;
 };
 
-class null_cipher : public cipher {
-public:
-    explicit null_cipher(const cipher_parameters& parameters) : cipher(parameters) {}
-    virtual std::vector<uint8_t> do_process(const std::vector<uint8_t>& data, const std::vector<uint8_t>& verbuffer) override {
-        (void) verbuffer;
-        return data;
-    }
-};
+static const cipher_parameters null_cipher_parameters_e{cipher_parameters::encrypt, tls::parameters_from_suite(tls::cipher_suite::null_with_null_null), {}, {}, {}};
+static const cipher_parameters null_cipher_parameters_d{cipher_parameters::decrypt, tls::parameters_from_suite(tls::cipher_suite::null_with_null_null), {}, {}, {}};
 
-class mac_checked_cipher : public cipher {
-public:
-    explicit mac_checked_cipher(const cipher_parameters& parameters) : cipher(parameters) {}
-
-private:
-    std::vector<uint8_t> calc_mac(const std::vector<uint8_t>& content, std::vector<uint8_t> verbuffer);
-    virtual std::vector<uint8_t> do_process(const std::vector<uint8_t>& data, const std::vector<uint8_t>& verbuffer) override;
-    virtual std::vector<uint8_t> do_process_content(const std::vector<uint8_t>& data) = 0;
-};
-
-class rc4_cipher : public mac_checked_cipher {
-public:
-    explicit rc4_cipher(const cipher_parameters& parameters);
-    ~rc4_cipher();
-private:
-    virtual std::vector<uint8_t> do_process_content(const std::vector<uint8_t>& data) override;
-    std::unique_ptr<rc4::rc4> rc4_;
-};
-
-class _3des_cipher : public mac_checked_cipher {
-public:
-    static_assert(_3des_traits::fixed_iv_length == 0, "");
-    static constexpr size_t iv_length = _3des_traits::record_iv_length;
-
-    _3des_cipher(const cipher_parameters& parameters) : mac_checked_cipher(parameters) {}
-private:
-    virtual std::vector<uint8_t> do_process_content(const std::vector<uint8_t>& data) override;
-};
-
-class aes_cbc_cipher : public mac_checked_cipher {
-public:
-    static constexpr size_t iv_length = aes_cbc_traits<256>::record_iv_length;
-    static_assert(aes_cbc_traits<256>::fixed_iv_length == 0, "");
-    static_assert(aes_cbc_traits<256>::fixed_iv_length == aes_cbc_traits<128>::fixed_iv_length, "");
-    static_assert(aes_cbc_traits<256>::record_iv_length == aes_cbc_traits<128>::record_iv_length, "");
-
-    aes_cbc_cipher(const cipher_parameters& parameters) : mac_checked_cipher(parameters) {}
-private:
-    virtual std::vector<uint8_t> do_process_content(const std::vector<uint8_t>& data) override;
-};
-
-class aes_gcm_cipher : public cipher {
-public:
-    static constexpr size_t fixed_iv_length  = aes_gcm_traits<256>::fixed_iv_length;
-    static constexpr size_t record_iv_length = aes_gcm_traits<256>::record_iv_length;
-    static constexpr size_t tag_length       = 16;
-    static_assert(fixed_iv_length == 4, "");
-    static_assert(record_iv_length == 8, "");
-    static_assert(aes_gcm_traits<256>::fixed_iv_length == aes_gcm_traits<128>::fixed_iv_length, "");
-    static_assert(aes_gcm_traits<256>::record_iv_length == aes_gcm_traits<128>::record_iv_length, "");
-
-    aes_gcm_cipher(const cipher_parameters& parameters) : cipher(parameters) {}
-private:
-    virtual std::vector<uint8_t> do_process(const std::vector<uint8_t>& data, const std::vector<uint8_t>& verbuffer) override;
-};
+std::unique_ptr<cipher> make_cipher(const cipher_parameters& parameters);
 
 } } // namespace funtls::tls
 
