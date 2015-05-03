@@ -257,6 +257,8 @@ struct cipher_suite_parameters {
     const uint8_t                     mac_key_length;
 };
 
+enum class hash_algorithm : uint8_t;
+hash::hash_algorithm get_hash(hash_algorithm algo);
 hash::hash_algorithm get_hmac(mac_algorithm algo, const std::vector<uint8_t>& key);
 cipher_suite_parameters parameters_from_suite(cipher_suite suite);
 

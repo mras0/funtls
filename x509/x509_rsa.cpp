@@ -6,6 +6,47 @@
 #include <boost/multiprecision/cpp_int.hpp>
 using int_type = boost::multiprecision::cpp_int;
 
+using namespace funtls;
+
+namespace {
+
+hash::hash_algorithm get_hash(const asn1::object_id& oid)
+{
+    if (oid == x509::id_sha1) {
+        return hash::sha1{};
+    } else if (oid == x509::id_sha256) {
+        return hash::sha256{};
+    }
+
+    std::ostringstream oss;
+    oss << "Unknown hash algorithm " << oid;
+    FUNTLS_CHECK_FAILURE(oss.str());
+}
+
+asn1::object_id public_key_algo_from_signature_algo(const asn1::object_id& sig_algo)
+{
+    if (sig_algo == x509::sha1WithRSAEncryption || sig_algo == x509::sha256WithRSAEncryption) {
+        return x509::rsaEncryption;
+    }
+    std::ostringstream oss;
+    oss << "Unknown signature algorithm " << sig_algo;
+    FUNTLS_CHECK_FAILURE(oss.str());
+}
+
+asn1::object_id digest_algo_from_signature_algo(const asn1::object_id& sig_algo)
+{
+    if (sig_algo == x509::sha1WithRSAEncryption) {
+        return x509::id_sha1;
+    } else if (sig_algo == x509::sha256WithRSAEncryption) {
+        return x509::id_sha256;
+    }
+    std::ostringstream oss;
+    oss << "Unknown signature algorithm " << sig_algo;
+    FUNTLS_CHECK_FAILURE(oss.str());
+}
+
+} // unnamed namespace
+
 namespace funtls { namespace x509 {
 
 rsa_public_key rsa_public_key::parse(const asn1::der_encoded_value& repr)
@@ -19,6 +60,7 @@ rsa_public_key rsa_public_key::parse(const asn1::der_encoded_value& repr)
 
 digest_info pkcs1_decode(const rsa_public_key& pk, const std::vector<uint8_t>& data)
 {
+    FUNTLS_CHECK_BINARY(pk.key_length() & (pk.key_length()-1), ==, 0, "Non pow2 key length?");
     // The signatureValue field contains a digital signature computed upon
     // the ASN.1 DER encoded tbsCertificate.  The ASN.1 DER encoded
     // tbsCertificate is used as the input to the signature function.
@@ -36,8 +78,8 @@ digest_info pkcs1_decode(const rsa_public_key& pk, const std::vector<uint8_t>& d
 
     // EM = 0x00 || 0x01 || PS || 0x00 || T (T=DER encoded DigestInfo)
     auto digest_buf = util::buffer_view{&decoded[0], decoded.size()};
-    FUNTLS_CHECK_BINARY(0x00, ==, digest_buf.get(), "Invalid PKCS#1 1.5 signature");
-    FUNTLS_CHECK_BINARY(0x01, ==, digest_buf.get(), "Invalid PKCS#1 1.5 signature");
+    FUNTLS_CHECK_BINARY(0x00, ==, static_cast<unsigned>(digest_buf.get()), "Invalid PKCS#1 1.5 signature");
+    FUNTLS_CHECK_BINARY(0x01, ==, static_cast<unsigned>(digest_buf.get()), "Invalid PKCS#1 1.5 signature");
     // Skip padding
     for (;;) {
         const auto b = digest_buf.get();
@@ -65,6 +107,7 @@ digest_info pkcs1_decode(const rsa_public_key& pk, const std::vector<uint8_t>& d
 
 std::vector<uint8_t> pkcs1_encode(const x509::rsa_public_key& key, const std::vector<uint8_t>& message, void (*get_random_bytes)(void*, size_t))
 {
+    FUNTLS_CHECK_BINARY(key.key_length() & (key.key_length()-1), ==, 0, "Non pow2 key length?");
     const auto n = key.modolus.as<int_type>();
     const auto e = key.public_exponent.as<int_type>();
 
@@ -112,6 +155,40 @@ rsa_public_key rsa_public_key_from_certificate(const v3_certificate& cert)
     const auto vec = cert.certificate().subject_public_key.as_vector();
     util::buffer_view pk_buf{&vec[0], vec.size()};
     return x509::rsa_public_key::parse(asn1::read_der_encoded_value(pk_buf));
+}
+
+void verify_x509_certificate(const v3_certificate& subject_cert, const v3_certificate& issuer_cert)
+{
+    auto c = subject_cert.certificate();
+    FUNTLS_ASSERT_EQUAL(x509::rsaEncryption, public_key_algo_from_signature_algo(subject_cert.signature_algorithm()));
+    FUNTLS_CHECK_BINARY(subject_cert.signature_algorithm(), ==, subject_cert.certificate().signature_algorithm, "Signature algorihtm mismatch");
+
+    FUNTLS_CHECK_BINARY(c.issuer, ==, issuer_cert.certificate().subject, "Issuer certificate does not match");
+
+    const auto digest_algo = digest_algo_from_signature_algo(subject_cert.signature_algorithm());
+
+    // Decode the signature using the issuers public key
+    auto digest = x509::pkcs1_decode(rsa_public_key_from_certificate(issuer_cert), subject_cert.signature().as_vector());
+    FUNTLS_CHECK_BINARY(digest.digest_algorithm, ==, digest_algo, "Digest algorithm mismatch");
+
+    const auto computed_sig = get_hash(digest_algo).input(subject_cert.certificate_der_encoded()).result();
+    if (digest.digest != computed_sig) {
+        std::ostringstream oss;
+        oss << "Invalid certificate signature (algorithm = " << subject_cert.signature_algorithm() << ")\n";
+        oss << "Computed:  " << util::base16_encode(computed_sig) << "\n";
+        oss << "Signature: " << util::base16_encode(digest.digest);
+        FUNTLS_CHECK_FAILURE(oss.str());
+    }
+}
+
+void verify_x509_certificate_chain(const std::vector<v3_certificate>& chain)
+{
+    FUNTLS_CHECK_BINARY(chain.size(), >=, 2, "Chain too short"); // This function shouldn't be used to check a single self-signed certificate
+    verify_x509_certificate(chain.back(), chain.back());
+    size_t i = chain.size() - 1;
+    while (i--) {
+        verify_x509_certificate(chain[i], chain[i+1]);
+    }
 }
 
 } } // namespace funtls::x509

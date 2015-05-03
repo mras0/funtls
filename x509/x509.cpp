@@ -97,11 +97,12 @@ attribute_type::attribute_type(const asn1::der_encoded_value& repr)
 std::ostream& operator<<(std::ostream& os, const attribute_type& attr)
 {
     switch (attr) {
-    case attribute_type::common_name:            return os << "CN";
-    case attribute_type::country_name:           return os << "C";
-    case attribute_type::locality_name:          return os << "L";
-    case attribute_type::state_or_province_name: return os << "ST";
-    case attribute_type::organization_name:      return os << "O";
+    case attribute_type::common_name:              return os << "CN";
+    case attribute_type::country_name:             return os << "C";
+    case attribute_type::locality_name:            return os << "L";
+    case attribute_type::state_or_province_name:   return os << "ST";
+    case attribute_type::organization_name:        return os << "O";
+    case attribute_type::organizational_unit_name: return os << "OU";
     }
     return os << "Unknown " << static_cast<uint32_t>(attr);
     return os;

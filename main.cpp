@@ -13,10 +13,18 @@
 #include <util/buffer.h>
 #include <tls/tls.h>
 
+//#define WRITE_CERTS
+#ifdef WRITE_CERTS
+#include <fstream>
+#include <x509/x509_io.h>
+#endif
+
 #include <boost/multiprecision/cpp_int.hpp>
 using int_type = boost::multiprecision::cpp_int;
 
 using namespace funtls;
+
+namespace {
 
 std::pair<std::vector<uint8_t>, tls::handshake> client_key_exchange_rsa(tls::protocol_version protocol_version, const x509::rsa_public_key& server_public_key) {
     // OK, now it's time to do ClientKeyExchange
@@ -61,6 +69,33 @@ std::pair<std::vector<uint8_t>, tls::handshake> client_key_exchange_dhe_rsa(cons
     //std::cout << "Negotaited key = " << util::base16_encode(dh_Z) << std::endl;
     return std::make_pair(std::move(dh_Z), std::move(handshake));
 }
+
+void verify_dhe_signature(const tls::server_key_exchange_dhe& dhe_kex, const x509::rsa_public_key& public_key, const std::vector<uint8_t>& digest_buf)
+{
+    //std::cout << "Verifying server DHE signature\n";
+    FUNTLS_CHECK_BINARY(dhe_kex.signature_algorithm, ==, tls::signature_algorithm::rsa, "");
+    const auto digest = x509::pkcs1_decode(public_key, dhe_kex.signature.as_vector());
+    if (digest.digest_algorithm == x509::id_sha1) {
+        FUNTLS_CHECK_BINARY(tls::hash_algorithm::sha1, ==, dhe_kex.hash_algorithm, "");
+    } else {
+        // What hash algorithm should be used? What if there's a mismatch?
+        std::ostringstream oss;
+        oss << "Untested digest algorithm " << digest.digest_algorithm << ". Digest=" << util::base16_encode(digest.digest);
+        FUNTLS_CHECK_FAILURE(oss.str());
+    }
+
+    const auto calced_digest = tls::get_hash(dhe_kex.hash_algorithm).input(digest_buf).result();
+    //std::cout << "Calculated digest: " << util::base16_encode(calced_digest) << std::endl;
+
+    FUNTLS_CHECK_BINARY(calced_digest.size(), ==, digest.digest.size(), "Wrong digest size");
+    if (!std::equal(calced_digest.begin(), calced_digest.end(), digest.digest.begin())) {
+        throw std::runtime_error("Digest mismatch in " + std::string(__PRETTY_FUNCTION__) + " Calculated: " +
+                util::base16_encode(calced_digest) + " Expected: " +
+                util::base16_encode(digest.digest));
+    }
+}
+
+} // unnamed namespace
 
 // http://stackoverflow.com/questions/10175812/how-to-create-a-self-signed-certificate-with-openssl
 // openssl req -x509 -newkey rsa:2048 -keyout server_key.pem -out server_cert.pem -days 365 -nodes
@@ -242,6 +277,10 @@ private:
         // TODO: Make sure the certificate is correct etc.
         // TODO: Verify certificate(s)
 
+#ifdef WRITE_CERTS
+        std::ofstream of("/tmp/certs.pem", std::fstream::binary);
+        if (!of || !of.is_open()) throw std::runtime_error("Error opening certificate output file");
+#endif
         for (const auto& c : certificate_lists[0].certificate_list) {
             const auto v = c.as_vector();
             auto cert_buf = util::buffer_view{&v[0], v.size()};
@@ -249,6 +288,11 @@ private:
             std::cout << "Ignoring certificate:\n";
             std::cout << " Issuer: " << cert.issuer << std::endl;
             std::cout << " Subject: " << cert.subject << std::endl;
+
+#ifdef WRITE_CERTS
+            x509::write_pem_certificate(of, v);
+            if (!of) throw std::runtime_error("Error writing to certificate output file");
+#endif
         }
 
         const auto their_certificate = certificate_lists[0].certificate_list[0].as_vector();
@@ -258,27 +302,12 @@ private:
 
         // HAX
         if (dhe_kex) {
-            std::cout << "Verifying server DHE signature\n";
-            FUNTLS_CHECK_BINARY(dhe_kex->signature_algorithm, ==, tls::signature_algorithm::rsa, "");
-            const auto digest = x509::pkcs1_decode(*server_public_key, dhe_kex->signature.as_vector());
-            FUNTLS_CHECK_BINARY(x509::id_sha1,             ==, digest.digest_algorithm, "");
-            FUNTLS_CHECK_BINARY(tls::hash_algorithm::sha1, ==, dhe_kex->hash_algorithm, "");
-            std::cout << "Digest (Algorithm: " << digest.digest_algorithm << ")\n" << util::base16_encode(digest.digest) << std::endl;
-
+            assert(server_public_key);
             std::vector<uint8_t> digest_buf;
             append_to_buffer(digest_buf, client_random);
             append_to_buffer(digest_buf, server_random);
             append_to_buffer(digest_buf, dhe_kex->params);
-            const auto calced_digest = hash::sha1{}.input(digest_buf).result();
-            std::cout << "Calculated digest: " << util::base16_encode(calced_digest) << std::endl;
-
-            FUNTLS_CHECK_BINARY(calced_digest.size(), ==, digest.digest.size(), "Wrong digest size");
-            if (!std::equal(calced_digest.begin(), calced_digest.end(), digest.digest.begin())) {
-                throw std::runtime_error("Digest mismatch in " + std::string(__PRETTY_FUNCTION__) + " Calculated: " +
-                        util::base16_encode(calced_digest) + " Expected: " +
-                        util::base16_encode(digest.digest));
-            }
-
+            verify_dhe_signature(*dhe_kex, *server_public_key, digest_buf);
             server_dh_params.reset(new tls::server_dh_params(dhe_kex->params));
         }
     }
@@ -333,13 +362,25 @@ private:
      }
 
     void send_change_cipher_spec() {
+        if (!pending_encrypt_cipher) {
+            FUNTLS_CHECK_FAILURE("Sending ChangeCipherSpec without a pending cipher suite");
+        }
         send_record(tls::change_cipher_spec{});
+        //
+        // Immediately after sending [the ChangeCipherSpec] message, the sender MUST instruct the
+        // record layer to make the write pending state the write active state.
+        //
+        encrypt_cipher = std::move(pending_encrypt_cipher);
+        //
+        // The sequence number MUST be set to zero whenever a connection state is made the
+        // active state.
+        //
+        encrypt_sequence_number = 0;
+        //
         // A Finished message is always sent immediately after a change
         // cipher spec message to verify that the key exchange and
         // authentication processes were successful
-        assert(pending_encrypt_cipher);
-        encrypt_cipher = std::move(pending_encrypt_cipher);
-        encrypt_sequence_number = 0;
+        //
         send_finished();
     }
 
@@ -355,9 +396,7 @@ private:
         //      All of the data from all messages in this handshake (not
         //      including any HelloRequest messages) up to, but not including,
         //      this message
-        std::cout << "Hash(handshake_messages) = " << util::base16_encode(handshake_message_digest.result()) << std::endl;
         auto verify_data = tls::PRF(master_secret, "client finished", handshake_message_digest.result(), tls::finished::verify_data_length);
-        std::cout << "Verify data: " << util::base16_encode(verify_data) << std::endl;
         assert(verify_data.size() == tls::finished::verify_data_length);
 
         std::vector<uint8_t> content;
@@ -402,30 +441,39 @@ private:
         FUNTLS_CHECK_BINARY(record.type,            ==, tls::content_type::change_cipher_spec, "Invalid content type");
         FUNTLS_CHECK_BINARY(record.fragment.size(), ==, 1, "Invalid ChangeCipherSpec fragment size");
         FUNTLS_CHECK_BINARY(record.fragment[0],     !=, 0, "Invalid ChangeCipherSpec fragment data");
-        std::cout << "Got ChangeCipherSpec from server\n";
-        assert(pending_decrypt_cipher);
+        std::cout << "Got ChangeCipherSpec\n";
+        //
+        // Reception of [the ChangeCipherSpec] message causes the receiver to instruct the record layer to
+        // immediately copy the read pending state into the read current state.
+        //
+        if (!pending_decrypt_cipher) {
+            FUNTLS_CHECK_FAILURE("Got ChangeCipherSpec without a pending cipher suite");
+        }
         decrypt_cipher = std::move(pending_decrypt_cipher);
         decrypt_sequence_number = 0;
     }
 
     void read_finished() {
         const auto record = read_record();
-        assert(record.type == tls::content_type::handshake);
+        FUNTLS_CHECK_BINARY(record.type, ==, tls::content_type::handshake, "Invalid record type");
         const auto& content = record.fragment;
         // Parse content
-        assert(content.size() >= 5);
-        assert(content[0] == (int)tls::handshake_type::finished);
-        assert(content[1] == 0);
-        assert(content[2] == 0);
-        assert(content[3] == tls::finished::verify_data_length);
-        assert(content.size() == 4U + content[3]);
+        FUNTLS_CHECK_BINARY(content.size(), >=, 5, "Invalid finished message");
+        FUNTLS_CHECK_BINARY(content[0], ==, (int)tls::handshake_type::finished, "Invalid finished message");
+        FUNTLS_CHECK_BINARY(content[1], ==, 0, "Invalid finished message");
+        FUNTLS_CHECK_BINARY(content[2], ==, 0, "Invalid finished message");
+        FUNTLS_CHECK_BINARY(content[3], ==, tls::finished::verify_data_length, "Invalid finished message");
+        FUNTLS_CHECK_BINARY(content.size(), ==, 4U + content[3], "Invalid finished message");
         const std::vector<uint8_t> verify_data{&content[4], &content[content.size()]};
 
-        std::cout << "verify_data\n" << util::base16_encode(verify_data) << std::endl;
-        std::cout << "Hash(handshake_messages) = " << util::base16_encode(handshake_message_digest.result()) << std::endl;
         const auto calced_verify_data = tls::PRF(master_secret, "server finished", handshake_message_digest.result(), tls::finished::verify_data_length);
-        std::cout << "calculated verify_data\n" << util::base16_encode(calced_verify_data) << std::endl;
-        assert(verify_data == calced_verify_data);
+        if (verify_data != calced_verify_data) {
+            std::ostringstream oss;
+            oss << "Got invalid finished message. verify_data check failed. Expected ";
+            oss << "'" << util::base16_encode(calced_verify_data) << "' Got";
+            oss << "'" << util::base16_encode(verify_data);
+            FUNTLS_CHECK_FAILURE(oss.str());
+        }
     }
 
     tls::record read_record() {

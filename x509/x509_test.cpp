@@ -17,6 +17,7 @@ using int_type = boost::multiprecision::cpp_int;
 
 #include <x509/x509.h>
 #include <x509/x509_rsa.h>
+#include <x509/x509_io.h>
 
 #include <util/test.h>
 #include <hash/hash.h>
@@ -36,43 +37,6 @@ void print_x509_v3(const x509::v3_certificate& cert)
     std::cout << "Signature algorithm: " << cert.signature_algorithm() << std::endl;
 }
 
-void check_x509_v3(const x509::v3_certificate& cert)
-{
-    auto c = cert.certificate();
-    FUNTLS_CHECK_BINARY(c.signature_algorithm, ==, x509::sha256WithRSAEncryption, "Unsupported signature algorithm");
-
-    // TODO: Check that it's self-signed
-
-    auto s_pk = rsa_public_key_from_certificate(cert);
-    std::cout << " Subject public key: n=0x" << util::base16_encode(s_pk.modolus.as_vector())
-        << " e=0x" << util::base16_encode(s_pk.public_exponent.as_vector()) << std::endl;
-    FUNTLS_CHECK_BINARY(s_pk.key_length() & (s_pk.key_length()-1), ==, 0, "Non pow2 key length?");
-
-    assert(cert.signature_algorithm() == x509::sha256WithRSAEncryption);
-    auto sig_value = cert.signature().as_vector();
-    std::cout << " " << sig_value.size() << " bits" << std::endl;
-    std::cout << " " << util::base16_encode(sig_value) << std::endl;
-
-    // Decode the signature using the issuers public key (here using the subjects PK since the cert is selfsigned)
-    const auto issuer_pk = s_pk;
-    auto digest = x509::pkcs1_decode(issuer_pk, cert.signature().as_vector());
-    std::cout << "Digest algorithm: " << digest.digest_algorithm << std::endl;
-    assert(digest.digest_algorithm == x509::id_sha256);
-    std::cout << "Digest: " << util::base16_encode(digest.digest) << std::endl;
-
-    const auto& cert_buf = cert.certificate_der_encoded();
-    const auto calced_digest = hash::sha256{}.input(cert_buf).result();
-    std::cout << "Calculated digest: " << util::base16_encode(calced_digest) << std::endl;
-
-    FUNTLS_ASSERT_EQUAL(calced_digest.size(), digest.digest.size());
-
-    if (!std::equal(calced_digest.begin(), calced_digest.end(), digest.digest.begin())) {
-        throw std::runtime_error("Digest mismatch in " + std::string(__PRETTY_FUNCTION__) + " Calculated: " +
-                util::base16_encode(calced_digest) + " Expected: " +
-                util::base16_encode(digest.digest));
-    }
-}
-
 std::vector<uint8_t> read_file(const std::string& filename)
 {
     std::ifstream in(filename, std::ios::binary);
@@ -89,64 +53,73 @@ std::vector<uint8_t> read_file(const std::string& filename)
     return buffer;
 }
 
-std::vector<uint8_t> read_pem_cert(std::istream& is)
-{
-    static const char* const begin_line = "-----BEGIN CERTIFICATE-----";
-    static const char* const end_line   = "-----END CERTIFICATE-----";
-
-    enum { before_first_line, reading_content } state = before_first_line;
-
-    std::string content;
-    for (std::string line; std::getline(is, line);) {
-        if (line == begin_line) {
-            if (state == before_first_line) {
-                state = reading_content;
-            } else if (state == reading_content) {
-                FUNTLS_CHECK_FAILURE("Two beginning markers found");
-            } else {
-                assert(false);
-            }
-         } else if (line == end_line) {
-            if (state == before_first_line) {
-                FUNTLS_CHECK_FAILURE("End marker reached before finding the beginning");
-            } else if (state == reading_content) {
-                return util::base64_decode(content);
-            }
-            assert(false);
-        } else {
-            if (state == before_first_line) {
-                // skip
-            } else if (state == reading_content) {
-                content += line;
-            } else {
-                assert(false);
-            }
-        }
-    }
-    FUNTLS_CHECK_FAILURE("End reached without finishing content");
-}
-
 std::ostream& operator<<(std::ostream& os, const std::vector<uint8_t>& a)  {
     return os << util::base16_encode(a);
 }
 
-x509::v3_certificate certificate_from_pem_string(const std::string& pem_data)
+std::vector<uint8_t> crude_get_pem_data(const std::string& s)
 {
-    std::istringstream cert_pem_data(pem_data);
-    auto cert_der_data = read_pem_cert(cert_pem_data);
-    assert(cert_der_data.size());
-    util::buffer_view cert_buf(&cert_der_data[0], cert_der_data.size());
-    return x509::v3_certificate::parse(asn1::read_der_encoded_value(cert_buf));
+    std::string data;
+    std::istringstream in(s);
+    for (std::string line; std::getline(in, line);) {
+        if (line.empty()) continue;
+        if (line[0] == '-') continue;
+        if (line.back() == '\r') line.pop_back();
+        FUNTLS_CHECK_BINARY(line.size(), <=, 72, "Illegal line length: '" + line + "'");
+        data += line;
+    }
+    return util::base64_decode(data);
+}
+
+void test_load_save(const std::vector<uint8_t>& der_data)
+{
+    std::ostringstream oss;
+
+    // Write as PEM data to string
+    x509::write_pem_certificate(oss, der_data);
+    const auto pem_data = oss.str();
+
+    // Did we get the expected result?
+    FUNTLS_ASSERT_EQUAL(der_data, crude_get_pem_data(pem_data));
+
+    // And can it be read?
+    auto cert = x509::read_pem_certificate(pem_data);
+
+    // Check it against the supplied data
+    util::buffer_view buf{&der_data[0], der_data.size()};
+    auto ccert = x509::v3_certificate::parse(asn1::read_der_encoded_value(buf));
+    FUNTLS_ASSERT_EQUAL(cert.certificate_der_encoded(), ccert.certificate_der_encoded());
+    FUNTLS_ASSERT_EQUAL(cert.signature_algorithm(), ccert.signature_algorithm());
+    FUNTLS_ASSERT_EQUAL(cert.signature().as_vector(), ccert.signature().as_vector());
+}
+
+void test_load_save(const std::string& pem_data)
+{
+    const auto der_data = crude_get_pem_data(pem_data);
+    test_load_save(der_data);
+}
+
+std::vector<x509::v3_certificate> read_pem_cert_chain(std::istream& in)
+{
+    std::vector<x509::v3_certificate> chain;
+    std::cout << "\n\n\n\n\n";
+    while (in && in.peek() != std::char_traits<char>::eof()) {
+        chain.push_back(x509::read_pem_certificate(in));
+    }
+    return chain;
 }
 
 #include "test_cert0.h"
 #include "test_cert1.h"
+#include "test_cert_chain0.h"
 
 int main()
 {
-    const auto cert0 = certificate_from_pem_string(test_cert0);
-    print_x509_v3(cert0);
-    check_x509_v3(cert0);
+    // TODO: Check x509::name equals operations. Only exact matches should be allowed (with order being important) etc.
+
+    const auto cert0 = x509::read_pem_certificate(test_cert0);
+    x509::verify_x509_certificate(cert0, cert0);
+    test_load_save(test_cert0);
     FUNTLS_ASSERT_EQUAL(int_type("11259235216357634699"), cert0.certificate().serial_number.as<int_type>());
     FUNTLS_ASSERT_EQUAL(x509::sha256WithRSAEncryption, cert0.certificate().signature_algorithm);
     auto a = cert0.certificate().issuer.attributes();
@@ -172,10 +145,47 @@ int main()
     FUNTLS_ASSERT_EQUAL(x509::attribute_type::common_name, a[3].first);
     FUNTLS_ASSERT_EQUAL("localhost", a[3].second);
     FUNTLS_ASSERT_EQUAL(x509::rsaEncryption, cert0.certificate().subject_public_key_algo);
+    FUNTLS_ASSERT_EQUAL(cert0.certificate().issuer, cert0.certificate().subject);
     // asn1::bit_string cert0.certificate().subject_public_key;
     FUNTLS_ASSERT_EQUAL(x509::sha256WithRSAEncryption, cert0.signature_algorithm());
     // asn1::bit_string cert0.signature
 
-    const auto cert1 = certificate_from_pem_string(test_cert1);
-    print_x509_v3(cert1);
+    const auto cert1 = x509::read_pem_certificate(test_cert1);
+    test_load_save(test_cert1);
+    FUNTLS_ASSERT_NOT_EQUAL(cert1.certificate().issuer, cert1.certificate().subject);
+    FUNTLS_ASSERT_THROWS(x509::verify_x509_certificate(cert1, cert1), std::runtime_error);
+
+    {
+        const auto root_cert = x509::read_pem_certificate(test_cert_chain0_root);
+        x509::verify_x509_certificate(root_cert, root_cert);
+        test_load_save(test_cert_chain0_root);
+        FUNTLS_ASSERT_EQUAL(root_cert.certificate().issuer, root_cert.certificate().subject);
+
+        std::istringstream chain_iss(test_cert_chain0);
+        const auto chain = read_pem_cert_chain(chain_iss);
+        FUNTLS_ASSERT_EQUAL(3U, chain.size());
+        FUNTLS_ASSERT_EQUAL(chain[2].certificate().issuer, root_cert.certificate().subject);
+        x509::verify_x509_certificate(chain[2], root_cert);
+        FUNTLS_ASSERT_EQUAL(chain[1].certificate().issuer, chain[2].certificate().subject);
+        x509::verify_x509_certificate(chain[1], chain[2]);
+        FUNTLS_ASSERT_EQUAL(chain[0].certificate().issuer, chain[1].certificate().subject);
+        x509::verify_x509_certificate(chain[0], chain[1]);
+
+        // Check that various invalid combinations aren't allowed
+        for (unsigned i = 0; i < chain.size(); ++i) {
+            FUNTLS_ASSERT_THROWS(x509::verify_x509_certificate(root_cert, chain[i]), std::runtime_error);
+            for (unsigned j = 0; j < chain.size(); ++j) {
+                if (i + 1 != j) {
+                    FUNTLS_ASSERT_THROWS(x509::verify_x509_certificate(chain[i], chain[j]), std::runtime_error);
+                }
+            }
+        }
+        FUNTLS_ASSERT_THROWS(x509::verify_x509_certificate_chain(chain), std::runtime_error);
+        auto complete_chain = chain; complete_chain.push_back(root_cert);
+        x509::verify_x509_certificate_chain(complete_chain);
+    }
+
+    FUNTLS_ASSERT_THROWS(x509::verify_x509_certificate_chain(std::vector<x509::v3_certificate>{}), std::runtime_error);
+    FUNTLS_ASSERT_THROWS(x509::verify_x509_certificate_chain(std::vector<x509::v3_certificate>{cert0}), std::runtime_error);
+    x509::verify_x509_certificate_chain(std::vector<x509::v3_certificate>{cert0, cert0});
 }

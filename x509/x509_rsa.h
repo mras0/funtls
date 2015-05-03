@@ -2,6 +2,7 @@
 #define FUNTLS_X509_X509_RSA_H_INCLUDED
 
 #include <x509/x509.h>
+#include <hash/hash.h>
 #include <memory>
 #include <cassert>
 #include <vector>
@@ -9,6 +10,7 @@
 namespace funtls { namespace x509 {
 
 static const asn1::object_id rsaEncryption{1,2,840,113549,1,1,1};
+static const asn1::object_id sha1WithRSAEncryption{1,2,840,113549,1,1,5};
 static const asn1::object_id sha256WithRSAEncryption{1,2,840,113549,1,1,11};
 static const asn1::object_id id_sha256{2,16,840,1,101,3,4,2,1};
 static const asn1::object_id id_sha1{1,3,14,3,2,26};
@@ -86,6 +88,20 @@ std::vector<uint8_t> base256_encode(IntType i, size_t byte_count)
     return result;
 }
 
+//
+// Checks the signature of the X509 v3 certificate 'subject_cert' against the issuers certificate
+// 'issuer_cert' (Note: ONLY against this issuer, i.e. the validity of the issuers certificate is
+// NOT verified).
+// Throws an exception if the verification failed.
+//
+void verify_x509_certificate(const v3_certificate& subject_cert, const v3_certificate& issuer_cert);
+
+//
+// Checks the trust chain backwards from the last element of 'chain' to the first
+// Ending with a self-signed root certificate. NOTE: The chain must contain at least
+// 2 elements.
+//
+void verify_x509_certificate_chain(const std::vector<v3_certificate>& chain);
 
 } } // namespace funtls::x509
 

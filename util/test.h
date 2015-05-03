@@ -33,7 +33,7 @@ void assert_failed(const char* func, const char* file, int line, const std::stri
 #define FUNTLS_ASSERT_THROWS(expr, exception_type) \
     FUNTLS_ASSERT_THROWS_MESSAGE(expr, exception_type, "")
 
-#define FUNTLS_CHECK_BINARY_(bin_op, expected, actual, message, fail)   \
+#define FUNTLS_CHECK_BINARY_(expected, bin_op, actual, message, fail)   \
     do {                                                                \
         const auto _a_val = (expected);                                 \
         const auto _b_val = (actual);                                   \
@@ -49,11 +49,14 @@ void assert_failed(const char* func, const char* file, int line, const std::stri
         }                                                               \
     } while (0)
 
-#define FUNTLS_ASSERT_BINARY_MESSAGE(bin_op, expected, actual, message) \
-    FUNTLS_CHECK_BINARY_(bin_op, expected, actual, message, funtls::test::assert_failed)
+#define FUNTLS_ASSERT_BINARY_MESSAGE(expected, bin_op, actual, message) \
+    FUNTLS_CHECK_BINARY_(expected, bin_op, actual, message, funtls::test::assert_failed)
 
-#define FUNTLS_ASSERT_EQUAL(expected, actual) FUNTLS_ASSERT_BINARY_MESSAGE(==, expected, actual, "")
-#define FUNTLS_ASSERT_EQUAL_MESSAGE(message, expected, actual) FUNTLS_ASSERT_BINARY_MESSAGE(==, expected, actual, message)
+#define FUNTLS_ASSERT_EQUAL(expected, actual) FUNTLS_ASSERT_BINARY_MESSAGE(expected, ==, actual, "")
+#define FUNTLS_ASSERT_EQUAL_MESSAGE(message, expected, actual) FUNTLS_ASSERT_BINARY_MESSAGE(expected, ==, actual, message)
+
+#define FUNTLS_ASSERT_NOT_EQUAL(expected, actual) FUNTLS_ASSERT_BINARY_MESSAGE(expected, !=, actual, "")
+#define FUNTLS_ASSERT_NOT_EQUAL_MESSAGE(message, expected, actual) FUNTLS_ASSERT_BINARY_MESSAGE(expected, !=, actual, message)
 
 #define FUNTLS_CHECK_BINARY(expected, bin_op, actual, message) \
-    FUNTLS_CHECK_BINARY_(bin_op, expected, actual, message, funtls::test::check_failed)
+    FUNTLS_CHECK_BINARY_(expected, bin_op, actual, message, funtls::test::check_failed)

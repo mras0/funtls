@@ -25,7 +25,7 @@ public:
         state_or_province_name = 8,
         //streetAddress = 9,
         organization_name = 10,
-        //organizationalUnitName = 11,
+        organizational_unit_name = 11,
         //title = 12,
         //description = 13,
         //searchGuide = 14,
@@ -113,6 +113,14 @@ public:
 private:
     attr_type attributes_;
 };
+
+inline bool operator==(const name& lhs, const name& rhs) {
+    return lhs.attributes() == rhs.attributes();
+}
+
+inline bool operator!=(const name& lhs, const name& rhs) {
+    return !(lhs == rhs);
+}
 
 std::ostream& operator<<(std::ostream& os, const name& n);
 

@@ -286,6 +286,21 @@ bool try_consume(std::string& in, const std::string& t)
 
 namespace funtls { namespace tls {
 
+hash::hash_algorithm get_hash(hash_algorithm algo)
+{
+    switch (algo) {
+    case hash_algorithm::none:   break;
+    case hash_algorithm::md5:    return hash::md5{};
+    case hash_algorithm::sha1:   return hash::sha1{};
+    case hash_algorithm::sha224: return hash::sha224{};
+    case hash_algorithm::sha256: return hash::sha256{};
+    case hash_algorithm::sha384: return hash::sha384{};
+    case hash_algorithm::sha512: return hash::sha512{};
+    }
+    assert(false);
+    FUNTLS_CHECK_FAILURE("Unimplemented hash algorithm " + std::to_string((int)algo));
+}
+
 hash::hash_algorithm get_hmac(mac_algorithm algo, const std::vector<uint8_t>& key)
 {
     switch (algo) {
