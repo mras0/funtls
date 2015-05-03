@@ -25,7 +25,7 @@ hash::hash_algorithm get_hash(const asn1::object_id& oid)
 
 asn1::object_id public_key_algo_from_signature_algo(const x509::algorithm_id& sig_algo)
 {
-    if (sig_algo.id() == x509::id_sha1WithRSAEncryption || sig_algo.id() == x509::id_sha256WithRSAEncryption) {
+    if (sig_algo.id() == x509::id_md2WithRSAEncryption || sig_algo.id() == x509::id_sha1WithRSAEncryption || sig_algo.id() == x509::id_sha256WithRSAEncryption) {
         FUNTLS_CHECK_BINARY(sig_algo.null_parameters(), ==, true, "Invalid algorithm parameters");
         return x509::id_rsaEncryption;
     }

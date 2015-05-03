@@ -148,6 +148,14 @@ der_encoded_value read_der_encoded_value(util::buffer_view& buffer)
     return {orig_buf.get_slice(offset + len), offset, id, len};
 }
 
+boolean::boolean(const der_encoded_value& repr)
+{
+    FUNTLS_CHECK_ID(repr.id());
+    auto buf = repr.content_view();
+    FUNTLS_CHECK_BINARY(buf.remaining(), ==, 1, "Invalid boolean length encountered");
+    repr_ = buf.get();
+}
+
 integer::integer(const der_encoded_value& repr)
 {
     FUNTLS_CHECK_ID(repr.id());

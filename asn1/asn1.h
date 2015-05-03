@@ -22,6 +22,7 @@ class identifier {
 public:
     static constexpr uint8_t constructed_bit = 0x20;
     enum tag : uint8_t {
+        boolean                 = 0x01,
         integer                 = 0x02,
         bit_string              = 0x03,
         octet_string            = 0x04,
@@ -127,13 +128,35 @@ using sequence_view = container_view<identifier::constructed_sequence>;
 using set_view = container_view<identifier::constructed_set>;
 
 //
+// ASN.1 BOOLEAN (tag = 0x01)
+//
+class boolean {
+public:
+    static constexpr auto id = identifier::boolean;
+
+    explicit boolean(const der_encoded_value& repr);
+    explicit boolean(bool b) : repr_(b) {
+    }
+
+    operator bool() const {
+        return repr_ != 0;
+    }
+
+    uint8_t repr() const {
+        return repr_;
+    }
+
+private:
+    uint8_t repr_;
+};
+//
 // ASN.1 INTEGER (tag = 0x02)
 //
 class integer {
 public:
     static constexpr auto id = identifier::integer;
 
-    integer(const der_encoded_value& repr);
+    explicit integer(const der_encoded_value& repr);
 
     // Would have liked to do this as an explicit conversion operator
     // but I couldn't get G++ 4.8.2 / boost mulitprecision 1.57.0 to play ball
@@ -299,6 +322,29 @@ public:
         : raw_string(detail::read_string(id, repr)) {
     }
 };
+
+class any_string : public raw_string {
+public:
+    any_string(const der_encoded_value& repr)
+        : raw_string(detail::read_string(repr.id(), repr))
+        , id_(repr.id()) {
+    }
+
+    identifier id() const {
+        return id_;
+    }
+
+private:
+    identifier id_;
+};
+
+inline bool operator==(const any_string& lhs, const any_string& rhs) {
+    return lhs.id() == rhs.id() && lhs.as_string() == rhs.as_string();
+}
+
+inline bool operator!=(const any_string& lhs, const any_string& rhs) {
+    return !(lhs == rhs);
+}
 
 using bit_string = string_base<identifier::bit_string>;
 using octet_string = string_base<identifier::octet_string>;

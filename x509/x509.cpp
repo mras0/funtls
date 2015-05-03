@@ -10,20 +10,6 @@ namespace {
 
 constexpr auto x509_version_tag = funtls::asn1::identifier::context_specific_tag_0;
 
-x509::attribute_type::tag attribute_tag_from_oid(const asn1::object_id& oid)
-{
-    // XXX: HACK: See header.
-    static const auto pkcs9_emailAddress = asn1::object_id{1,2,840,113549,1,9,1};
-    if (oid == pkcs9_emailAddress) {
-        return x509::attribute_type::tag::email_address;
-    }
-    FUNTLS_CHECK_BINARY(oid.size(), ==, 4, "Invalid X509 attribute " + oid.as_string());
-    FUNTLS_CHECK_BINARY(oid[0], ==, 2, "Invalid X509 attribute " + oid.as_string());
-    FUNTLS_CHECK_BINARY(oid[1], ==, 5, "Invalid X509 attribute " + oid.as_string());
-    FUNTLS_CHECK_BINARY(oid[2], ==, 4, "Invalid X509 attribute " + oid.as_string());
-    return static_cast<x509::attribute_type::tag>(oid[3]);
-}
-
 enum x509::version::tag version_tag_from_int(const asn1::integer& i)
 {
     FUNTLS_CHECK_BINARY(i.octet_count(), ==, 1, "Invalid X509 version");
@@ -62,23 +48,7 @@ x509::name::attr_type parse_name_attributes(const asn1::der_encoded_value& repr)
             auto av_pair = asn1::sequence_view{rdn_set.next()};
             auto attribute_type = x509::attribute_type{av_pair.next()};
             const auto value = av_pair.next();
-            std::string text;
-            // TODO: preserve type information
-            if (value.id() == asn1::identifier::printable_string) {
-                text = asn1::printable_string{value}.as_string();
-            } else if (value.id() == asn1::identifier::utf8_string) {
-                text = asn1::utf8_string{value}.as_string();
-            } else if (value.id() == asn1::identifier::t61_string) {
-                text = asn1::t61_string{value}.as_string();
-            } else if (value.id() == asn1::identifier::ia5_string) {
-                text = asn1::ia5_string{value}.as_string();
-            } else {
-                // Only TeletexString, UniversalString or BMPString allowed here
-                std::ostringstream oss;
-                oss << "Unsupported value type " << value.id() << " for attribute type " << attribute_type;
-                FUNTLS_CHECK_FAILURE(oss.str());
-            }
-            res.push_back(std::make_pair(attribute_type, text));
+            res.push_back(std::make_pair(attribute_type, asn1::any_string(value)));
             if (av_pair.has_next()) {
                 FUNTLS_CHECK_FAILURE("Excess data in X509 name attribute type/value pair");
             }
@@ -87,6 +57,28 @@ x509::name::attr_type parse_name_attributes(const asn1::der_encoded_value& repr)
     }
     return res;
 }
+
+std::vector<x509::extension> parse_extensions(const asn1::der_encoded_value& value)
+{
+    std::vector<x509::extension> ret;
+    auto extensions = asn1::sequence_view{value};
+    do {
+        auto ext = asn1::sequence_view{extensions.next()};
+        auto extnID = asn1::object_id{ext.next()};
+        auto next_elem = ext.next();
+        asn1::boolean critical{0};
+        if (next_elem.id() == asn1::identifier::boolean) {
+            critical  = asn1::boolean{next_elem};
+            next_elem = ext.next();
+        }
+        auto extnValue = asn1::octet_string{next_elem};
+        FUNTLS_CHECK_BINARY(ext.has_next(), ==, false, "Extra data at end of extension element");
+        ret.push_back(x509::extension{std::move(extnID), std::move(critical), std::move(extnValue)});
+    } while (extensions.has_next());
+
+    return ret;
+}
+
 
 std::vector<uint8_t> buffer_copy(const util::buffer_view& buf)
 {
@@ -102,23 +94,28 @@ std::vector<uint8_t> buffer_copy(const util::buffer_view& buf)
 namespace funtls { namespace x509 {
 
 attribute_type::attribute_type(const asn1::der_encoded_value& repr)
-    : tag_(attribute_tag_from_oid(asn1::object_id{repr}))
+    : attribute_type(asn1::object_id{repr})
 {
 }
 
 std::ostream& operator<<(std::ostream& os, const attribute_type& attr)
 {
-    switch (attr) {
-    case attribute_type::common_name:              return os << "CN";
-    case attribute_type::country_name:             return os << "C";
-    case attribute_type::locality_name:            return os << "L";
-    case attribute_type::state_or_province_name:   return os << "ST";
-    case attribute_type::organization_name:        return os << "O";
-    case attribute_type::organizational_unit_name: return os << "OU";
-    case attribute_type::email_address:            return os << "E";
+    if (attr == attr_commonName) {
+        return os << "CN";
+    } else if (attr == attr_countryName) {
+        return os << "C";
+    } else if (attr == attr_localityName) {
+        return os << "L";
+    } else if (attr == attr_stateOrProvinceName) {
+        return os << "ST";
+    } else if (attr == attr_organizationName) {
+        return os << "O";
+    } else if (attr == attr_organizationalUnitName) {
+        return os << "OU";
+    } else if (attr == attr_emailAddress) {
+        return os << "E";
     }
-    return os << "Unknown " << static_cast<uint32_t>(attr);
-    return os;
+    return os << "AttributeType<" << static_cast<asn1::object_id>(attr) << ">";
 }
 
 std::ostream& operator<<(std::ostream& os, const version& ver)
@@ -167,7 +164,7 @@ algorithm_id::algorithm_id(const asn1::der_encoded_value& repr)
 
 bool algorithm_id::null_parameters() const {
     if (parameters_.empty()) return true;
-    if (parameters_.size() == 2 && parameters_[0] == asn1::identifier::tag::null && parameters_[1] == 0) {
+    if (parameters_.size() == 2 && parameters_[0] == asn1::identifier::null && parameters_[1] == 0) {
         return true;
     }
     return false;
@@ -175,27 +172,59 @@ bool algorithm_id::null_parameters() const {
 
 std::ostream& operator<<(std::ostream& os, const algorithm_id& aid)
 {
-    os << aid.id();
+    const auto& id = aid.id();
+    if (id == id_rsaEncryption){
+        os << "rsaEncryption";
+    } else if (id == id_ecPublicKey){
+        os << "ecPublicKey";
+    } else if (id == id_md2WithRSAEncryption){
+        os << "md2WithRSAEncryption";
+    } else if (id == id_sha1WithRSAEncryption){
+        os << "sha1WithRSAEncryption";
+    } else if (id == id_sha256WithRSAEncryption){
+        os << "sha256WithRSAEncryption";
+    } else if (id == id_sha256){
+        os << "sha256";
+    } else if (id == id_sha1){
+        os << "sha1";
+    } else {
+        os << aid.id();
+    }
     if (!aid.null_parameters()) {
         os << "[parameters: " << util::base16_encode(aid.parameters()) << "]";
     }
     return os;
 }
 
-std::ostream& operator<<(std::ostream& os, const x509::certificate& cert)
+std::ostream& operator<<(std::ostream& os, const extension& e)
 {
-    auto c = cert.tbs();
-    os << "Certificate " << c.version << " :" << std::endl;
-    os << " Serial number: 0x" << util::base16_encode(c.serial_number.as_vector()) << std::endl;
-    os << " Signature algorithm: " << c.signature_algorithm <<  std::endl;
-    os << " Issuer: " << c.issuer << std::endl;
-    os << " Validity: Between " << c.validity_not_before << " and " << c.validity_not_after << std::endl;
-    os << " Subject: " << c.subject << std::endl;
-    os << " Subject public key algorithm: " << c.subject_public_key_algo << std::endl;
-    os << "Signature algorithm: " << cert.signature_algorithm() << std::endl;
+    os << "<";
+    if (e.critical) os << "Critical";
+    os << "Extension " << e.id << " " << util::base16_encode(e.value.as_vector());
+    os << ">";
     return os;
 }
 
+std::ostream& operator<<(std::ostream& os, const certificate& cert)
+{
+    auto c = cert.tbs();
+    os << "Certificate " << c.version << ":\n";
+    os << " Serial number: 0x" << util::base16_encode(c.serial_number.as_vector()) << "\n";
+    os << " Signature algorithm: " << c.signature_algorithm << " [Actual " << cert.signature_algorithm() << "]\n";
+    os << " Issuer: " << c.issuer << "\n";
+    os << " Validity: Between " << c.validity_not_before << " and " << c.validity_not_after << "\n";
+    os << " Subject: " << c.subject << "\n";
+    os << " Subject public key algorithm: " << c.subject_public_key_algo << "\n";
+    bool first = true;
+    for (const auto ext : c.extensions) {
+        if (first) {
+            os << "Extensions:\n";
+            first = false;
+        }
+        os << " " << ext << "\n";
+    }
+    return os;
+}
 
 tbs_certificate parse_tbs_certificate(const asn1::der_encoded_value& repr)
 {
@@ -232,19 +261,39 @@ tbs_certificate parse_tbs_certificate(const asn1::der_encoded_value& repr)
     // The public key is DER-encoded inside a bit string
     const auto subject_public_key = asn1::bit_string{pk_seq.next()};
     assert(!pk_seq.has_next());
- 
+
+    std::vector<extension> extensions;
+
     while (cert_seq.has_next()) {
         auto value = cert_seq.next();
         if (value.id() == asn1::identifier::context_specific_tag_1) {
-            assert(ver == version::v2 || ver == version::v3);
+            // issuerUniqueID  [1]  IMPLICIT UniqueIdentifier OPTIONAL -- If present, version MUST be v2 or v3
+            if (ver != version::v2 && ver != version::v3) {
+                std::ostringstream msg;
+                msg << value.id() << " not expected in version " << ver;
+                FUNTLS_CHECK_FAILURE(msg.str());
+            }
         } else if (value.id() == asn1::identifier::context_specific_tag_2) {
-            assert(ver == version::v2 || ver == version::v3);
+            // subjectUniqueID [2]  IMPLICIT UniqueIdentifier OPTIONAL -- If present, version MUST be v2 or v3
+            if (ver != version::v2 && ver != version::v3) {
+                std::ostringstream msg;
+                msg << value.id() << " not expected in version " << ver;
+                FUNTLS_CHECK_FAILURE(msg.str());
+            }
         } else if (value.id() == asn1::identifier::context_specific_tag_3) {
-            assert(ver == version::v3);
+            //  extensions [3]  EXPLICIT Extensions OPTIONAL -- If present, version MUST be v3
+            if (ver != version::v3) {
+                std::ostringstream msg;
+                msg << value.id() << " not expected in version " << ver;
+                FUNTLS_CHECK_FAILURE(msg.str());
+            }
+            auto extensions_buf = value.content_view();
+            extensions = parse_extensions(asn1::read_der_encoded_value(extensions_buf));
+            FUNTLS_CHECK_BINARY(extensions_buf.remaining(), ==, 0, "Invalid Extensions[3] element");
         } else {
-            std::ostringstream oss;
-            oss << "Unknown tag found in " << __PRETTY_FUNCTION__ << ": " << value;
-            throw std::runtime_error(oss.str());
+            std::ostringstream msg;
+            msg << "Unknown tag " << value;
+            FUNTLS_CHECK_FAILURE(msg.str());
         }
     }
 
@@ -257,7 +306,8 @@ tbs_certificate parse_tbs_certificate(const asn1::der_encoded_value& repr)
         notafter,
         subject,
         pk_algo_id,
-        subject_public_key
+        subject_public_key,
+        extensions
     };
 }
 

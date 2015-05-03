@@ -103,14 +103,49 @@ class tls_socket {
 public:
     typedef std::function<void (const std::vector<x509::certificate>&)> verify_certificate_chain_func;
 
-    explicit tls_socket(boost::asio::ip::tcp::socket& socket, const verify_certificate_chain_func& verify_certificate_chain)
+    explicit tls_socket(boost::asio::ip::tcp::socket& socket, const std::vector<tls::cipher_suite>& wanted_ciphers, const verify_certificate_chain_func& verify_certificate_chain)
         : socket(socket)
+        , wanted_ciphers_(wanted_ciphers)
         , verify_certificate_chain_(verify_certificate_chain)
         , client_random(tls::make_random()) {
+        assert(!wanted_ciphers_.empty());
+        assert(std::find(wanted_ciphers_.begin(), wanted_ciphers_.end(), tls::cipher_suite::null_with_null_null) == wanted_ciphers_.end());
+        perform_handshake();
     }
 
-    void perform_handshake(tls::cipher_suite wanted_cipher) {
-        this->wanted_cipher = wanted_cipher;
+    void send_app_data(const std::vector<uint8_t>& d) {
+        send_record(tls::content_type::application_data, d);
+    }
+
+    std::vector<uint8_t> next_app_data() {
+        const auto record = read_record();
+        FUNTLS_CHECK_BINARY(record.type, ==, tls::content_type::application_data, "Unexpected content type");
+        return record.fragment;
+    }
+
+private:
+    const tls::protocol_version     current_protocol_version = tls::protocol_version_tls_1_2;
+    boost::asio::ip::tcp::socket&   socket;
+    std::vector<tls::cipher_suite>  wanted_ciphers_;
+    tls::cipher_suite               negotiated_cipher_;
+    verify_certificate_chain_func   verify_certificate_chain_;
+    const tls::random               client_random;
+    tls::random                     server_random;
+    std::unique_ptr<
+        x509::rsa_public_key>       server_public_key;
+    std::unique_ptr<
+        tls::server_dh_params>      server_dh_params;
+    tls::session_id                 sesion_id;
+    std::vector<uint8_t>            master_secret;
+    hash::sha256                    handshake_message_digest;
+    uint64_t                        encrypt_sequence_number = 0;
+    uint64_t                        decrypt_sequence_number = 0;
+    std::unique_ptr<tls::cipher>    encrypt_cipher = tls::make_cipher(tls::null_cipher_parameters_e);
+    std::unique_ptr<tls::cipher>    decrypt_cipher = tls::make_cipher(tls::null_cipher_parameters_d);
+    std::unique_ptr<tls::cipher>    pending_encrypt_cipher;
+    std::unique_ptr<tls::cipher>    pending_decrypt_cipher;
+
+    void perform_handshake() {
         /*
         Client                                               Server
 
@@ -130,7 +165,6 @@ public:
         Application Data             <------->     Application Data
         */
 
-        std::cout << "Requesting " << wanted_cipher << std::endl;
         send_client_hello();
         read_server_hello();
         read_until_server_hello_done();
@@ -141,38 +175,6 @@ public:
 
         std::cout << "Session " << util::base16_encode(sesion_id.as_vector()) << " in progress\n";
     }
-
-    void send_app_data(const std::vector<uint8_t>& d) {
-        send_record(tls::content_type::application_data, d);
-    }
-
-    std::vector<uint8_t> next_app_data() {
-        const auto record = read_record();
-        FUNTLS_CHECK_BINARY(record.type, ==, tls::content_type::application_data, "Unexpected content type");
-        return record.fragment;
-    }
-
-private:
-    const tls::protocol_version     current_protocol_version = tls::protocol_version_tls_1_2;
-    tls::cipher_suite               wanted_cipher;
-
-    boost::asio::ip::tcp::socket&   socket;
-    verify_certificate_chain_func   verify_certificate_chain_;
-    const tls::random               client_random;
-    tls::random                     server_random;
-    std::unique_ptr<
-        x509::rsa_public_key>       server_public_key;
-    std::unique_ptr<
-        tls::server_dh_params>      server_dh_params;
-    tls::session_id                 sesion_id;
-    std::vector<uint8_t>            master_secret;
-    hash::sha256                    handshake_message_digest;
-    uint64_t                        encrypt_sequence_number = 0;
-    uint64_t                        decrypt_sequence_number = 0;
-    std::unique_ptr<tls::cipher>    encrypt_cipher = tls::make_cipher(tls::null_cipher_parameters_e);
-    std::unique_ptr<tls::cipher>    decrypt_cipher = tls::make_cipher(tls::null_cipher_parameters_d);
-    std::unique_ptr<tls::cipher>    pending_encrypt_cipher;
-    std::unique_ptr<tls::cipher>    pending_decrypt_cipher;
 
     // TODO: This only works when the payload isn't encrypted/compressed
     template<typename Payload>
@@ -205,7 +207,7 @@ private:
                 current_protocol_version,
                 client_random,
                 sesion_id,
-                { wanted_cipher },
+                wanted_ciphers_,
                 { tls::compression_method::null },
             }
         ));
@@ -214,14 +216,16 @@ private:
     void read_server_hello() {
         auto handshake = read_handshake();
         auto server_hello = tls::get_as<tls::server_hello>(handshake);
-        if (server_hello.cipher_suite != wanted_cipher) {
-            throw std::runtime_error("Invalid cipher suite " + util::base16_encode(&server_hello.cipher_suite, 2));
+        negotiated_cipher_ = server_hello.cipher_suite;
+        if (std::find(wanted_ciphers_.begin(), wanted_ciphers_.end(), negotiated_cipher_) == wanted_ciphers_.end()) {
+            throw std::runtime_error("Invalid cipher suite returned " + util::base16_encode(&server_hello.cipher_suite, 2));
         }
         if (server_hello.compression_method != tls::compression_method::null) {
             throw std::runtime_error("Invalid compression method " + std::to_string((int)server_hello.compression_method));
         }
         server_random = server_hello.random;
         sesion_id = server_hello.session_id;
+        std::cout << "Negotiated cipher suite:\n" << tls::parameters_from_suite(negotiated_cipher_) << std::endl;
     }
 
     // TODO: Improve this function
@@ -235,7 +239,7 @@ private:
             tls::handshake_type::server_hello_done
         };
 
-        const auto cipher_param = tls::parameters_from_suite(wanted_cipher);
+        const auto cipher_param = tls::parameters_from_suite(negotiated_cipher_);
         std::unique_ptr<tls::server_key_exchange_dhe> dhe_kex;
 
         static const size_t num_handshake_order = sizeof(handshake_order)/sizeof(*handshake_order);
@@ -299,7 +303,7 @@ private:
     }
 
     void send_client_key_exchange() {
-        const auto cipher_param = tls::parameters_from_suite(wanted_cipher);
+        const auto cipher_param = tls::parameters_from_suite(negotiated_cipher_);
         std::vector<uint8_t> pre_master_secret;
         tls::handshake       client_key_exchange;
         if (cipher_param.key_exchange_algorithm == tls::key_exchange_algorithm::rsa) {
@@ -604,7 +608,7 @@ void verify_cert_chain(const std::vector<x509::certificate>& certlist, const tru
     FUNTLS_CHECK_BINARY(certlist.size(), >, 0, "Empty certificate chain not allowed");
     const auto self_signed = certlist.back().tbs().subject == certlist.back().tbs().issuer;
     if (certlist.size() == 1 && self_signed) {
-        std::cout << "Checking self-signed certificate for " << certlist[0].tbs().subject << std::endl;
+        std::cout << "Checking self-signed certificate\n" << certlist[0] << std::endl;
         x509::verify_x509_certificate(certlist[0], certlist[0]);
         return;
     }
@@ -615,24 +619,38 @@ void verify_cert_chain(const std::vector<x509::certificate>& certlist, const tru
         auto certs = ts.find(root_issuer_name);
         if (certs.empty()) {
             std::ostringstream oss;
-            oss << "No certificate found in trust store for " << root_issuer_name;
+            oss << "No valid certificate found in trust store for " << root_issuer_name;
             FUNTLS_CHECK_FAILURE(oss.str());
         }
-        if (certs.size()) {
-            std::cout << "Warning: Multiple certificates match (only trying first):\n";
-            for (const auto& c : certs) {
-                std::cout << " " << c->tbs().subject << std::endl;
+        const x509::certificate* cert = nullptr;
+        for (const auto& c : certs) {
+            try {
+                verify_x509_certificate(*c, *c);
+                if (!cert) {
+                    cert = c;
+                } else {
+                    std::cout << "Warning multiple certificates could be used for " << c->tbs().subject << std::endl;
+                }
+            } catch (const std::exception& e) {
+                std::cout << "Warning: Could not use " << c->tbs().subject << " : " << e.what() << std::endl;
             }
         }
-        complete_chain.push_back(*certs.front());
+        if (!cert) {
+            std::ostringstream oss;
+            oss << "No valid certificate found in trust store for " << root_issuer_name;
+            FUNTLS_CHECK_FAILURE(oss.str());
+        }
+        complete_chain.push_back(*cert);
     }
+    std::cout << "Verifying trust chain:\n";
+    for (const auto& cert : complete_chain) std::cout << cert << std::endl << std::endl;
     x509::verify_x509_certificate_chain(complete_chain);
 }
 
 int main(int argc, char* argv[])
 {
-    if (argc != 2 && argc != 3) {
-        std::cout << "Usage: " << argv[0] << " https-uri [cipher]\n";
+    if (argc < 2) {
+        std::cout << "Usage: " << argv[0] << " https-uri [cipher...]\n";
         return 0;
     }
 
@@ -662,16 +680,37 @@ int main(int argc, char* argv[])
     std::cout << "host: " << host << ":" << port << std::endl;
     std::cout << "path: " << path << std::endl;
 
-    const std::string wanted_cipher_txt = argc >= 3 ? argv[2] : "rsa_with_aes_128_gcm_sha256";//"rsa_with_aes_256_cbc_sha256";
-    tls::cipher_suite wanted_cipher = tls::cipher_suite::null_with_null_null;
-    FUNTLS_CHECK_BINARY(bool(std::istringstream(wanted_cipher_txt)>>wanted_cipher), !=, false, "Invalid cipher " + wanted_cipher_txt);
-    FUNTLS_CHECK_BINARY(wanted_cipher, !=, tls::cipher_suite::null_with_null_null, "Invalid cipher " + wanted_cipher_txt);
+    std::vector<tls::cipher_suite> wanted_ciphers{
+        tls::cipher_suite::rsa_with_aes_128_gcm_sha256,
+        tls::cipher_suite::dhe_rsa_with_aes_256_cbc_sha256,
+        tls::cipher_suite::dhe_rsa_with_aes_128_cbc_sha256,
+        tls::cipher_suite::dhe_rsa_with_aes_256_cbc_sha,
+        tls::cipher_suite::dhe_rsa_with_aes_128_cbc_sha,
+        tls::cipher_suite::rsa_with_aes_256_cbc_sha256,
+        tls::cipher_suite::rsa_with_aes_128_cbc_sha256,
+        tls::cipher_suite::rsa_with_aes_256_cbc_sha,
+        tls::cipher_suite::rsa_with_aes_128_cbc_sha,
+        tls::cipher_suite::dhe_rsa_with_3des_ede_cbc_sha,
+        tls::cipher_suite::rsa_with_3des_ede_cbc_sha,
+        tls::cipher_suite::rsa_with_rc4_128_sha,
+        tls::cipher_suite::rsa_with_rc4_128_md5,
+    };
+    if (argc > 2) {
+        wanted_ciphers.clear();
+        for (int arg = 2; arg < argc; ++arg) {
+            std::string wanted_cipher_txt = argv[arg];
+            tls::cipher_suite wanted_cipher = tls::cipher_suite::null_with_null_null;
+            FUNTLS_CHECK_BINARY(bool(std::istringstream(wanted_cipher_txt)>>wanted_cipher), !=, false, "Invalid cipher " + wanted_cipher_txt);
+            FUNTLS_CHECK_BINARY(wanted_cipher, !=, tls::cipher_suite::null_with_null_null, "Invalid cipher " + wanted_cipher_txt);
+            wanted_ciphers.push_back(wanted_cipher);
+        }
+    }
+    FUNTLS_CHECK_BINARY(wanted_ciphers.size(), !=, 0, "No ciphers");
 
     trust_store ts;
     //add_certificates_from_directory_to_trust_store(ts, "/etc/ssl/certs");
     add_all_certs_to_trust_store(ts, "/etc/ssl/certs/ca-certificates.crt");
 
-    std::cout << "Cipher suite: " << tls::parameters_from_suite(wanted_cipher) << std::endl;
     try {
         boost::asio::io_service         io_service;
         boost::asio::ip::tcp::socket    socket(io_service);
@@ -681,10 +720,7 @@ int main(int argc, char* argv[])
         boost::asio::connect(socket, resolver.resolve({host, port}));
         std::cout << " OK" << std::endl;
         tls_socket::verify_certificate_chain_func cf = std::bind(&verify_cert_chain, std::placeholders::_1, ts);
-        tls_socket ts{socket, cf};
-        ts.perform_handshake(wanted_cipher);
-
-        std::cout << "Completed handshake!\n";
+        tls_socket ts{socket, wanted_ciphers, cf};
 
         const auto data = "GET "+path+" HTTP/1.1\r\nHost: "+host+"\r\nConnection: close\r\n\r\n";
         ts.send_app_data(std::vector<uint8_t>(data.begin(), data.end()));
