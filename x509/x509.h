@@ -94,17 +94,25 @@ std::ostream& operator<<(std::ostream& os, const attribute_type& attr);
 class version {
 public:
     enum tag { v1 = 0, v2 = 1, v3 = 2 };
-    version(const asn1::der_encoded_value& repr);
-    version(tag t) : tag_(t) {
+
+    version(tag t = v1) : tag_(t) {
         assert(t == v1 || t == v2 || t == v3);
     }
 
-    operator tag() const {
+    enum tag tag() const {
         return tag_;
     }
 private:
-    tag tag_;
+    enum tag tag_;
 };
+
+inline bool operator==(const version& lhs, const version& rhs) {
+    return lhs.tag() == rhs.tag();
+}
+
+inline bool operator!=(const version& lhs, const version& rhs) {
+    return !(lhs == rhs);
+}
 
 std::ostream& operator<<(std::ostream& os, const version& attr);
 
@@ -130,22 +138,55 @@ inline bool operator!=(const name& lhs, const name& rhs) {
 
 std::ostream& operator<<(std::ostream& os, const name& n);
 
+class algorithm_id {
+public:
+    algorithm_id(const asn1::der_encoded_value& repr);
+
+    const asn1::object_id& id() const {
+        return id_;
+    }
+
+    bool null_parameters() const;
+
+    const std::vector<uint8_t>& parameters() const {
+        return parameters_;
+    }
+private:
+    asn1::object_id id_;
+    std::vector<uint8_t> parameters_;
+};
+
+inline bool operator==(const algorithm_id& lhs, const algorithm_id& rhs) {
+    if (lhs.id() != rhs.id()) return false;
+    if (lhs.null_parameters()) return rhs.null_parameters();
+    if (rhs.null_parameters()) return false;
+    return lhs.parameters() == rhs.parameters();
+}
+
+inline bool operator!=(const algorithm_id& lhs, const algorithm_id& rhs) {
+    return !(lhs == rhs);
+}
+
+std::ostream& operator<<(std::ostream& os, const algorithm_id& aid);
+
+// TBS = To Be Signed
 struct tbs_certificate {
+    x509::version    version;
     asn1::integer    serial_number;
-    asn1::object_id  signature_algorithm;
+    algorithm_id     signature_algorithm;
     name             issuer;
     asn1::utc_time   validity_not_before;
     asn1::utc_time   validity_not_after;
     name             subject;
-    asn1::object_id  subject_public_key_algo;
+    algorithm_id     subject_public_key_algo;
     asn1::bit_string subject_public_key;
 };
 
-struct v3_certificate {
+struct certificate {
 public:
-    static v3_certificate parse(const asn1::der_encoded_value&);
+    static certificate parse(const asn1::der_encoded_value&);
 
-    const tbs_certificate& certificate() const {
+    const tbs_certificate& tbs() const {
         return tbs_certificate_;
     }
 
@@ -153,7 +194,7 @@ public:
         return tbs_certificate_der_encoded_;
     }
 
-    const asn1::object_id& signature_algorithm() const {
+    const algorithm_id& signature_algorithm() const {
         return signature_algorithm_;
     }
 
@@ -162,7 +203,7 @@ public:
     }
 
 private:
-    v3_certificate(tbs_certificate&& tbs_cert, std::vector<uint8_t>&& encoded_cert, asn1::object_id&& sig_alg, asn1::bit_string&& sig)
+    certificate(tbs_certificate&& tbs_cert, std::vector<uint8_t>&& encoded_cert, algorithm_id&& sig_alg, asn1::bit_string&& sig)
         : tbs_certificate_(std::move(tbs_cert))
         , tbs_certificate_der_encoded_(std::move(encoded_cert))
         , signature_algorithm_(sig_alg)
@@ -171,11 +212,20 @@ private:
 
     tbs_certificate         tbs_certificate_;
     std::vector<uint8_t>    tbs_certificate_der_encoded_;
-    asn1::object_id         signature_algorithm_;
+    algorithm_id            signature_algorithm_;
     asn1::bit_string        signature_;
 };
 
-asn1::object_id read_algorithm_identifer(const asn1::der_encoded_value& value);
+std::ostream& operator<<(std::ostream& os, const x509::certificate& cert);
+
+static const asn1::object_id id_rsaEncryption{1,2,840,113549,1,1,1};
+static const asn1::object_id id_ecPublicKey{1,2,840,10045,2,1}; // https://tools.ietf.org/html/rfc5480
+
+static const asn1::object_id id_sha1WithRSAEncryption{1,2,840,113549,1,1,5};
+static const asn1::object_id id_sha256WithRSAEncryption{1,2,840,113549,1,1,11};
+
+static const asn1::object_id id_sha256{2,16,840,1,101,3,4,2,1};
+static const asn1::object_id id_sha1{1,3,14,3,2,26};
 
 } } // namespace funtls::x509
 

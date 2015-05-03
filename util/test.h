@@ -1,6 +1,5 @@
 #include <sstream>
 #include <string>
-#include <iomanip>
 #include <cstdlib>
 
 namespace funtls { namespace test {
@@ -42,7 +41,6 @@ void assert_failed(const char* func, const char* file, int line, const std::stri
             oss << "Expected:\n" << #expected << " "                    \
                 << #bin_op << " " << #actual << "\n"                    \
                 << "Failure:\n"                                         \
-                << std::hex << std::showbase                            \
                 << "\"" << _a_val << "\" " << #bin_op << " \""          \
                 << _b_val << "\"\n" << message;                         \
             fail(__PRETTY_FUNCTION__, __FILE__, __LINE__, oss.str());   \

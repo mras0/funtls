@@ -23,21 +23,24 @@ hash::hash_algorithm get_hash(const asn1::object_id& oid)
     FUNTLS_CHECK_FAILURE(oss.str());
 }
 
-asn1::object_id public_key_algo_from_signature_algo(const asn1::object_id& sig_algo)
+asn1::object_id public_key_algo_from_signature_algo(const x509::algorithm_id& sig_algo)
 {
-    if (sig_algo == x509::sha1WithRSAEncryption || sig_algo == x509::sha256WithRSAEncryption) {
-        return x509::rsaEncryption;
+    if (sig_algo.id() == x509::id_sha1WithRSAEncryption || sig_algo.id() == x509::id_sha256WithRSAEncryption) {
+        FUNTLS_CHECK_BINARY(sig_algo.null_parameters(), ==, true, "Invalid algorithm parameters");
+        return x509::id_rsaEncryption;
     }
     std::ostringstream oss;
     oss << "Unknown signature algorithm " << sig_algo;
     FUNTLS_CHECK_FAILURE(oss.str());
 }
 
-asn1::object_id digest_algo_from_signature_algo(const asn1::object_id& sig_algo)
+asn1::object_id digest_algo_from_signature_algo(const x509::algorithm_id& sig_algo)
 {
-    if (sig_algo == x509::sha1WithRSAEncryption) {
+    if (sig_algo.id() == x509::id_sha1WithRSAEncryption) {
+        FUNTLS_CHECK_BINARY(sig_algo.null_parameters(), ==, true, "Invalid algorithm parameters");
         return x509::id_sha1;
-    } else if (sig_algo == x509::sha256WithRSAEncryption) {
+    } else if (sig_algo.id() == x509::id_sha256WithRSAEncryption) {
+        FUNTLS_CHECK_BINARY(sig_algo.null_parameters(), ==, true, "Invalid algorithm parameters");
         return x509::id_sha256;
     }
     std::ostringstream oss;
@@ -98,7 +101,7 @@ digest_info pkcs1_decode(const rsa_public_key& pk, const std::vector<uint8_t>& d
     auto digest_info = asn1::sequence_view{asn1::read_der_encoded_value(digest_buf)};
     FUNTLS_CHECK_BINARY(digest_buf.remaining(), ==, 0, "Invalid PKCS#1 1.5 signature");
 
-    auto digest_algo = x509::read_algorithm_identifer(digest_info.next());
+    auto digest_algo = x509::algorithm_id(digest_info.next());
     auto digest = asn1::octet_string{digest_info.next()}.as_vector();
     FUNTLS_CHECK_BINARY(digest_info.has_next(), ==, false, "Invalid PKCS#1 1.5 signature");
 
@@ -149,27 +152,29 @@ std::vector<uint8_t> pkcs1_encode(const x509::rsa_public_key& key, const std::ve
     return C;
 }
 
-rsa_public_key rsa_public_key_from_certificate(const v3_certificate& cert)
+rsa_public_key rsa_public_key_from_certificate(const certificate& cert)
 {
-    FUNTLS_CHECK_BINARY(cert.certificate().subject_public_key_algo, ==, rsaEncryption, "Unsupported public key algorithm");
-    const auto vec = cert.certificate().subject_public_key.as_vector();
+    FUNTLS_CHECK_BINARY(cert.tbs().subject_public_key_algo.id(), ==, id_rsaEncryption, "Invalid algorithm");
+    FUNTLS_CHECK_BINARY(cert.tbs().subject_public_key_algo.null_parameters(), ==, true, "Invalid algorithm parameters");
+    const auto vec = cert.tbs().subject_public_key.as_vector();
     util::buffer_view pk_buf{&vec[0], vec.size()};
     return x509::rsa_public_key::parse(asn1::read_der_encoded_value(pk_buf));
 }
 
-void verify_x509_certificate(const v3_certificate& subject_cert, const v3_certificate& issuer_cert)
+void verify_x509_certificate(const certificate& subject_cert, const certificate& issuer_cert)
 {
-    auto c = subject_cert.certificate();
-    FUNTLS_ASSERT_EQUAL(x509::rsaEncryption, public_key_algo_from_signature_algo(subject_cert.signature_algorithm()));
-    FUNTLS_CHECK_BINARY(subject_cert.signature_algorithm(), ==, subject_cert.certificate().signature_algorithm, "Signature algorihtm mismatch");
+    auto c = subject_cert.tbs();
+    FUNTLS_CHECK_BINARY(x509::id_rsaEncryption, ==, public_key_algo_from_signature_algo(subject_cert.signature_algorithm()), "Only RSA supported");
+    FUNTLS_CHECK_BINARY(subject_cert.signature_algorithm(), ==, subject_cert.tbs().signature_algorithm, "Signature algorihtm mismatch");
 
-    FUNTLS_CHECK_BINARY(c.issuer, ==, issuer_cert.certificate().subject, "Issuer certificate does not match");
+    FUNTLS_CHECK_BINARY(c.issuer, ==, issuer_cert.tbs().subject, "Issuer certificate does not match");
 
     const auto digest_algo = digest_algo_from_signature_algo(subject_cert.signature_algorithm());
 
     // Decode the signature using the issuers public key
     auto digest = x509::pkcs1_decode(rsa_public_key_from_certificate(issuer_cert), subject_cert.signature().as_vector());
-    FUNTLS_CHECK_BINARY(digest.digest_algorithm, ==, digest_algo, "Digest algorithm mismatch");
+    FUNTLS_CHECK_BINARY(digest.digest_algorithm.null_parameters(), ==, true, "Invalid digest algorithm parameters");
+    FUNTLS_CHECK_BINARY(digest.digest_algorithm.id(), ==, digest_algo, "Digest algorithm mismatch");
 
     const auto computed_sig = get_hash(digest_algo).input(subject_cert.certificate_der_encoded()).result();
     if (digest.digest != computed_sig) {
@@ -181,7 +186,7 @@ void verify_x509_certificate(const v3_certificate& subject_cert, const v3_certif
     }
 }
 
-void verify_x509_certificate_chain(const std::vector<v3_certificate>& chain)
+void verify_x509_certificate_chain(const std::vector<certificate>& chain)
 {
     FUNTLS_CHECK_BINARY(chain.size(), >=, 2, "Chain too short"); // This function shouldn't be used to check a single self-signed certificate
     verify_x509_certificate(chain.back(), chain.back());

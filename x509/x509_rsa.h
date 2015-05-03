@@ -9,12 +9,6 @@
 
 namespace funtls { namespace x509 {
 
-static const asn1::object_id rsaEncryption{1,2,840,113549,1,1,1};
-static const asn1::object_id sha1WithRSAEncryption{1,2,840,113549,1,1,5};
-static const asn1::object_id sha256WithRSAEncryption{1,2,840,113549,1,1,11};
-static const asn1::object_id id_sha256{2,16,840,1,101,3,4,2,1};
-static const asn1::object_id id_sha1{1,3,14,3,2,26};
-
 struct rsa_public_key {
     asn1::integer modolus;           // n
     asn1::integer public_exponent;   // e
@@ -35,14 +29,14 @@ struct rsa_public_key {
 };
 
 struct digest_info {
-    asn1::object_id         digest_algorithm;
+    x509::algorithm_id      digest_algorithm;
     std::vector<uint8_t>    digest;
 };
 
 digest_info pkcs1_decode(const rsa_public_key& pk, const std::vector<uint8_t>& data);
 std::vector<uint8_t> pkcs1_encode(const x509::rsa_public_key& key, const std::vector<uint8_t>& message, void (*get_random_bytes)(void*, size_t));
 
-rsa_public_key rsa_public_key_from_certificate(const v3_certificate& cert);
+rsa_public_key rsa_public_key_from_certificate(const certificate& cert);
 
 // Actually PKCS#1 RFC3447 stuff:
 
@@ -95,7 +89,7 @@ std::vector<uint8_t> base256_encode(IntType i, size_t byte_count)
 // NOTE: validaty dates are not yet checked
 // Throws an exception if the verification failed.
 //
-void verify_x509_certificate(const v3_certificate& subject_cert, const v3_certificate& issuer_cert);
+void verify_x509_certificate(const certificate& subject_cert, const certificate& issuer_cert);
 
 //
 // Checks the trust chain backwards from the last element of 'chain' to the first
@@ -103,7 +97,7 @@ void verify_x509_certificate(const v3_certificate& subject_cert, const v3_certif
 // 2 elements.
 // NOTE: validaty dates are not yet checked
 //
-void verify_x509_certificate_chain(const std::vector<v3_certificate>& chain);
+void verify_x509_certificate_chain(const std::vector<certificate>& chain);
 
 } } // namespace funtls::x509
 

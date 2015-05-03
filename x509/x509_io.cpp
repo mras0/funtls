@@ -74,21 +74,21 @@ void write_pem_data(std::ostream& os, const char* const begin_line, const char* 
 
 namespace funtls { namespace x509 {
 
-v3_certificate read_pem_certificate(std::istream& is)
+certificate read_pem_certificate(std::istream& is)
 {
     auto cert_der_data = read_pem_data(is, cert_begin_line, cert_end_line);
     assert(cert_der_data.size());
     util::buffer_view cert_buf(&cert_der_data[0], cert_der_data.size());
-    return v3_certificate::parse(asn1::read_der_encoded_value(cert_buf));
+    return certificate::parse(asn1::read_der_encoded_value(cert_buf));
 }
 
-v3_certificate read_pem_certificate_from_string(const std::string& s)
+certificate read_pem_certificate_from_string(const std::string& s)
 {
     std::istringstream iss(s);
     return read_pem_certificate(iss);
 }
 
-v3_certificate read_pem_certificate_from_file(const std::string& filename)
+certificate read_pem_certificate_from_file(const std::string& filename)
 {
     std::ifstream in(filename, std::ifstream::binary);
 

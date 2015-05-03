@@ -217,8 +217,15 @@ std::ostream& operator<<(std::ostream& os, const object_id& oid)
 }
 
 utc_time::utc_time(const der_encoded_value& repr) {
-    FUNTLS_CHECK_ID(repr.id());
     auto utc_time_buf = repr.content_view();
+    if (repr.id() == identifier::tag::generalized_time) {
+        // HACK:
+        std::string s(utc_time_buf.remaining(), '\0');
+        utc_time_buf.read(&s[0], s.length());
+        repr_ = "HACK in " + std::string(__FILE__) + ":" + std::to_string(__LINE__) + s;
+        return;
+    }
+    FUNTLS_CHECK_ID(repr.id());
 
     FUNTLS_CHECK_BINARY(utc_time_buf.remaining(), >=, 11, "Not enough data for UTCTime");
 

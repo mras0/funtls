@@ -71,7 +71,8 @@ void verify_dhe_signature(const tls::server_key_exchange_dhe& dhe_kex, const x50
     //std::cout << "Verifying server DHE signature\n";
     FUNTLS_CHECK_BINARY(dhe_kex.signature_algorithm, ==, tls::signature_algorithm::rsa, "");
     const auto digest = x509::pkcs1_decode(public_key, dhe_kex.signature.as_vector());
-    if (digest.digest_algorithm == x509::id_sha1) {
+    if (digest.digest_algorithm.id() == x509::id_sha1) {
+        FUNTLS_CHECK_BINARY(digest.digest_algorithm.null_parameters(), ==, true, "Invalid algorithm parameters");
         FUNTLS_CHECK_BINARY(tls::hash_algorithm::sha1, ==, dhe_kex.hash_algorithm, "");
     } else {
         // What hash algorithm should be used? What if there's a mismatch?
@@ -100,7 +101,7 @@ void verify_dhe_signature(const tls::server_key_exchange_dhe& dhe_kex, const x50
 
 class tls_socket {
 public:
-    typedef std::function<void (const std::vector<x509::v3_certificate>&)> verify_certificate_chain_func;
+    typedef std::function<void (const std::vector<x509::certificate>&)> verify_certificate_chain_func;
 
     explicit tls_socket(boost::asio::ip::tcp::socket& socket, const verify_certificate_chain_func& verify_certificate_chain)
         : socket(socket)
@@ -274,11 +275,11 @@ private:
             throw std::runtime_error("Unsupported number of certificate lists: " + std::to_string(certificate_lists.size()));
         }
 
-        std::vector<x509::v3_certificate> certlist;
+        std::vector<x509::certificate> certlist;
         for (const auto& c : certificate_lists[0].certificate_list) {
             const auto v = c.as_vector();
             auto cert_buf = util::buffer_view{&v[0], v.size()};
-            certlist.push_back(x509::v3_certificate::parse(asn1::read_der_encoded_value(cert_buf)));
+            certlist.push_back(x509::certificate::parse(asn1::read_der_encoded_value(cert_buf)));
         }
 
         FUNTLS_CHECK_BINARY(certlist.size(), >, 0, "Empty certificate chain not allowed");
@@ -520,13 +521,13 @@ class trust_store {
 public:
     trust_store() {}
 
-    void add(x509::v3_certificate&& cert)      { certs_.push_back(std::move(cert)); }
-    void add(const x509::v3_certificate& cert) { certs_.push_back(cert); }
+    void add(x509::certificate&& cert)      { certs_.push_back(std::move(cert)); }
+    void add(const x509::certificate& cert) { certs_.push_back(cert); }
 
-    std::vector<const x509::v3_certificate*> find(const x509::name& subject_name) const {
-        std::vector<const x509::v3_certificate*> res;
+    std::vector<const x509::certificate*> find(const x509::name& subject_name) const {
+        std::vector<const x509::certificate*> res;
         for (const auto& cert : certs_) {
-            if (cert.certificate().subject == subject_name) {
+            if (cert.tbs().subject == subject_name) {
                 res.push_back(&cert);
             }
         }
@@ -534,7 +535,7 @@ public:
     }
 
 private:
-    std::vector<x509::v3_certificate> certs_;
+    std::vector<x509::certificate> certs_;
 };
 
 #include <sys/types.h>
@@ -570,30 +571,46 @@ void add_certificates_from_directory_to_trust_store(trust_store& ts, const std::
     std::cout << "Adding certificates to trust store from " << path << std::endl;
     for (const auto& f : all_files_in_dir(path)) {
         assert(f.size() > path.size() + 1);
-        std::cout << " " << f.substr(path.size()+1) << " ... " << std::flush;
-        try {
-            auto cert = x509::read_pem_certificate_from_file(f);
-            ts.add(cert);
-            std::cout << cert.certificate().subject << std::endl;
-        } catch (const std::runtime_error& e) {
-            std::cout << e.what() << std::endl;
+        const auto fn = f.substr(path.size()+1);
+        std::cout << " " << fn << " ... " << std::flush;
+        if (fn == "ca-certificates.crt") {
+            std::cout << "HACK - skipping\n";
+            continue;
         }
+        auto cert = x509::read_pem_certificate_from_file(f);
+        ts.add(cert);
+        std::cout << cert.tbs().subject << std::endl;
     }
 }
 
+#include <fstream>
 
-void verify_cert_chain(const std::vector<x509::v3_certificate>& certlist, const trust_store& ts)
+void add_all_certs_to_trust_store(trust_store& ts, const std::string& filename){
+    std::ifstream in(filename, std::ifstream::binary);
+    if (!in || !in.is_open()) throw std::runtime_error("Error opering " + filename);
+
+    while (in && in.peek() != std::char_traits<char>::eof()) {
+        auto cert = x509::read_pem_certificate(in);
+        ts.add(cert);
+    }
+
+    if (!in) throw std::runtime_error("Error reading from " + filename);
+}
+
+
+
+void verify_cert_chain(const std::vector<x509::certificate>& certlist, const trust_store& ts)
 {
     FUNTLS_CHECK_BINARY(certlist.size(), >, 0, "Empty certificate chain not allowed");
-    const auto self_signed = certlist.back().certificate().subject == certlist.back().certificate().issuer;
+    const auto self_signed = certlist.back().tbs().subject == certlist.back().tbs().issuer;
     if (certlist.size() == 1 && self_signed) {
-        std::cout << "Checking self-signed certificate for " << certlist[0].certificate().subject << std::endl;
+        std::cout << "Checking self-signed certificate for " << certlist[0].tbs().subject << std::endl;
         x509::verify_x509_certificate(certlist[0], certlist[0]);
         return;
     }
     auto complete_chain = certlist;
     if (!self_signed) {
-        const auto root_issuer_name = certlist.back().certificate().issuer;
+        const auto root_issuer_name = certlist.back().tbs().issuer;
         // Incomplete chain, try to locate root certificate
         auto certs = ts.find(root_issuer_name);
         if (certs.empty()) {
@@ -604,14 +621,13 @@ void verify_cert_chain(const std::vector<x509::v3_certificate>& certlist, const 
         if (certs.size()) {
             std::cout << "Warning: Multiple certificates match (only trying first):\n";
             for (const auto& c : certs) {
-                std::cout << " " << c->certificate().subject << std::endl;
+                std::cout << " " << c->tbs().subject << std::endl;
             }
         }
         complete_chain.push_back(*certs.front());
     }
     x509::verify_x509_certificate_chain(complete_chain);
 }
-
 
 int main(int argc, char* argv[])
 {
@@ -652,7 +668,8 @@ int main(int argc, char* argv[])
     FUNTLS_CHECK_BINARY(wanted_cipher, !=, tls::cipher_suite::null_with_null_null, "Invalid cipher " + wanted_cipher_txt);
 
     trust_store ts;
-    add_certificates_from_directory_to_trust_store(ts, "/etc/ssl/certs");
+    //add_certificates_from_directory_to_trust_store(ts, "/etc/ssl/certs");
+    add_all_certs_to_trust_store(ts, "/etc/ssl/certs/ca-certificates.crt");
 
     std::cout << "Cipher suite: " << tls::parameters_from_suite(wanted_cipher) << std::endl;
     try {

@@ -6,9 +6,9 @@
 
 namespace funtls { namespace x509 {
 
-v3_certificate read_pem_certificate(std::istream& is);
-v3_certificate read_pem_certificate_from_string(const std::string& s);
-v3_certificate read_pem_certificate_from_file(const std::string& filename);
+certificate read_pem_certificate(std::istream& is);
+certificate read_pem_certificate_from_string(const std::string& s);
+certificate read_pem_certificate_from_file(const std::string& filename);
 
 void write_pem_certificate(std::ostream& os, const std::vector<uint8_t>& der_encoded_certificate);
 

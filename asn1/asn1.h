@@ -34,6 +34,7 @@ public:
         t61_string              = 0x14,
         ia5_string              = 0x16,
         utc_time                = 0x17,
+        generalized_time        = 0x18,
         constructed_sequence    = sequence | constructed_bit,
         constructed_set         = set      | constructed_bit,
 

@@ -26,7 +26,9 @@ struct buffer_view {
     }
 
     void skip(size_t num_bytes) {
-        if (index_ + num_bytes > size_) throw std::runtime_error("Out of data in " + std::string(__PRETTY_FUNCTION__));
+        if (index_ + num_bytes > size_) {
+            throw std::runtime_error("Out of data in " + std::string(__PRETTY_FUNCTION__));
+        }
         index_ += num_bytes;
     }
 
@@ -37,13 +39,17 @@ struct buffer_view {
     }
 
     void read(void* dest, size_t num_bytes) {
-        if (index_ + num_bytes > size_) throw std::runtime_error("Out of data in " + std::string(__PRETTY_FUNCTION__));
+        if (index_ + num_bytes > size_) {
+            throw std::runtime_error("Out of data in " + std::string(__PRETTY_FUNCTION__));
+        }
         std::memcpy(dest, &buffer_[index_], num_bytes);
         index_ += num_bytes;
     }
 
     buffer_view get_slice(size_t slice_size) {
-        if (index_ + slice_size > size_) throw std::runtime_error("Out of data in " + std::string(__PRETTY_FUNCTION__));
+        if (index_ + slice_size > size_) {
+            throw std::runtime_error("Out of data in " + std::string(__PRETTY_FUNCTION__));
+        }
         const uint8_t* slice_buffer = buffer_ + index_;
         index_ += slice_size;
         return buffer_view(slice_buffer, slice_size);
