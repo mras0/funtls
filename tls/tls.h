@@ -17,6 +17,8 @@
 
 namespace funtls { namespace tls {
 
+static constexpr size_t master_secret_size = 48;
+
 template<unsigned BitCount, typename Underlying>
 struct uint {
     static_assert(BitCount >= 8, "");

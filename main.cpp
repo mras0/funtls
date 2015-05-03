@@ -18,6 +18,50 @@ using int_type = boost::multiprecision::cpp_int;
 
 using namespace funtls;
 
+std::pair<std::vector<uint8_t>, tls::handshake> client_key_exchange_rsa(tls::protocol_version protocol_version, const x509::rsa_public_key& server_public_key) {
+    // OK, now it's time to do ClientKeyExchange
+    // Since we're doing RSA, we'll be sending the EncryptedPreMasterSecret
+
+    // Prepare pre-master secret (version + 46 random bytes)
+    std::vector<uint8_t> pre_master_secret(tls::master_secret_size);
+    pre_master_secret[0] = protocol_version.major;
+    pre_master_secret[1] = protocol_version.minor;
+    tls::get_random_bytes(&pre_master_secret[2], pre_master_secret.size()-2);
+
+    const auto C = x509::pkcs1_encode(server_public_key, pre_master_secret, &tls::get_random_bytes);
+    tls::client_key_exchange_rsa client_key_exchange{tls::vector<tls::uint8,0,(1<<16)-1>{C}};
+    return std::make_pair(std::move(pre_master_secret), make_handshake(client_key_exchange));
+}
+
+std::pair<std::vector<uint8_t>, tls::handshake> client_key_exchange_dhe_rsa(const tls::server_dh_params& server_dh_params) {
+    const size_t key_size = server_dh_params.dh_p.size();
+    //std::cout << "Should generate int of size " << key_size*8 << " bits " << std::endl;
+    std::vector<uint8_t> rand_int(key_size);
+    do {
+        tls::get_random_bytes(&rand_int[0], rand_int.size());
+    } while (std::find_if(rand_int.begin(), rand_int.end(), [](uint8_t i) { return i != 0; }) == rand_int.end());
+
+    const int_type private_key = x509::base256_decode<int_type>(rand_int);
+
+    //std::cout << "DHE client private key: " << std::hex << private_key << std::dec << std::endl;
+
+    const int_type p  = x509::base256_decode<int_type>(server_dh_params.dh_p.as_vector());
+    const int_type g  = x509::base256_decode<int_type>(server_dh_params.dh_g.as_vector());
+    const int_type Ys = x509::base256_decode<int_type>(server_dh_params.dh_Ys.as_vector());
+    const int_type Yc = powm(g, private_key, p);
+    const auto dh_Yc  = x509::base256_encode(Yc, key_size);
+
+    //std::cout << "dh_Yc = " << util::base16_encode(dh_Yc) << std::endl;
+
+    tls::client_key_exchange_dhe_rsa client_key_exchange{tls::vector<tls::uint8,1,(1<<16)-1>{dh_Yc}};
+    auto handshake = make_handshake(client_key_exchange);
+
+    const int_type Z = powm(Ys, private_key, p);
+    auto dh_Z  = x509::base256_encode(Z, key_size);
+    //std::cout << "Negotaited key = " << util::base16_encode(dh_Z) << std::endl;
+    return std::make_pair(std::move(dh_Z), std::move(handshake));
+}
+
 // http://stackoverflow.com/questions/10175812/how-to-create-a-self-signed-certificate-with-openssl
 // openssl req -x509 -newkey rsa:2048 -keyout server_key.pem -out server_cert.pem -days 365 -nodes
 // cat server_key.pem server_cert.pem >server.pem
@@ -74,11 +118,8 @@ public:
     }
 
 private:
-    static constexpr size_t         master_secret_size = 48;
-
     const tls::protocol_version     current_protocol_version = tls::protocol_version_tls_1_2;
     tls::cipher_suite               wanted_cipher;
-    tls::cipher_suite               current_cipher           = tls::cipher_suite::null_with_null_null;
 
     boost::asio::ip::tcp::socket&   socket;
     const tls::random               client_random;
@@ -90,10 +131,12 @@ private:
     tls::session_id                 sesion_id;
     std::vector<uint8_t>            master_secret;
     hash::sha256                    handshake_message_digest;
-    uint64_t                        server_sequence_number = 0;
-    uint64_t                        client_sequence_number = 0;
+    uint64_t                        encrypt_sequence_number = 0;
+    uint64_t                        decrypt_sequence_number = 0;
     std::unique_ptr<tls::cipher>    encrypt_cipher = tls::make_cipher(tls::null_cipher_parameters_e);
     std::unique_ptr<tls::cipher>    decrypt_cipher = tls::make_cipher(tls::null_cipher_parameters_d);
+    std::unique_ptr<tls::cipher>    pending_encrypt_cipher;
+    std::unique_ptr<tls::cipher>    pending_decrypt_cipher;
 
     // TODO: This only works when the payload isn't encrypted/compressed
     template<typename Payload>
@@ -179,6 +222,9 @@ private:
                 std::cout << "dh_g:      " << util::base16_encode(kex.params.dh_g.as_vector()) << std::endl;
                 std::cout << "dh_Ys:     " << util::base16_encode(kex.params.dh_Ys.as_vector()) << std::endl;
 
+                if (dhe_kex) {
+                    FUNTLS_CHECK_FAILURE("More than one server_key_change_dhe messages");
+                }
                 dhe_kex.reset(new tls::server_key_exchange_dhe(kex));
 
             } else if (handshake.type == tls::handshake_type::server_hello_done) {
@@ -237,73 +283,28 @@ private:
         }
     }
 
-    std::vector<uint8_t> send_client_key_exchange_rsa() {
-        // OK, now it's time to do ClientKeyExchange
-        // Since we're doing RSA, we'll be sending the EncryptedPreMasterSecret
-
-        // Prepare pre-master secret (version + 46 random bytes)
-        std::vector<uint8_t> pre_master_secret(master_secret_size);
-        pre_master_secret[0] = current_protocol_version.major;
-        pre_master_secret[1] = current_protocol_version.minor;
-        tls::get_random_bytes(&pre_master_secret[2], pre_master_secret.size()-2);
-
-        std::cout << "Pre-master secret: " << util::base16_encode(&pre_master_secret[2], pre_master_secret.size()-2) << std::endl;
-
-        assert(server_public_key);
-        const auto C = x509::pkcs1_encode(*server_public_key, pre_master_secret, &tls::get_random_bytes);
-        tls::client_key_exchange_rsa client_key_exchange{tls::vector<tls::uint8,0,(1<<16)-1>{C}};
-        send_record(make_handshake(client_key_exchange));
-        return pre_master_secret;
-    }
-
-    std::vector<uint8_t> send_client_key_exchange_dhe_rsa() {
-        const size_t key_size = server_dh_params->dh_p.size();
-        std::cout << "Should generate int of size " << key_size*8 << " bits " << std::endl;
-        std::vector<uint8_t> rand_int(key_size);
-        do {
-            tls::get_random_bytes(&rand_int[0], rand_int.size());
-        } while (std::find_if(rand_int.begin(), rand_int.end(), [](uint8_t i) { return i != 0; }) == rand_int.end());
-
-        const int_type private_key = x509::base256_decode<int_type>(rand_int);
-
-        std::cout << "DHE client private key: " << std::hex << private_key << std::dec << std::endl;
-
-        const int_type p  = x509::base256_decode<int_type>(server_dh_params->dh_p.as_vector());
-        const int_type g  = x509::base256_decode<int_type>(server_dh_params->dh_g.as_vector());
-        const int_type Ys = x509::base256_decode<int_type>(server_dh_params->dh_Ys.as_vector());
-        const int_type Yc = powm(g, private_key, p);
-        const auto dh_Yc  = x509::base256_encode(Yc, key_size);
-
-        std::cout << "dh_Yc = " << util::base16_encode(dh_Yc) << std::endl;
-
-        tls::client_key_exchange_dhe_rsa client_key_exchange{tls::vector<tls::uint8,1,(1<<16)-1>{dh_Yc}};
-        send_record(make_handshake(client_key_exchange));
-
-        const int_type Z = powm(Ys, private_key, p);
-        const auto dh_Z  = x509::base256_encode(Z, key_size);
-        std::cout << "Negotaited key = " << util::base16_encode(dh_Z) << std::endl;
-        return dh_Z;
-    }
-
     void send_client_key_exchange() {
         const auto cipher_param = tls::parameters_from_suite(wanted_cipher);
         std::vector<uint8_t> pre_master_secret;
+        tls::handshake       client_key_exchange;
         if (cipher_param.key_exchange_algorithm == tls::key_exchange_algorithm::rsa) {
-            pre_master_secret = send_client_key_exchange_rsa();
+            assert(server_public_key);
+            std::tie(pre_master_secret, client_key_exchange) = client_key_exchange_rsa(current_protocol_version, *server_public_key);
         } else if (cipher_param.key_exchange_algorithm == tls::key_exchange_algorithm::dhe_rsa) {
             assert(server_dh_params);
-            pre_master_secret = send_client_key_exchange_dhe_rsa();
+            std::tie(pre_master_secret, client_key_exchange) = client_key_exchange_dhe_rsa(*server_dh_params);
         } else {
             FUNTLS_CHECK_FAILURE("Internal error: Unsupported KeyExchangeAlgorithm " + std::to_string((int)(cipher_param.key_exchange_algorithm)));
         }
+        send_record(client_key_exchange);
         // We can now compute the master_secret as specified in rfc5246 8.1
         // master_secret = PRF(pre_master_secret, "master secret", ClientHello.random + ServerHello.random)[0..47]
 
         std::vector<uint8_t> rand_buf;
         tls::append_to_buffer(rand_buf, client_random);
         tls::append_to_buffer(rand_buf, server_random);
-        master_secret = tls::PRF(pre_master_secret, "master secret", rand_buf, master_secret_size);
-        assert(master_secret.size() == master_secret_size);
+        master_secret = tls::PRF(pre_master_secret, "master secret", rand_buf, tls::master_secret_size);
+        assert(master_secret.size() == tls::master_secret_size);
         std::cout << "Master secret: " << util::base16_encode(master_secret) << std::endl;
 
         // Now do Key Calculation http://tools.ietf.org/html/rfc5246#section-6.3
@@ -327,8 +328,8 @@ private:
         tls::cipher_parameters server_cipher_parameters{tls::cipher_parameters::decrypt, cipher_param, server_mac_key, server_enc_key, server_iv};
 
         // TODO: This should obviously be reversed if running as a server
-        encrypt_cipher = tls::make_cipher(client_cipher_parameters);
-        decrypt_cipher = tls::make_cipher(server_cipher_parameters);
+        pending_encrypt_cipher = tls::make_cipher(client_cipher_parameters);
+        pending_decrypt_cipher = tls::make_cipher(server_cipher_parameters);
      }
 
     void send_change_cipher_spec() {
@@ -336,9 +337,10 @@ private:
         // A Finished message is always sent immediately after a change
         // cipher spec message to verify that the key exchange and
         // authentication processes were successful
-        current_cipher = wanted_cipher; // HACKISH
+        assert(pending_encrypt_cipher);
+        encrypt_cipher = std::move(pending_encrypt_cipher);
+        encrypt_sequence_number = 0;
         send_finished();
-        current_cipher = tls::cipher_suite::null_with_null_null; // HACKISH
     }
 
     void send_finished() {
@@ -381,14 +383,8 @@ private:
         //
         // Do encryption
         //
-        std::vector<uint8_t> fragment;
-        if (current_cipher != tls::cipher_suite::null_with_null_null) {
-            const auto ver_buffer = verification_buffer(client_sequence_number, content_type, current_protocol_version, plaintext.size());
-            ++client_sequence_number;
-            fragment = encrypt_cipher->process(plaintext, ver_buffer);
-        } else {
-            fragment = plaintext;
-        }
+        const auto ver_buffer = verification_buffer(encrypt_sequence_number++, content_type, current_protocol_version, plaintext.size());
+        const auto fragment  = encrypt_cipher->process(plaintext, ver_buffer);
         FUNTLS_CHECK_BINARY(fragment.size(), <=, tls::record::max_ciphertext_length, "Illegal fragment size");
 
         std::vector<uint8_t> header;
@@ -401,13 +397,15 @@ private:
         boost::asio::write(socket, boost::asio::buffer(fragment));
     }
 
-    void read_change_cipher_spec(){
+    void read_change_cipher_spec() {
         auto record = read_record();
         FUNTLS_CHECK_BINARY(record.type,            ==, tls::content_type::change_cipher_spec, "Invalid content type");
         FUNTLS_CHECK_BINARY(record.fragment.size(), ==, 1, "Invalid ChangeCipherSpec fragment size");
         FUNTLS_CHECK_BINARY(record.fragment[0],     !=, 0, "Invalid ChangeCipherSpec fragment data");
         std::cout << "Got ChangeCipherSpec from server\n";
-        current_cipher = wanted_cipher;
+        assert(pending_decrypt_cipher);
+        decrypt_cipher = std::move(pending_decrypt_cipher);
+        decrypt_sequence_number = 0;
     }
 
     void read_finished() {
@@ -453,12 +451,9 @@ private:
         //
         // Decrypt
         //
-        if (current_cipher != tls::cipher_suite::null_with_null_null) {
-            assert(buffer.size() <= tls::record::max_ciphertext_length);
-            const auto ver_buffer = verification_buffer(server_sequence_number, content_type, current_protocol_version, 0 /* filled in later */);
-            server_sequence_number++;
-            buffer = decrypt_cipher->process(buffer, ver_buffer);
-        }
+        assert(buffer.size() <= tls::record::max_ciphertext_length);
+        const auto ver_buffer = verification_buffer(decrypt_sequence_number++, content_type, current_protocol_version, 0 /* filled in later */);
+        buffer = decrypt_cipher->process(buffer, ver_buffer);
 
         //
         // Decompression
