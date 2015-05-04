@@ -180,11 +180,21 @@ static const asn1::object_id id_rsaEncryption{1,2,840,113549,1,1,1};
 static const asn1::object_id id_ecPublicKey{1,2,840,10045,2,1}; // https://tools.ietf.org/html/rfc5480
 
 static const asn1::object_id id_md2WithRSAEncryption{1,2,840,113549,1,1,2};
+static const asn1::object_id id_md5WithRSAEncryption{1,2,840,113549,1,1,4};
 static const asn1::object_id id_sha1WithRSAEncryption{1,2,840,113549,1,1,5};
 static const asn1::object_id id_sha256WithRSAEncryption{1,2,840,113549,1,1,11};
+static const asn1::object_id id_sha384WithRSAEncryption{1,2,840,113549,1,1,12};
+static const asn1::object_id id_sha512WithRSAEncryption{1,2,840,113549,1,1,13};
 
-static const asn1::object_id id_sha256{2,16,840,1,101,3,4,2,1};
 static const asn1::object_id id_sha1{1,3,14,3,2,26};
+static const asn1::object_id id_sha256{2,16,840,1,101,3,4,2,1};
+static const asn1::object_id id_sha384{2,16,840,1,101,3,4,2,2};
+static const asn1::object_id id_sha512{2,16,840,1,101,3,4,2,3};
+
+// X509v3 certificate extensions
+static const asn1::object_id id_ce_subjectKeyIdentifier{2,5,29,14};
+static const asn1::object_id id_ce_keyUsage{2,5,29,15};
+static const asn1::object_id id_ce_basicConstraints{2,5,29,19};
 
 } } // namespace funtls::x509
 

@@ -65,19 +65,11 @@ std::string read_string(identifier id, const der_encoded_value& repr)
 {
     type_check(id, repr.id());
     auto buf = repr.content_view();
-    if (id == identifier::bit_string) {
-        FUNTLS_CHECK_BINARY(buf.remaining(), >=, 2, "Empty bit string");
-        FUNTLS_CHECK_BINARY(buf.get(), ==, 0, "Unsupported bit count");
-        std::string s(buf.remaining(), '\0');
-        buf.read(&s[0], buf.remaining());
-        return s;
-    } else {
-        FUNTLS_CHECK_BINARY(buf.remaining(), >=, 1, "Empty string");
-        std::string s(buf.remaining(), '\0');
-        buf.read(&s[0], buf.remaining());
-        // TODO: Check that the string is valid
-        return s;
-    }
+    FUNTLS_CHECK_BINARY(buf.remaining(), >=, 1, "Empty string");
+    std::string s(buf.remaining(), '\0');
+    buf.read(&s[0], buf.remaining());
+    // TODO: Check that the string is valid
+    return s;
 }
 
 } // namespace detail
@@ -168,6 +160,27 @@ integer::integer(const der_encoded_value& repr)
 void integer::do_check_size(size_t int_type_size, size_t octet_count)
 {
     FUNTLS_CHECK_BINARY(int_type_size, >=, octet_count, "Integer out of " + std::to_string(int_type_size*8) + "-bit integer range");
+}
+
+bit_string::bit_string(const der_encoded_value& repr)
+{
+    FUNTLS_CHECK_ID(repr.id());
+    auto buf = repr.content_view();
+    FUNTLS_CHECK_BINARY(buf.remaining(), >=, 2, "Empty bit string");
+    excess_bits_ = buf.get();
+    FUNTLS_CHECK_BINARY(unsigned(excess_bits_), <, 8, "Unsupported bit count");
+    repr_.resize(buf.remaining());
+    buf.read(&repr_[0], buf.remaining());
+    // Check that repr_.back() doesn't have illegal bits set
+    if (excess_bits_) {
+        FUNTLS_CHECK_BINARY(repr_.back() & ((1<<excess_bits_)-1), ==, 0, "Invalid padding in bit_string");
+    }
+}
+
+const std::vector<uint8_t>& bit_string::as_vector() const
+{
+    FUNTLS_CHECK_BINARY(excess_bits_, ==, 0, "Bit string has excess bits");
+    return repr_;
 }
 
 object_id::object_id(const der_encoded_value& repr)

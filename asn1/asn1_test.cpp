@@ -36,6 +36,10 @@ T from_bytes(const std::vector<uint8_t>& d)
     return T{value_from_bytes(bytes)};
 }
 
+std::ostream& operator<<(std::ostream& os, const std::vector<uint8_t>& v) {
+    return os << funtls::util::base16_encode(v);
+}
+
 int main()
 {
     using namespace funtls::util;
@@ -161,11 +165,24 @@ int main()
         FUNTLS_ASSERT_EQUAL(1, vec[0]);
         FUNTLS_ASSERT_EQUAL(2, vec[1]);
         FUNTLS_ASSERT_EQUAL(3, vec[2]);
+    }
 
+    //
+    // BIT STRING
+    //
+    {
         FUNTLS_ASSERT_THROWS(from_bytes<bit_string>({}), std::runtime_error);
         FUNTLS_ASSERT_THROWS(from_bytes<bit_string>({0}), std::runtime_error);
         FUNTLS_ASSERT_THROWS(from_bytes<bit_string>({1}), std::runtime_error);
         FUNTLS_ASSERT_THROWS(from_bytes<bit_string>({9}), std::runtime_error);
-        FUNTLS_ASSERT_EQUAL("A", from_bytes<bit_string>({0,65}).as_string());
+        FUNTLS_ASSERT_EQUAL((std::vector<uint8_t>{(uint8_t)'A'}), from_bytes<bit_string>({0,65}).as_vector());
+        FUNTLS_ASSERT_EQUAL(0, from_bytes<bit_string>({0,65}).excess_bits());
+        FUNTLS_ASSERT_EQUAL((std::vector<uint8_t>{0xF0}), from_bytes<bit_string>({0,0xF0}).repr());
+        FUNTLS_ASSERT_EQUAL((std::vector<uint8_t>{0xF0}), from_bytes<bit_string>({4,0xF0}).repr());
+        FUNTLS_ASSERT_THROWS(from_bytes<bit_string>({5,0xF0}), std::runtime_error);
+        FUNTLS_ASSERT_THROWS(from_bytes<bit_string>({5,0x01}), std::runtime_error);
+        FUNTLS_ASSERT_EQUAL(6, from_bytes<bit_string>({0x06, 0x6e, 0x5d, 0xc0}).excess_bits());
+        FUNTLS_ASSERT_EQUAL(18, from_bytes<bit_string>({0x06, 0x6e, 0x5d, 0xc0}).bit_count());
+        FUNTLS_ASSERT_EQUAL((std::vector<uint8_t>{0x6e, 0x5d, 0xc0}), from_bytes<bit_string>({0x06, 0x6e, 0x5d, 0xc0}).repr());
     }
 }

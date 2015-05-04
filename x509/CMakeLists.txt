@@ -8,4 +8,7 @@ target_link_libraries(x509 util asn1 hash)
 add_executable(x509_test x509_test.cpp)
 target_link_libraries(x509_test util x509)
 
+add_executable(x509_util x509_util.cpp)
+target_link_libraries(x509_util util x509)
+
 add_test(x509_test x509_test)

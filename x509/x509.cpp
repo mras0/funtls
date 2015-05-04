@@ -179,14 +179,24 @@ std::ostream& operator<<(std::ostream& os, const algorithm_id& aid)
         os << "ecPublicKey";
     } else if (id == id_md2WithRSAEncryption){
         os << "md2WithRSAEncryption";
+    } else if (id == id_md5WithRSAEncryption){
+        os << "md5WithRSAEncryption";
     } else if (id == id_sha1WithRSAEncryption){
         os << "sha1WithRSAEncryption";
     } else if (id == id_sha256WithRSAEncryption){
         os << "sha256WithRSAEncryption";
-    } else if (id == id_sha256){
-        os << "sha256";
+    } else if (id == id_sha384WithRSAEncryption){
+        os << "sha384WithRSAEncryption";
+    } else if (id == id_sha512WithRSAEncryption){
+        os << "sha512WithRSAEncryption";
     } else if (id == id_sha1){
         os << "sha1";
+    } else if (id == id_sha256){
+        os << "sha256";
+    } else if (id == id_sha384){
+        os << "sha384";
+    } else if (id == id_sha512){
+        os << "sha512";
     } else {
         os << aid.id();
     }
@@ -196,13 +206,89 @@ std::ostream& operator<<(std::ostream& os, const algorithm_id& aid)
     return os;
 }
 
+namespace {
+
+std::string handle_subjectKeyIdentifier(util::buffer_view& buf) {
+    asn1::octet_string key_identifier{asn1::read_der_encoded_value(buf)};
+    return "SubjectKeyIdentifier " + util::base16_encode(key_identifier.as_vector());
+}
+
+std::string handle_keyUsage(util::buffer_view& buf) {
+    auto bs = asn1::bit_string{asn1::read_der_encoded_value(buf)};
+
+    static const char* const bit_meaning[] = {
+           "digitalSignature",
+           "nonRepudiation", //-- recent editions of X.509 have renamed this bit to contentCommitment
+           "keyEncipherment",
+           "dataEncipherment",
+           "keyAgreement",
+           "keyCertSign",
+           "cRLSign",
+           "encipherOnly",
+           "decipherOnly",
+    };
+    std::ostringstream oss;
+    oss << "KeyUsage";
+    const auto& r = bs.repr();
+    for (size_t i = 0; i < bs.bit_count(); ++i) {
+        const auto byte = i >> 3;
+        const auto bit  = 7 - (i & 7);
+        assert(byte < r.size());
+        if (r[byte] & (1<<bit)) {
+            FUNTLS_CHECK_BINARY(i, <, sizeof(bit_meaning)/sizeof(bit_meaning[0]), "Unknown KeyUsage bit");
+            oss << " " << bit_meaning[i];
+        }
+    }
+
+    return oss.str();
+}
+
+std::string handle_basicConstraints(util::buffer_view& buf) {
+    // BasicConstraintsSyntax ::= SEQUENCE {
+    // 	cA	BOOLEAN DEFAULT FALSE,
+    // 	pathLenConstraint INTEGER (0..MAX) OPTIONAL
+    // }
+    asn1::sequence_view seq{asn1::read_der_encoded_value(buf)};
+    std::ostringstream oss;
+    oss << "BasicConstraints";
+    if (seq.has_next()) {
+        auto elem = seq.next();
+        if (elem.id() == asn1::identifier::boolean) {
+            oss << " cA=" << (asn1::boolean{elem} ? "true" : "false");
+            if (!seq.has_next()) goto done;
+            elem = seq.next();
+        }
+        oss << " pathLenConstraint=" << asn1::integer{elem}.as<long long>();
+    }
+done:
+    return oss.str();
+}
+
+const struct {
+    asn1::object_id id;
+    std::string   (*format_string)(util::buffer_view&);
+} extension_handlers[] = {
+    { id_ce_subjectKeyIdentifier ,&handle_subjectKeyIdentifier },
+    { id_ce_keyUsage             ,&handle_keyUsage },
+    { id_ce_basicConstraints     ,&handle_basicConstraints },
+};
+
+}
+
 std::ostream& operator<<(std::ostream& os, const extension& e)
 {
-    os << "<";
-    if (e.critical) os << "Critical";
-    os << "Extension " << e.id << " " << util::base16_encode(e.value.as_vector());
-    os << ">";
-    return os;
+    for (const auto& h : extension_handlers) {
+        if (h.id != e.id) {
+            continue;
+        }
+        auto buf = e.value.as_vector();
+        FUNTLS_CHECK_BINARY(buf.size(), >, 0, "Empty extension value");
+        util::buffer_view bv{&buf[0], buf.size()};
+        os << h.format_string(bv);
+        FUNTLS_CHECK_BINARY(bv.remaining(), ==, 0, "Extension parsed incorectly");
+        return os;
+    }
+    return os << "<Extension " << e.id << (e.critical ? "! " : "  ") << util::base16_encode(e.value.as_vector()) << ">";
 }
 
 std::ostream& operator<<(std::ostream& os, const certificate& cert)

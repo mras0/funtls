@@ -16,6 +16,10 @@ hash::hash_algorithm get_hash(const asn1::object_id& oid)
         return hash::sha1{};
     } else if (oid == x509::id_sha256) {
         return hash::sha256{};
+    } else if (oid == x509::id_sha384) {
+        return hash::sha384{};
+    } else if (oid == x509::id_sha512) {
+        return hash::sha512{};
     }
 
     std::ostringstream oss;
@@ -25,7 +29,12 @@ hash::hash_algorithm get_hash(const asn1::object_id& oid)
 
 asn1::object_id public_key_algo_from_signature_algo(const x509::algorithm_id& sig_algo)
 {
-    if (sig_algo.id() == x509::id_md2WithRSAEncryption || sig_algo.id() == x509::id_sha1WithRSAEncryption || sig_algo.id() == x509::id_sha256WithRSAEncryption) {
+    if (sig_algo.id() == x509::id_md2WithRSAEncryption
+     || sig_algo.id() == x509::id_md5WithRSAEncryption
+     || sig_algo.id() == x509::id_sha1WithRSAEncryption
+     || sig_algo.id() == x509::id_sha256WithRSAEncryption
+     || sig_algo.id() == x509::id_sha384WithRSAEncryption
+     || sig_algo.id() == x509::id_sha512WithRSAEncryption) {
         FUNTLS_CHECK_BINARY(sig_algo.null_parameters(), ==, true, "Invalid algorithm parameters");
         return x509::id_rsaEncryption;
     }
@@ -36,12 +45,17 @@ asn1::object_id public_key_algo_from_signature_algo(const x509::algorithm_id& si
 
 asn1::object_id digest_algo_from_signature_algo(const x509::algorithm_id& sig_algo)
 {
-    if (sig_algo.id() == x509::id_sha1WithRSAEncryption) {
+    if (public_key_algo_from_signature_algo(sig_algo) == x509::id_rsaEncryption) {
         FUNTLS_CHECK_BINARY(sig_algo.null_parameters(), ==, true, "Invalid algorithm parameters");
+    }
+    if (sig_algo.id() == x509::id_sha1WithRSAEncryption) {
         return x509::id_sha1;
     } else if (sig_algo.id() == x509::id_sha256WithRSAEncryption) {
-        FUNTLS_CHECK_BINARY(sig_algo.null_parameters(), ==, true, "Invalid algorithm parameters");
         return x509::id_sha256;
+    } else if (sig_algo.id() == x509::id_sha384WithRSAEncryption) {
+        return x509::id_sha384;
+    } else if (sig_algo.id() == x509::id_sha512WithRSAEncryption) {
+        return x509::id_sha512;
     }
     std::ostringstream oss;
     oss << "Unknown signature algorithm " << sig_algo;
@@ -161,7 +175,7 @@ rsa_public_key rsa_public_key_from_certificate(const certificate& cert)
     return x509::rsa_public_key::parse(asn1::read_der_encoded_value(pk_buf));
 }
 
-void verify_x509_certificate(const certificate& subject_cert, const certificate& issuer_cert)
+void verify_x509_signature(const certificate& subject_cert, const certificate& issuer_cert)
 {
     auto c = subject_cert.tbs();
     FUNTLS_CHECK_BINARY(x509::id_rsaEncryption, ==, public_key_algo_from_signature_algo(subject_cert.signature_algorithm()), "Only RSA supported");
@@ -189,10 +203,24 @@ void verify_x509_certificate(const certificate& subject_cert, const certificate&
 void verify_x509_certificate_chain(const std::vector<certificate>& chain)
 {
     FUNTLS_CHECK_BINARY(chain.size(), >=, 2, "Chain too short"); // This function shouldn't be used to check a single self-signed certificate
-    verify_x509_certificate(chain.back(), chain.back());
+    for (const auto& cert : chain) {
+        // Don't allow any critical extensions
+        for (const auto& ext : cert.tbs().extensions) {
+            static const std::vector<asn1::object_id> ignored_extensions {
+                id_ce_keyUsage,
+                    id_ce_basicConstraints,
+            };
+            if (ext.critical && std::find(ignored_extensions.begin(), ignored_extensions.end(), ext.id) == ignored_extensions.end()) {
+                std::ostringstream msg;
+                msg << "Unsupported critical certificate extension " << ext;
+                FUNTLS_CHECK_FAILURE(msg.str());
+            }
+        }
+    }
+    verify_x509_signature(chain.back(), chain.back());
     size_t i = chain.size() - 1;
     while (i--) {
-        verify_x509_certificate(chain[i], chain[i+1]);
+        verify_x509_signature(chain[i], chain[i+1]);
     }
 }
 

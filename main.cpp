@@ -609,7 +609,7 @@ void verify_cert_chain(const std::vector<x509::certificate>& certlist, const tru
     const auto self_signed = certlist.back().tbs().subject == certlist.back().tbs().issuer;
     if (certlist.size() == 1 && self_signed) {
         std::cout << "Checking self-signed certificate\n" << certlist[0] << std::endl;
-        x509::verify_x509_certificate(certlist[0], certlist[0]);
+        x509::verify_x509_signature(certlist[0], certlist[0]);
         return;
     }
     auto complete_chain = certlist;
@@ -625,7 +625,7 @@ void verify_cert_chain(const std::vector<x509::certificate>& certlist, const tru
         const x509::certificate* cert = nullptr;
         for (const auto& c : certs) {
             try {
-                verify_x509_certificate(*c, *c);
+                verify_x509_signature(*c, *c);
                 if (!cert) {
                     cert = c;
                 } else {

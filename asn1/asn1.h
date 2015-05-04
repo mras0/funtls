@@ -149,6 +149,7 @@ public:
 private:
     uint8_t repr_;
 };
+
 //
 // ASN.1 INTEGER (tag = 0x02)
 //
@@ -208,6 +209,35 @@ private:
     static void do_check_size(size_t int_type_size, size_t octet_count);
 };
 
+//
+// ASN.1 BIT STRING (tag = 0x03)
+//
+class bit_string {
+public:
+    static constexpr auto id = identifier::bit_string;
+
+    explicit bit_string(const der_encoded_value& repr);
+
+    uint8_t excess_bits() const {
+        return excess_bits_;
+    }
+
+    size_t bit_count() const {
+        assert(excess_bits_ < 8);
+        assert(repr_.size() >= 1);
+        return repr_.size() * 8 - excess_bits_;
+    }
+
+    const std::vector<uint8_t>& as_vector() const;
+
+    const std::vector<uint8_t>& repr() const {
+        return repr_;
+    }
+
+private:
+    std::vector<uint8_t> repr_;
+    uint8_t              excess_bits_;
+};
 
 //
 // ASN.1 OBJECT IDENTIFIER (tag = 0x06)
@@ -240,6 +270,10 @@ public:
     uint32_t operator[](size_t index) const {
         assert(index < size());
         return components_[index];
+    }
+
+    bool operator<(const object_id& rhs) const {
+        return components_ < rhs.components_;
     }
 
     bool operator==(const object_id& rhs) const {
@@ -346,7 +380,6 @@ inline bool operator!=(const any_string& lhs, const any_string& rhs) {
     return !(lhs == rhs);
 }
 
-using bit_string = string_base<identifier::bit_string>;
 using octet_string = string_base<identifier::octet_string>;
 using utf8_string = string_base<identifier::utf8_string>;
 using printable_string = string_base<identifier::printable_string>;

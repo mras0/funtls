@@ -89,7 +89,6 @@ void test_load_save(const std::string& pem_data)
 std::vector<x509::certificate> read_pem_cert_chain(std::istream& in)
 {
     std::vector<x509::certificate> chain;
-    std::cout << "\n\n\n\n\n";
     while (in && in.peek() != std::char_traits<char>::eof()) {
         chain.push_back(x509::read_pem_certificate(in));
     }
@@ -107,7 +106,7 @@ int main()
     // TODO: Check x509::name equals operations. Only exact matches should be allowed (with order being important) etc.
 
     const auto cert0 = x509::read_pem_certificate_from_string(test_cert0);
-    x509::verify_x509_certificate(cert0, cert0);
+    x509::verify_x509_signature(cert0, cert0);
     test_load_save(test_cert0);
     FUNTLS_ASSERT_EQUAL(int_type("11259235216357634699"), cert0.tbs().serial_number.as<int_type>());
     FUNTLS_ASSERT_EQUAL(x509::id_sha256WithRSAEncryption, cert0.tbs().signature_algorithm.id());
@@ -149,11 +148,11 @@ int main()
     const auto cert1 = x509::read_pem_certificate_from_string(test_cert1);
     test_load_save(test_cert1);
     FUNTLS_ASSERT_NOT_EQUAL(cert1.tbs().issuer, cert1.tbs().subject);
-    FUNTLS_ASSERT_THROWS(x509::verify_x509_certificate(cert1, cert1), std::runtime_error);
+    FUNTLS_ASSERT_THROWS(x509::verify_x509_signature(cert1, cert1), std::runtime_error);
 
     const auto cert2 = x509::read_pem_certificate_from_string(test_cert2);
     FUNTLS_ASSERT_EQUAL(cert2.tbs().issuer, cert2.tbs().subject);
-    x509::verify_x509_certificate(cert2, cert2);
+    x509::verify_x509_signature(cert2, cert2);
     test_load_save(test_cert2);
 
     const auto cert3 = x509::read_pem_certificate_from_string(test_cert3);
@@ -166,7 +165,7 @@ int main()
 
     {
         const auto root_cert = x509::read_pem_certificate_from_string(test_cert_chain0_root);
-        x509::verify_x509_certificate(root_cert, root_cert);
+        x509::verify_x509_signature(root_cert, root_cert);
         test_load_save(test_cert_chain0_root);
         FUNTLS_ASSERT_EQUAL(root_cert.tbs().issuer, root_cert.tbs().subject);
 
@@ -174,18 +173,18 @@ int main()
         const auto chain = read_pem_cert_chain(chain_iss);
         FUNTLS_ASSERT_EQUAL(3U, chain.size());
         FUNTLS_ASSERT_EQUAL(chain[2].tbs().issuer, root_cert.tbs().subject);
-        x509::verify_x509_certificate(chain[2], root_cert);
+        x509::verify_x509_signature(chain[2], root_cert);
         FUNTLS_ASSERT_EQUAL(chain[1].tbs().issuer, chain[2].tbs().subject);
-        x509::verify_x509_certificate(chain[1], chain[2]);
+        x509::verify_x509_signature(chain[1], chain[2]);
         FUNTLS_ASSERT_EQUAL(chain[0].tbs().issuer, chain[1].tbs().subject);
-        x509::verify_x509_certificate(chain[0], chain[1]);
+        x509::verify_x509_signature(chain[0], chain[1]);
 
         // Check that various invalid combinations aren't allowed
         for (unsigned i = 0; i < chain.size(); ++i) {
-            FUNTLS_ASSERT_THROWS(x509::verify_x509_certificate(root_cert, chain[i]), std::runtime_error);
+            FUNTLS_ASSERT_THROWS(x509::verify_x509_signature(root_cert, chain[i]), std::runtime_error);
             for (unsigned j = 0; j < chain.size(); ++j) {
                 if (i + 1 != j) {
-                    FUNTLS_ASSERT_THROWS(x509::verify_x509_certificate(chain[i], chain[j]), std::runtime_error);
+                    FUNTLS_ASSERT_THROWS(x509::verify_x509_signature(chain[i], chain[j]), std::runtime_error);
                 }
             }
         }
