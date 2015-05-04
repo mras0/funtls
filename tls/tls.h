@@ -307,8 +307,8 @@ struct client_key_exchange_dhe_rsa {
 struct finished {
     static constexpr tls::handshake_type handshake_type = tls::handshake_type::finished;
 
-    static constexpr size_t verify_data_length = 12; // For RSA at least
-    uint8 verify_data[verify_data_length];
+    static constexpr size_t verify_data_min_length = 12;   // For RSA at least
+    std::vector<uint8_t> verify_data;
 };
 
 struct handshake {
@@ -559,11 +559,21 @@ inline void from_bytes(server_dh_params& item, util::buffer_view& buffer) {
     from_bytes(item.dh_Ys, buffer);
 }
 
+inline void from_bytes(server_hello_done& item, util::buffer_view& buffer) {
+    assert(buffer.remaining() == 0);
+    (void)item; (void)buffer;
+}
 inline void from_bytes(server_key_exchange_dhe& item, util::buffer_view& buffer) {
     from_bytes(item.params, buffer);
     from_bytes(item.hash_algorithm, buffer);
     from_bytes(item.signature_algorithm, buffer);
     from_bytes(item.signature, buffer);
+}
+
+inline void from_bytes(finished& item, util::buffer_view& buffer) {
+    assert(buffer.remaining());
+    item.verify_data.resize(buffer.remaining());
+    buffer.read(&item.verify_data[0], item.verify_data.size());
 }
 
 inline void from_bytes(handshake& item, util::buffer_view& buffer) {
@@ -584,12 +594,12 @@ inline HandshakeType get_as(const handshake& h) {
     if (h.type != HandshakeType::handshake_type) {
         throw std::runtime_error("Expected handshake of type " + std::to_string(int(HandshakeType::handshake_type)) + " got " + std::to_string(int(h.type)));
     }
-    if (h.body.empty()) {
-        throw std::runtime_error("Empty handshake of type " + std::to_string(int(HandshakeType::handshake_type)));
-    }
-    util::buffer_view body_buffer{&h.body[0], h.body.size()};
+    util::buffer_view body_buffer{h.body.data(), h.body.size()};
     HandshakeType inner;
     from_bytes(inner, body_buffer);
+    if (body_buffer.remaining()) {
+        throw std::runtime_error("Unread data in handshake of type " + std::to_string(int(HandshakeType::handshake_type)));
+    }
     return inner;
 }
 

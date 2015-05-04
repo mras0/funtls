@@ -22,49 +22,62 @@ using namespace funtls;
 
 namespace {
 
-std::pair<std::vector<uint8_t>, tls::handshake> client_key_exchange_rsa(tls::protocol_version protocol_version, const x509::rsa_public_key& server_public_key) {
-    // OK, now it's time to do ClientKeyExchange
-    // Since we're doing RSA, we'll be sending the EncryptedPreMasterSecret
+class client_key_exchange_protocol {
+public:
+    typedef std::pair<std::vector<uint8_t>, tls::handshake> result_type;
 
-    // Prepare pre-master secret (version + 46 random bytes)
-    std::vector<uint8_t> pre_master_secret(tls::master_secret_size);
-    pre_master_secret[0] = protocol_version.major;
-    pre_master_secret[1] = protocol_version.minor;
-    tls::get_random_bytes(&pre_master_secret[2], pre_master_secret.size()-2);
+    virtual ~client_key_exchange_protocol() {}
 
-    const auto C = x509::pkcs1_encode(server_public_key, pre_master_secret, &tls::get_random_bytes);
-    tls::client_key_exchange_rsa client_key_exchange{tls::vector<tls::uint8,0,(1<<16)-1>{C}};
-    return std::make_pair(std::move(pre_master_secret), make_handshake(client_key_exchange));
-}
+    result_type result() const {
+        return do_result();
+    }
 
-std::pair<std::vector<uint8_t>, tls::handshake> client_key_exchange_dhe_rsa(const tls::server_dh_params& server_dh_params) {
-    const size_t key_size = server_dh_params.dh_p.size();
-    //std::cout << "Should generate int of size " << key_size*8 << " bits " << std::endl;
-    std::vector<uint8_t> rand_int(key_size);
-    do {
-        tls::get_random_bytes(&rand_int[0], rand_int.size());
-    } while (std::find_if(rand_int.begin(), rand_int.end(), [](uint8_t i) { return i != 0; }) == rand_int.end());
+    void certificate_list(const std::vector<x509::certificate>& certificate_list) {
+        if (server_public_key_rsa_) FUNTLS_CHECK_FAILURE("");
+        server_public_key_rsa_.reset(new x509::rsa_public_key(rsa_public_key_from_certificate(certificate_list[0])));
+    }
 
-    const int_type private_key = x509::base256_decode<int_type>(rand_int);
+    void server_key_exchange(const tls::handshake& ske) {
+        do_server_key_exchange(ske);
+    }
 
-    //std::cout << "DHE client private key: " << std::hex << private_key << std::dec << std::endl;
+protected:
+    const x509::rsa_public_key& server_public_key_rsa() const {
+        if (!server_public_key_rsa_) FUNTLS_CHECK_FAILURE("");
+        return *server_public_key_rsa_;
+    }
 
-    const int_type p  = x509::base256_decode<int_type>(server_dh_params.dh_p.as_vector());
-    const int_type g  = x509::base256_decode<int_type>(server_dh_params.dh_g.as_vector());
-    const int_type Ys = x509::base256_decode<int_type>(server_dh_params.dh_Ys.as_vector());
-    const int_type Yc = powm(g, private_key, p);
-    const auto dh_Yc  = x509::base256_encode(Yc, key_size);
+private:
+    std::unique_ptr<x509::rsa_public_key> server_public_key_rsa_;
+    virtual result_type do_result() const = 0;
+    virtual void do_server_key_exchange(const tls::handshake&) {
+        FUNTLS_CHECK_FAILURE("Not expecting ServerKeyExchange message");
+    }
+};
 
-    //std::cout << "dh_Yc = " << util::base16_encode(dh_Yc) << std::endl;
+class rsa_client_kex_protocol : public client_key_exchange_protocol {
+public:
+    rsa_client_kex_protocol(tls::protocol_version protocol_version)
+        : protocol_version_(protocol_version) {
+    }
 
-    tls::client_key_exchange_dhe_rsa client_key_exchange{tls::vector<tls::uint8,1,(1<<16)-1>{dh_Yc}};
-    auto handshake = make_handshake(client_key_exchange);
+private:
+    tls::protocol_version protocol_version_;
 
-    const int_type Z = powm(Ys, private_key, p);
-    auto dh_Z  = x509::base256_encode(Z, key_size);
-    //std::cout << "Negotaited key = " << util::base16_encode(dh_Z) << std::endl;
-    return std::make_pair(std::move(dh_Z), std::move(handshake));
-}
+    virtual result_type do_result() const override {
+        // OK, now it's time to do ClientKeyExchange
+        // Since we're doing RSA, we'll be sending the EncryptedPreMasterSecret
+        // Prepare pre-master secret (version + 46 random bytes)
+        std::vector<uint8_t> pre_master_secret(tls::master_secret_size);
+        pre_master_secret[0] = protocol_version_.major;
+        pre_master_secret[1] = protocol_version_.minor;
+        tls::get_random_bytes(&pre_master_secret[2], pre_master_secret.size()-2);
+
+        const auto C = x509::pkcs1_encode(server_public_key_rsa(), pre_master_secret, &tls::get_random_bytes);
+        tls::client_key_exchange_rsa client_key_exchange{tls::vector<tls::uint8,0,(1<<16)-1>{C}};
+        return std::make_pair(std::move(pre_master_secret), make_handshake(client_key_exchange));
+    }
+};
 
 void verify_dhe_signature(const tls::server_key_exchange_dhe& dhe_kex, const x509::rsa_public_key& public_key, const std::vector<uint8_t>& digest_buf)
 {
@@ -92,6 +105,62 @@ void verify_dhe_signature(const tls::server_key_exchange_dhe& dhe_kex, const x50
     }
 }
 
+class dhe_rsa_client_kex_protocol : public client_key_exchange_protocol {
+public:
+    dhe_rsa_client_kex_protocol(const tls::random& client_random, const tls::random& server_random) {
+        tls::append_to_buffer(digest_buf, client_random);
+        tls::append_to_buffer(digest_buf, server_random);
+    }
+
+private:
+    std::unique_ptr<tls::server_dh_params> server_dh_params_;
+    std::vector<uint8_t> digest_buf;
+
+    virtual void do_server_key_exchange(const tls::handshake& ske) override {
+        assert(!server_dh_params_);
+        auto kex = tls::get_as<tls::server_key_exchange_dhe>(ske);
+        std::cout << "Got server key exchange! hash=" << kex.hash_algorithm << " signature=" << kex.signature_algorithm << std::endl;
+        std::cout << "Signature: " << util::base16_encode(kex.signature.as_vector()) << std::endl;
+        std::cout << "dh_p:      " << util::base16_encode(kex.params.dh_p.as_vector()) << std::endl;
+        std::cout << "dh_g:      " << util::base16_encode(kex.params.dh_g.as_vector()) << std::endl;
+        std::cout << "dh_Ys:     " << util::base16_encode(kex.params.dh_Ys.as_vector()) << std::endl;
+
+        tls::append_to_buffer(digest_buf, kex.params);
+        verify_dhe_signature(kex, server_public_key_rsa(), digest_buf);
+        server_dh_params_.reset(new tls::server_dh_params(kex.params));
+    }
+
+    virtual result_type do_result() const override {
+        if (!server_dh_params_) FUNTLS_CHECK_FAILURE("");
+        const size_t key_size = server_dh_params_->dh_p.size();
+        //std::cout << "Should generate int of size " << key_size*8 << " bits " << std::endl;
+        std::vector<uint8_t> rand_int(key_size);
+        do {
+            tls::get_random_bytes(&rand_int[0], rand_int.size());
+        } while (std::find_if(rand_int.begin(), rand_int.end(), [](uint8_t i) { return i != 0; }) == rand_int.end());
+
+        const int_type private_key = x509::base256_decode<int_type>(rand_int);
+
+        //std::cout << "DHE client private key: " << std::hex << private_key << std::dec << std::endl;
+
+        const int_type p  = x509::base256_decode<int_type>(server_dh_params_->dh_p.as_vector());
+        const int_type g  = x509::base256_decode<int_type>(server_dh_params_->dh_g.as_vector());
+        const int_type Ys = x509::base256_decode<int_type>(server_dh_params_->dh_Ys.as_vector());
+        const int_type Yc = powm(g, private_key, p);
+        const auto dh_Yc  = x509::base256_encode(Yc, key_size);
+
+        //std::cout << "dh_Yc = " << util::base16_encode(dh_Yc) << std::endl;
+
+        tls::client_key_exchange_dhe_rsa client_key_exchange{tls::vector<tls::uint8,1,(1<<16)-1>{dh_Yc}};
+        auto handshake = make_handshake(client_key_exchange);
+
+        const int_type Z = powm(Ys, private_key, p);
+        auto dh_Z  = x509::base256_encode(Z, key_size);
+        //std::cout << "Negotaited key = " << util::base16_encode(dh_Z) << std::endl;
+        return std::make_pair(std::move(dh_Z), std::move(handshake));
+    }
+};
+
 } // unnamed namespace
 
 // http://stackoverflow.com/questions/10175812/how-to-create-a-self-signed-certificate-with-openssl
@@ -99,12 +168,228 @@ void verify_dhe_signature(const tls::server_key_exchange_dhe& dhe_kex, const x50
 // cat server_key.pem server_cert.pem >server.pem
 // openssl s_server
 
-class tls_socket {
+namespace funtls { namespace tls {
+
+enum class connection_end { server, client };
+
+class socket {
+public:
+
+    void send_app_data(const std::vector<uint8_t>& d) {
+        send_record(content_type::application_data, d);
+    }
+
+    std::vector<uint8_t> next_app_data() {
+        const auto record = read_record();
+        FUNTLS_CHECK_BINARY(record.type, ==, content_type::application_data, "Unexpected content type");
+        return record.fragment;
+    }
+
+protected:
+    explicit socket(connection_end ce, boost::asio::ip::tcp::socket&& socket)
+        : socket_(std::move(socket))
+        , connection_end_(ce) {
+    }
+
+    void send_record(tls::content_type content_type, const std::vector<uint8_t>& plaintext) {
+        collapse_pending();
+        FUNTLS_CHECK_BINARY(plaintext.size(), >=, 1, "Illegal plain text size"); // TODO: Empty plaintext is legal for app data
+        FUNTLS_CHECK_BINARY(plaintext.size(), <=, record::max_plaintext_length, "Illegal plain text size");
+
+        if (content_type == tls::content_type::handshake) {
+            handshake_message_digest_.input(plaintext);
+        }
+
+        // Compression would happen here
+
+        // Do encryption
+        const auto ver_buffer = verification_buffer(encrypt_sequence_number_++, content_type, current_protocol_version_, plaintext.size());
+        const auto fragment  = encrypt_cipher_->process(plaintext, ver_buffer);
+        FUNTLS_CHECK_BINARY(fragment.size(), <=, record::max_ciphertext_length, "Illegal fragment size");
+
+        std::vector<uint8_t> header;
+        append_to_buffer(header, content_type);
+        append_to_buffer(header, current_protocol_version_);
+        append_to_buffer(header, uint16(fragment.size()));
+        assert(header.size() == 5);
+
+        boost::asio::write(socket_, boost::asio::buffer(header));
+        boost::asio::write(socket_, boost::asio::buffer(fragment));
+    }
+
+    record read_record() {
+        collapse_pending();
+        std::vector<uint8_t> buffer(5);
+        boost::asio::read(socket_, boost::asio::buffer(buffer));
+
+        util::buffer_view     buf_view{&buffer[0], buffer.size()};
+        content_type     content_type;
+        protocol_version protocol_version;
+        uint16           length;
+        from_bytes(content_type, buf_view);
+        from_bytes(protocol_version, buf_view);
+        from_bytes(length, buf_view);
+        assert(buf_view.remaining() == 0);
+
+        FUNTLS_CHECK_BINARY(protocol_version, ==, current_protocol_version(), "Wrong TLS version");
+        FUNTLS_CHECK_BINARY(length, >=, 1, "Illegal fragment size");
+        FUNTLS_CHECK_BINARY(length, <=, record::max_ciphertext_length, "Illegal fragment size");
+
+        buffer.resize(length);
+        assert(buffer.size() <= record::max_ciphertext_length);
+        boost::asio::read(socket_, boost::asio::buffer(buffer));
+
+        //
+        // Decrypt
+        //
+        const auto ver_buffer = verification_buffer(decrypt_sequence_number_++, content_type, current_protocol_version(), 0 /* filled in later */);
+        buffer = decrypt_cipher_->process(buffer, ver_buffer);
+
+        // Decompression would happen here
+        FUNTLS_CHECK_BINARY(buffer.size(), <=, record::max_compressed_length, "Illegal decoded fragment size");
+
+        //
+        // We now have a TLSPlaintext buffer for consumption
+        //
+        FUNTLS_CHECK_BINARY(buffer.size(), <=, record::max_plaintext_length, "Illegal decoded fragment size");
+
+        if (content_type == tls::content_type::alert) {
+            util::buffer_view alert_buf(&buffer[0], buffer.size());
+            alert alert;
+            from_bytes(alert, alert_buf);
+            FUNTLS_CHECK_BINARY(alert_buf.remaining(), ==, 0, "Invalid alert message");
+
+            std::ostringstream oss;
+            oss << alert.level << " " << alert.description;
+            std::cout << "Got alert: " << oss.str() <<  std::endl;
+            throw std::runtime_error("Alert received: " + oss.str());
+        }
+
+        if (content_type == tls::content_type::handshake) {
+            assert(pending_handshake_messages_.empty());
+            pending_handshake_messages_ = buffer; // Will not become actove after this message has been parsed. This is a HACK
+        }
+
+        return record{content_type, protocol_version, std::move(buffer)};
+    }
+
+    void send_handshake(const handshake& handshake) {
+        assert(handshake.content_type == content_type::handshake);
+        std::vector<uint8_t> payload_buffer;
+        append_to_buffer(payload_buffer, handshake);
+
+        send_record(handshake.content_type, payload_buffer);
+    }
+
+    handshake read_handshake() {
+        auto record = read_record();
+        FUNTLS_CHECK_BINARY(record.type, ==, content_type::handshake, "Invalid content type");
+
+        util::buffer_view frag_buf{&record.fragment[0], record.fragment.size()};
+        handshake handshake;
+        from_bytes(handshake, frag_buf);
+        assert(frag_buf.remaining() == 0);
+        return handshake;
+    }
+
+    protocol_version current_protocol_version() const {
+        return current_protocol_version_;
+    }
+
+    std::vector<uint8_t> handshake_message_digest() const {
+        return handshake_message_digest_.result();
+    }
+
+    void set_pending_ciphers(cipher_parameters&& client_cipher_parameters, cipher_parameters&& server_cipher_parameters) {
+        assert(!pending_encrypt_cipher_ && !pending_decrypt_cipher_);
+        pending_encrypt_cipher_ = make_cipher(client_cipher_parameters);
+        pending_decrypt_cipher_ = make_cipher(server_cipher_parameters);
+    }
+
+    void send_change_cipher_spec() {
+        if (!pending_encrypt_cipher_) {
+            FUNTLS_CHECK_FAILURE("Sending ChangeCipherSpec without a pending cipher suite");
+        }
+        change_cipher_spec msg{};
+        std::vector<uint8_t> payload_buffer;
+        append_to_buffer(payload_buffer, msg);
+        send_record(msg.content_type, payload_buffer);
+        //
+        // Immediately after sending [the ChangeCipherSpec] message, the sender MUST instruct the
+        // record layer to make the write pending state the write active state.
+        //
+        encrypt_cipher_ = std::move(pending_encrypt_cipher_);
+        //
+        // The sequence number MUST be set to zero whenever a connection state is made the
+        // active state.
+        //
+        encrypt_sequence_number_ = 0;
+        //
+        // A Finished message is always sent immediately after a change
+        // cipher spec message to verify that the key exchange and
+        // authentication processes were successful
+        //
+        send_handshake(tls::make_handshake(tls::finished{do_verify_data(connection_end_)}));
+    }
+
+    void read_change_cipher_spec() {
+        auto record = read_record();
+        FUNTLS_CHECK_BINARY(record.type,            ==, content_type::change_cipher_spec, "Invalid content type");
+        FUNTLS_CHECK_BINARY(record.fragment.size(), ==, 1, "Invalid ChangeCipherSpec fragment size");
+        FUNTLS_CHECK_BINARY(record.fragment[0],     !=, 0, "Invalid ChangeCipherSpec fragment data");
+        //
+        // Reception of [the ChangeCipherSpec] message causes the receiver to instruct the record layer to
+        // immediately copy the read pending state into the read current state.
+        //
+        if (!pending_decrypt_cipher_) {
+            FUNTLS_CHECK_FAILURE("Got ChangeCipherSpec without a pending cipher suite");
+        }
+        decrypt_cipher_          = std::move(pending_decrypt_cipher_);
+        decrypt_sequence_number_ = 0;
+
+        // Read finished
+        auto handshake = read_handshake();
+        auto finished = tls::get_as<tls::finished>(handshake);
+        const auto calced_verify_data = do_verify_data(connection_end_ == connection_end::server ? connection_end::client : connection_end::server);
+        if (finished.verify_data != calced_verify_data) {
+            std::ostringstream oss;
+            oss << "Got invalid finished message. verify_data check failed. Expected ";
+            oss << "'" << util::base16_encode(calced_verify_data) << "' Got";
+            oss << "'" << util::base16_encode(finished.verify_data);
+            FUNTLS_CHECK_FAILURE(oss.str());
+        }
+    }
+
+private:
+    boost::asio::ip::tcp::socket socket_;
+
+    // State
+    connection_end               connection_end_;
+    protocol_version             current_protocol_version_ = protocol_version_tls_1_2;
+    uint64_t                     encrypt_sequence_number_  = 0;
+    uint64_t                     decrypt_sequence_number_  = 0;
+    std::unique_ptr<cipher>      encrypt_cipher_           = make_cipher(null_cipher_parameters_e);
+    std::unique_ptr<cipher>      decrypt_cipher_           = make_cipher(null_cipher_parameters_d);
+    std::unique_ptr<cipher>      pending_encrypt_cipher_;
+    std::unique_ptr<cipher>      pending_decrypt_cipher_;
+    hash::sha256                 handshake_message_digest_;
+    std::vector<uint8_t>         pending_handshake_messages_;
+
+    void collapse_pending() {
+        handshake_message_digest_.input(pending_handshake_messages_);
+        pending_handshake_messages_.clear();
+    }
+
+    virtual std::vector<uint8_t> do_verify_data(tls::connection_end ce) const = 0;
+};
+} } // namespace funtls::tls
+
+class tls_client : public tls::socket {
 public:
     typedef std::function<void (const std::vector<x509::certificate>&)> verify_certificate_chain_func;
 
-    explicit tls_socket(boost::asio::ip::tcp::socket& socket, const std::vector<tls::cipher_suite>& wanted_ciphers, const verify_certificate_chain_func& verify_certificate_chain)
-        : socket(socket)
+    explicit tls_client(boost::asio::ip::tcp::socket&& socket, const std::vector<tls::cipher_suite>& wanted_ciphers, const verify_certificate_chain_func& verify_certificate_chain)
+        : tls::socket(tls::connection_end::client, std::move(socket))
         , wanted_ciphers_(wanted_ciphers)
         , verify_certificate_chain_(verify_certificate_chain)
         , client_random(tls::make_random()) {
@@ -113,37 +398,15 @@ public:
         perform_handshake();
     }
 
-    void send_app_data(const std::vector<uint8_t>& d) {
-        send_record(tls::content_type::application_data, d);
-    }
-
-    std::vector<uint8_t> next_app_data() {
-        const auto record = read_record();
-        FUNTLS_CHECK_BINARY(record.type, ==, tls::content_type::application_data, "Unexpected content type");
-        return record.fragment;
-    }
-
 private:
-    const tls::protocol_version     current_protocol_version = tls::protocol_version_tls_1_2;
-    boost::asio::ip::tcp::socket&   socket;
     std::vector<tls::cipher_suite>  wanted_ciphers_;
     tls::cipher_suite               negotiated_cipher_;
     verify_certificate_chain_func   verify_certificate_chain_;
     const tls::random               client_random;
     tls::random                     server_random;
-    std::unique_ptr<
-        x509::rsa_public_key>       server_public_key;
-    std::unique_ptr<
-        tls::server_dh_params>      server_dh_params;
+    std::unique_ptr<client_key_exchange_protocol> client_kex;
     tls::session_id                 sesion_id;
     std::vector<uint8_t>            master_secret;
-    hash::sha256                    handshake_message_digest;
-    uint64_t                        encrypt_sequence_number = 0;
-    uint64_t                        decrypt_sequence_number = 0;
-    std::unique_ptr<tls::cipher>    encrypt_cipher = tls::make_cipher(tls::null_cipher_parameters_e);
-    std::unique_ptr<tls::cipher>    decrypt_cipher = tls::make_cipher(tls::null_cipher_parameters_d);
-    std::unique_ptr<tls::cipher>    pending_encrypt_cipher;
-    std::unique_ptr<tls::cipher>    pending_decrypt_cipher;
 
     void perform_handshake() {
         /*
@@ -169,42 +432,16 @@ private:
         read_server_hello();
         read_until_server_hello_done();
         send_client_key_exchange();
-        send_change_cipher_spec(); // calls send_finished();
+        send_change_cipher_spec();
         read_change_cipher_spec();
-        read_finished();
 
         std::cout << "Session " << util::base16_encode(sesion_id.as_vector()) << " in progress\n";
     }
 
-    // TODO: This only works when the payload isn't encrypted/compressed
-    template<typename Payload>
-    void send_record(const Payload& payload) {
-        std::vector<uint8_t> payload_buffer;
-        append_to_buffer(payload_buffer, payload);
-
-        send_record(payload.content_type, payload_buffer);
-        if (payload.content_type == tls::content_type::handshake) {
-            // HACK
-            handshake_message_digest.input(payload_buffer);
-        }
-    }
-
-    tls::handshake read_handshake() {
-        auto record = read_record();
-        FUNTLS_CHECK_BINARY(record.type, ==, tls::content_type::handshake, "Invalid content type");
-
-        util::buffer_view frag_buf{&record.fragment[0], record.fragment.size()};
-        tls::handshake handshake;
-        tls::from_bytes(handshake, frag_buf);
-        assert(frag_buf.remaining() == 0);
-        handshake_message_digest.input(record.fragment);
-        return handshake;
-    }
-
     void send_client_hello() {
-        send_record(tls::make_handshake(
+        send_handshake(tls::make_handshake(
             tls::client_hello{
-                current_protocol_version,
+                current_protocol_version(),
                 client_random,
                 sesion_id,
                 wanted_ciphers_,
@@ -228,94 +465,47 @@ private:
         std::cout << "Negotiated cipher suite:\n" << tls::parameters_from_suite(negotiated_cipher_) << std::endl;
     }
 
-    // TODO: Improve this function
     void read_until_server_hello_done() {
-        std::vector<tls::certificate> certificate_lists;
-
-        static const tls::handshake_type handshake_order[] = {
-            tls::handshake_type::certificate,
-            tls::handshake_type::server_key_exchange,
-            //tls::handshake_type::certificate_request
-            tls::handshake_type::server_hello_done
-        };
-
         const auto cipher_param = tls::parameters_from_suite(negotiated_cipher_);
-        std::unique_ptr<tls::server_key_exchange_dhe> dhe_kex;
-
-        static const size_t num_handshake_order = sizeof(handshake_order)/sizeof(*handshake_order);
-        for (size_t order = 0; ; ) {
-            auto handshake = read_handshake();
-            while (handshake.type != handshake_order[order]) {
-                ++order;
-                FUNTLS_CHECK_BINARY(order, <, num_handshake_order, "Handshake of type " + std::to_string((int)handshake.type) + " received out of order");
-            }
-
-            if (handshake.type == tls::handshake_type::certificate) {
-                certificate_lists.push_back(tls::get_as<tls::certificate>(handshake));
-            } else if (handshake.type == tls::handshake_type::server_key_exchange) {
-                // HACK
-                FUNTLS_CHECK_BINARY(tls::key_exchange_algorithm::dhe_rsa, ==, cipher_param.key_exchange_algorithm, "");
-                auto kex = tls::get_as<tls::server_key_exchange_dhe>(handshake);
-                std::cout << "Got server key exchange! hash=" << kex.hash_algorithm << " signature=" << kex.signature_algorithm << std::endl;
-                std::cout << "Signature: " << util::base16_encode(kex.signature.as_vector()) << std::endl;
-                std::cout << "dh_p:      " << util::base16_encode(kex.params.dh_p.as_vector()) << std::endl;
-                std::cout << "dh_g:      " << util::base16_encode(kex.params.dh_g.as_vector()) << std::endl;
-                std::cout << "dh_Ys:     " << util::base16_encode(kex.params.dh_Ys.as_vector()) << std::endl;
-
-                if (dhe_kex) {
-                    FUNTLS_CHECK_FAILURE("More than one server_key_change_dhe messages");
-                }
-                dhe_kex.reset(new tls::server_key_exchange_dhe(kex));
-
-            } else if (handshake.type == tls::handshake_type::server_hello_done) {
-                FUNTLS_CHECK_BINARY(handshake.body.size(), ==, 0, "Invalid ServerHelloDone message");
-                break;
-            } else {
-                FUNTLS_CHECK_FAILURE("Internal error: Unknown handshake type " + std::to_string((int)handshake.type));
-            }
-        }
-
-        if (certificate_lists.size() != 1) {
-            throw std::runtime_error("Unsupported number of certificate lists: " + std::to_string(certificate_lists.size()));
-        }
-
-        std::vector<x509::certificate> certlist;
-        for (const auto& c : certificate_lists[0].certificate_list) {
-            const auto v = c.as_vector();
-            auto cert_buf = util::buffer_view{&v[0], v.size()};
-            certlist.push_back(x509::certificate::parse(asn1::read_der_encoded_value(cert_buf)));
-        }
-
-        FUNTLS_CHECK_BINARY(certlist.size(), >, 0, "Empty certificate chain not allowed");
-        verify_certificate_chain_(certlist);
-        server_public_key.reset(new x509::rsa_public_key(rsa_public_key_from_certificate(certlist[0])));
-
-        // HAX
-        if (dhe_kex) {
-            assert(server_public_key);
-            std::vector<uint8_t> digest_buf;
-            append_to_buffer(digest_buf, client_random);
-            append_to_buffer(digest_buf, server_random);
-            append_to_buffer(digest_buf, dhe_kex->params);
-            verify_dhe_signature(*dhe_kex, *server_public_key, digest_buf);
-            server_dh_params.reset(new tls::server_dh_params(dhe_kex->params));
-        }
-    }
-
-    void send_client_key_exchange() {
-        const auto cipher_param = tls::parameters_from_suite(negotiated_cipher_);
-        std::vector<uint8_t> pre_master_secret;
-        tls::handshake       client_key_exchange;
         if (cipher_param.key_exchange_algorithm == tls::key_exchange_algorithm::rsa) {
-            assert(server_public_key);
-            std::tie(pre_master_secret, client_key_exchange) = client_key_exchange_rsa(current_protocol_version, *server_public_key);
+            client_kex.reset(new rsa_client_kex_protocol{current_protocol_version()});
         } else if (cipher_param.key_exchange_algorithm == tls::key_exchange_algorithm::dhe_rsa) {
-            assert(server_dh_params);
-            std::tie(pre_master_secret, client_key_exchange) = client_key_exchange_dhe_rsa(*server_dh_params);
+            client_kex.reset(new dhe_rsa_client_kex_protocol{client_random, server_random});
         } else {
             FUNTLS_CHECK_FAILURE("Internal error: Unsupported KeyExchangeAlgorithm " + std::to_string((int)(cipher_param.key_exchange_algorithm)));
         }
-        send_record(client_key_exchange);
+
+        std::vector<x509::certificate> certificate_list;
+
+        // Note: Handshake messages are only allowed in a specific order
+
+        auto handshake = read_handshake();
+        if (handshake.type == tls::handshake_type::certificate) {
+            auto cert_message = tls::get_as<tls::certificate>(handshake);
+            for (const auto& c : cert_message.certificate_list) {
+                const auto v = c.as_vector();
+                auto cert_buf = util::buffer_view{&v[0], v.size()};
+                certificate_list.push_back(x509::certificate::parse(asn1::read_der_encoded_value(cert_buf)));
+            }
+
+            FUNTLS_CHECK_BINARY(certificate_list.size(), >, 0, "Empty certificate chain not allowed");
+            verify_certificate_chain_(certificate_list);
+            client_kex->certificate_list(certificate_list);
+
+            handshake = read_handshake();
+        }
+
+        if (handshake.type == tls::handshake_type::server_key_exchange) {
+            client_kex->server_key_exchange(handshake);
+            handshake = read_handshake();
+        }
+
+        // Only CertificateRequest allowed before ServerHelloDone
+
+        (void) tls::get_as<tls::server_hello_done>(handshake);
+    }
+
+    void request_cipher_change(const std::vector<uint8_t>& pre_master_secret) {
         // We can now compute the master_secret as specified in rfc5246 8.1
         // master_secret = PRF(pre_master_secret, "master secret", ClientHello.random + ServerHello.random)[0..47]
 
@@ -327,8 +517,8 @@ private:
         std::cout << "Master secret: " << util::base16_encode(master_secret) << std::endl;
 
         // Now do Key Calculation http://tools.ietf.org/html/rfc5246#section-6.3
-        // key_block = PRF(SecurityParameters.master_secret, "key expansion",
-        // SecurityParameters.server_random + SecurityParameters.client_random)
+        // key_block = PRF(SecurityParameters.master_secret, "key expansion", SecurityParameters.server_random + SecurityParameters.client_random)
+        const auto cipher_param = tls::parameters_from_suite(negotiated_cipher_);
         const size_t key_block_length  = 2 * cipher_param.mac_key_length + 2 * cipher_param.key_length + 2 * cipher_param.fixed_iv_length;
         auto key_block = tls::PRF(master_secret, "key expansion", tls::vec_concat(server_random.as_vector(), client_random.as_vector()), key_block_length);
 
@@ -347,37 +537,19 @@ private:
         tls::cipher_parameters server_cipher_parameters{tls::cipher_parameters::decrypt, cipher_param, server_mac_key, server_enc_key, server_iv};
 
         // TODO: This should obviously be reversed if running as a server
-        pending_encrypt_cipher = tls::make_cipher(client_cipher_parameters);
-        pending_decrypt_cipher = tls::make_cipher(server_cipher_parameters);
-     }
-
-    void send_change_cipher_spec() {
-        if (!pending_encrypt_cipher) {
-            FUNTLS_CHECK_FAILURE("Sending ChangeCipherSpec without a pending cipher suite");
-        }
-        send_record(tls::change_cipher_spec{});
-        //
-        // Immediately after sending [the ChangeCipherSpec] message, the sender MUST instruct the
-        // record layer to make the write pending state the write active state.
-        //
-        encrypt_cipher = std::move(pending_encrypt_cipher);
-        //
-        // The sequence number MUST be set to zero whenever a connection state is made the
-        // active state.
-        //
-        encrypt_sequence_number = 0;
-        //
-        // A Finished message is always sent immediately after a change
-        // cipher spec message to verify that the key exchange and
-        // authentication processes were successful
-        //
-        send_finished();
+        set_pending_ciphers(std::move(client_cipher_parameters), std::move(server_cipher_parameters));
     }
 
-    void send_finished() {
-        //
-        // The data to include in the "finished" handshake is "verify_data":
-        //
+    void send_client_key_exchange() {
+        std::vector<uint8_t> pre_master_secret;
+        tls::handshake       client_key_exchange;
+        assert(client_kex);
+        std::tie(pre_master_secret, client_key_exchange) = client_kex->result();
+        send_handshake(client_key_exchange);
+        request_cipher_change(pre_master_secret);
+    }
+
+    virtual std::vector<uint8_t> do_verify_data(tls::connection_end ce) const override {
         // verify_data = PRF(master_secret, finished_label, Hash(handshake_messages))[0..verify_data_length-1]
         // finished_label: 
         //      For Finished messages sent by the client, the string "client finished".
@@ -386,138 +558,8 @@ private:
         //      All of the data from all messages in this handshake (not
         //      including any HelloRequest messages) up to, but not including,
         //      this message
-        auto verify_data = tls::PRF(master_secret, "client finished", handshake_message_digest.result(), tls::finished::verify_data_length);
-        assert(verify_data.size() == tls::finished::verify_data_length);
-
-        std::vector<uint8_t> content;
-        tls::append_to_buffer(content, tls::handshake_type::finished);
-        tls::append_to_buffer(content, tls::uint24(verify_data.size()));
-        tls::append_to_buffer(content, verify_data);
-
-        handshake_message_digest.input(content); // Now safe to update since we've used 
-
-        send_record(tls::content_type::handshake, content);
-    }
-
-    void send_record(tls::content_type content_type, const std::vector<uint8_t>& plaintext) {
-        FUNTLS_CHECK_BINARY(plaintext.size(), >=, 1, "Illegal plain text size");
-        FUNTLS_CHECK_BINARY(plaintext.size(), <=, tls::record::max_plaintext_length, "Illegal plain text size");
-
-        //
-        // We have our plaintext content to send (content).
-        // First apply compression (trivial for CompressionMethod.null)
-        // TODO
-        //
-
-        //
-        // Do encryption
-        //
-        const auto ver_buffer = verification_buffer(encrypt_sequence_number++, content_type, current_protocol_version, plaintext.size());
-        const auto fragment  = encrypt_cipher->process(plaintext, ver_buffer);
-        FUNTLS_CHECK_BINARY(fragment.size(), <=, tls::record::max_ciphertext_length, "Illegal fragment size");
-
-        std::vector<uint8_t> header;
-        tls::append_to_buffer(header, content_type);
-        tls::append_to_buffer(header, current_protocol_version);
-        tls::append_to_buffer(header, tls::uint16(fragment.size()));
-        assert(header.size() == 5);
-
-        boost::asio::write(socket, boost::asio::buffer(header));
-        boost::asio::write(socket, boost::asio::buffer(fragment));
-    }
-
-    void read_change_cipher_spec() {
-        auto record = read_record();
-        FUNTLS_CHECK_BINARY(record.type,            ==, tls::content_type::change_cipher_spec, "Invalid content type");
-        FUNTLS_CHECK_BINARY(record.fragment.size(), ==, 1, "Invalid ChangeCipherSpec fragment size");
-        FUNTLS_CHECK_BINARY(record.fragment[0],     !=, 0, "Invalid ChangeCipherSpec fragment data");
-        std::cout << "Got ChangeCipherSpec\n";
-        //
-        // Reception of [the ChangeCipherSpec] message causes the receiver to instruct the record layer to
-        // immediately copy the read pending state into the read current state.
-        //
-        if (!pending_decrypt_cipher) {
-            FUNTLS_CHECK_FAILURE("Got ChangeCipherSpec without a pending cipher suite");
-        }
-        decrypt_cipher = std::move(pending_decrypt_cipher);
-        decrypt_sequence_number = 0;
-    }
-
-    void read_finished() {
-        const auto record = read_record();
-        FUNTLS_CHECK_BINARY(record.type, ==, tls::content_type::handshake, "Invalid record type");
-        const auto& content = record.fragment;
-        // Parse content
-        FUNTLS_CHECK_BINARY(content.size(), >=, 5, "Invalid finished message");
-        FUNTLS_CHECK_BINARY(content[0], ==, (int)tls::handshake_type::finished, "Invalid finished message");
-        FUNTLS_CHECK_BINARY(content[1], ==, 0, "Invalid finished message");
-        FUNTLS_CHECK_BINARY(content[2], ==, 0, "Invalid finished message");
-        FUNTLS_CHECK_BINARY(content[3], ==, tls::finished::verify_data_length, "Invalid finished message");
-        FUNTLS_CHECK_BINARY(content.size(), ==, 4U + content[3], "Invalid finished message");
-        const std::vector<uint8_t> verify_data{&content[4], &content[content.size()]};
-
-        const auto calced_verify_data = tls::PRF(master_secret, "server finished", handshake_message_digest.result(), tls::finished::verify_data_length);
-        if (verify_data != calced_verify_data) {
-            std::ostringstream oss;
-            oss << "Got invalid finished message. verify_data check failed. Expected ";
-            oss << "'" << util::base16_encode(calced_verify_data) << "' Got";
-            oss << "'" << util::base16_encode(verify_data);
-            FUNTLS_CHECK_FAILURE(oss.str());
-        }
-    }
-
-    tls::record read_record() {
-        std::vector<uint8_t> buffer(5);
-        boost::asio::read(socket, boost::asio::buffer(buffer));
-
-        util::buffer_view buf_view{&buffer[0], buffer.size()};
-        tls::content_type     content_type;
-        tls::protocol_version protocol_version;
-        tls::uint16           length;
-        tls::from_bytes(content_type, buf_view);
-        tls::from_bytes(protocol_version, buf_view);
-        tls::from_bytes(length, buf_view);
-        assert(buf_view.remaining() == 0);
-
-        FUNTLS_CHECK_BINARY(protocol_version, ==, current_protocol_version, "Wrong TLS version");
-        FUNTLS_CHECK_BINARY(length, >=, 1, "Illegal fragment size");
-        FUNTLS_CHECK_BINARY(length, <=, tls::record::max_ciphertext_length, "Illegal fragment size");
-
-        buffer.resize(length);
-        boost::asio::read(socket, boost::asio::buffer(buffer));
-
-        //
-        // Decrypt
-        //
-        assert(buffer.size() <= tls::record::max_ciphertext_length);
-        const auto ver_buffer = verification_buffer(decrypt_sequence_number++, content_type, current_protocol_version, 0 /* filled in later */);
-        buffer = decrypt_cipher->process(buffer, ver_buffer);
-
-        //
-        // Decompression
-        //
-        // TODO: decompress buffer -> buffer
-        FUNTLS_CHECK_BINARY(buffer.size(), <=, tls::record::max_compressed_length, "Illegal decoded fragment size");
-
-        //
-        // We now have a TLSPlaintext buffer for consumption
-        //
-        FUNTLS_CHECK_BINARY(buffer.size(), <=, tls::record::max_plaintext_length, "Illegal decoded fragment size");
-
-
-        if (content_type == tls::content_type::alert) {
-            util::buffer_view alert_buf(&buffer[0], buffer.size());
-            tls::alert alert;
-            tls::from_bytes(alert, alert_buf);
-            FUNTLS_CHECK_BINARY(alert_buf.remaining(), ==, 0, "Invalid alert message");
-
-            std::ostringstream oss;
-            oss << alert.level << " " << alert.description;
-            std::cout << "Got alert: " << oss.str() <<  std::endl;
-            throw std::runtime_error("Alert received: " + oss.str());
-        }
-
-        return tls::record{content_type, protocol_version, std::move(buffer)};
+        auto finished_label = ce == tls::connection_end::server ? "server finished" : "client finished";
+        return tls::PRF(master_secret, finished_label, handshake_message_digest(), tls::finished::verify_data_min_length);
     }
 };
 
@@ -719,8 +761,8 @@ int main(int argc, char* argv[])
         std::cout << "Connecting to " << host << ":" << port << " ..." << std::flush;
         boost::asio::connect(socket, resolver.resolve({host, port}));
         std::cout << " OK" << std::endl;
-        tls_socket::verify_certificate_chain_func cf = std::bind(&verify_cert_chain, std::placeholders::_1, ts);
-        tls_socket ts{socket, wanted_ciphers, cf};
+        tls_client::verify_certificate_chain_func cf = std::bind(&verify_cert_chain, std::placeholders::_1, ts);
+        tls_client ts{std::move(socket), wanted_ciphers, cf};
 
         const auto data = "GET "+path+" HTTP/1.1\r\nHost: "+host+"\r\nConnection: close\r\n\r\n";
         ts.send_app_data(std::vector<uint8_t>(data.begin(), data.end()));
