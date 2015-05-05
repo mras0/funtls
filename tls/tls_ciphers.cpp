@@ -318,13 +318,18 @@ hash::hash_algorithm get_hmac(mac_algorithm algo, const std::vector<uint8_t>& ke
 std::ostream& operator<<(std::ostream& os, key_exchange_algorithm e)
 {
     switch (e) {
-    case key_exchange_algorithm::null:    return os << "NULL";
-    case key_exchange_algorithm::dhe_dss: return os << "DHE_DSS";
-    case key_exchange_algorithm::dhe_rsa: return os << "DHE_RSA";
-    case key_exchange_algorithm::dh_anon: return os << "DH_anon";
-    case key_exchange_algorithm::rsa:     return os << "RSA";
-    case key_exchange_algorithm::dh_dss:  return os << "DH_DSS";
-    case key_exchange_algorithm::dh_rsa:  return os << "DH_RSA";
+    case key_exchange_algorithm::null:          return os << "NULL";
+    case key_exchange_algorithm::dhe_dss:       return os << "DHE_DSS";
+    case key_exchange_algorithm::dhe_rsa:       return os << "DHE_RSA";
+    case key_exchange_algorithm::dh_anon:       return os << "DH_anon";
+    case key_exchange_algorithm::rsa:           return os << "RSA";
+    case key_exchange_algorithm::dh_dss:        return os << "DH_DSS";
+    case key_exchange_algorithm::dh_rsa:        return os << "DH_RSA";
+    case key_exchange_algorithm::ecdh_ecdsa:    return os << "ECDH_ECDSA";
+    case key_exchange_algorithm::ecdhe_ecdsa:   return os << "ECDHE_ECDSA";
+    case key_exchange_algorithm::ecdh_rsa:      return os << "ECDH_RSA";
+    case key_exchange_algorithm::ecdhe_rsa:     return os << "ECDHE_RSA";
+    case key_exchange_algorithm::ecdh_anon:     return os << "ECDH_anon";
     }
     assert(false);
     return os << "Unknown TLS key exchange algorithm " << static_cast<unsigned>(e);
@@ -391,7 +396,8 @@ std::ostream& operator<<(std::ostream& os, mac_algorithm e)
         f(dhe_rsa_with_aes_256_cbc_sha);\
         f(dhe_rsa_with_aes_128_cbc_sha256);\
         f(dhe_rsa_with_aes_256_cbc_sha256);\
-        f(rsa_with_aes_128_gcm_sha256)
+        f(rsa_with_aes_128_gcm_sha256);\
+        f(ecdhe_ecdsa_with_aes_128_gcm_sha256)
 
 cipher_suite_parameters parameters_from_suite(cipher_suite suite)
 {
@@ -448,6 +454,10 @@ std::istream& operator>>(std::istream& is, cipher_suite& suite)
     if (try_consume(text, "rsa_")) {
     } else if (try_consume(text, "dhe_rsa_")) {
         kex_algo = key_exchange_algorithm::dhe_rsa;
+    } else if (try_consume(text, "ecdh_ecdsa_")) {
+        kex_algo = key_exchange_algorithm::ecdh_ecdsa;
+    } else if (try_consume(text, "ecdhe_ecdsa_")) {
+        kex_algo = key_exchange_algorithm::ecdhe_ecdsa;
     }
 
     // Skip (optional) with_

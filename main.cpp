@@ -163,11 +163,6 @@ private:
 
 } // unnamed namespace
 
-// http://stackoverflow.com/questions/10175812/how-to-create-a-self-signed-certificate-with-openssl
-// openssl req -x509 -newkey rsa:2048 -keyout server_key.pem -out server_cert.pem -days 365 -nodes
-// cat server_key.pem server_cert.pem >server.pem
-// openssl s_server
-
 namespace funtls { namespace tls {
 
 enum class connection_end { server, client };
