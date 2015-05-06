@@ -130,6 +130,14 @@ enum class key_exchange_algorithm {
     ecdh_anon,
 };
 
+inline bool is_ecc(key_exchange_algorithm kea) {
+    return kea == key_exchange_algorithm::ecdh_ecdsa  ||
+           kea == key_exchange_algorithm::ecdhe_ecdsa ||
+           kea == key_exchange_algorithm::ecdh_rsa    ||
+           kea == key_exchange_algorithm::ecdhe_rsa   ||
+           kea == key_exchange_algorithm::ecdh_anon;
+}
+
 enum class prf_algorithm {
     tls_prf_sha256
 };

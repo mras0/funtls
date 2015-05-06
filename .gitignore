@@ -1,5 +1,7 @@
 build/
 tags
 *.pyc
-key.pem
-cert.pem
+ec-key.pem
+ec-cert.pem
+rsa-key.pem
+rsa-cert.pem

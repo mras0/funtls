@@ -434,6 +434,51 @@ private:
     }
 
     void send_client_hello() {
+        std::vector<tls::extension> extensions;
+
+        const bool use_ecc = std::any_of(
+                begin(wanted_ciphers_),
+                end(wanted_ciphers_),
+                [](tls::cipher_suite cs) { return tls::is_ecc(tls::parameters_from_suite(cs).key_exchange_algorithm); }
+                );
+        // Only send elliptic curve list if requesting at least one ECC cipher
+        if (use_ecc) {
+            // TODO: Order by preference
+            tls::vector<tls::uint16, 2, (1<<16)-2> named_curves {
+                /* sect163k1 */ 1,
+                /* sect163r1 */ 2,
+                /* sect163r2 */ 3,
+                /* sect193r1 */ 4,
+                /* sect193r2 */ 5,
+                /* sect233k1 */ 6,
+                /* sect233r1 */ 7,
+                /* sect239k1 */ 8,
+                /* sect283k1 */ 9,
+                /* sect283r1 */ 10,
+                /* sect409k1 */ 11,
+                /* sect409r1 */ 12,
+                /* sect571k1 */ 13,
+                /* sect571r1 */ 14,
+                /* secp160k1 */ 15,
+                /* secp160r1 */ 16,
+                /* secp160r2 */ 17,
+                /* secp192k1 */ 18,
+                /* secp192r1 */ 19,
+                /* secp224k1 */ 20,
+                /* secp224r1 */ 21,
+                /* secp256k1 */ 22,
+                /* secp256r1 */ 23,
+                /* secp384r1 */ 24,
+                /* secp521r1 */ 25,
+                /* arbitrary_explicit_prime_curves */ 0xFF01,
+                /* arbitrary_explicit_char2_curves */ 0xFF02,
+            };
+            // OpenSSL requires a list of supported named curves to support ECDH(E)_ECDSA
+            std::vector<uint8_t> ecl_buf; // elliptic_curve_list;
+            tls::append_to_buffer(ecl_buf, named_curves);
+            extensions.push_back(tls::extension{tls::extension::elliptic_curves, ecl_buf});
+        }
+
         send_handshake(tls::make_handshake(
             tls::client_hello{
                 current_protocol_version(),
@@ -441,6 +486,7 @@ private:
                 sesion_id,
                 wanted_ciphers_,
                 { tls::compression_method::null },
+                extensions
             }
         ));
     }
@@ -509,7 +555,7 @@ private:
         tls::append_to_buffer(rand_buf, server_random);
         master_secret = tls::PRF(pre_master_secret, "master secret", rand_buf, tls::master_secret_size);
         assert(master_secret.size() == tls::master_secret_size);
-        std::cout << "Master secret: " << util::base16_encode(master_secret) << std::endl;
+        //std::cout << "Master secret: " << util::base16_encode(master_secret) << std::endl;
 
         // Now do Key Calculation http://tools.ietf.org/html/rfc5246#section-6.3
         // key_block = PRF(SecurityParameters.master_secret, "key expansion", SecurityParameters.server_random + SecurityParameters.client_random)
@@ -517,7 +563,7 @@ private:
         const size_t key_block_length  = 2 * cipher_param.mac_key_length + 2 * cipher_param.key_length + 2 * cipher_param.fixed_iv_length;
         auto key_block = tls::PRF(master_secret, "key expansion", tls::vec_concat(server_random.as_vector(), client_random.as_vector()), key_block_length);
 
-        std::cout << "Keyblock:\n" << util::base16_encode(key_block) << "\n";
+        //std::cout << "Keyblock:\n" << util::base16_encode(key_block) << "\n";
 
         size_t i = 0;
         auto client_mac_key = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.mac_key_length]};  i += cipher_param.mac_key_length;
@@ -718,6 +764,7 @@ int main(int argc, char* argv[])
     std::cout << "path: " << path << std::endl;
 
     std::vector<tls::cipher_suite> wanted_ciphers{
+        //tls::cipher_suite::ecdhe_ecdsa_with_aes_128_gcm_sha256,
         tls::cipher_suite::rsa_with_aes_128_gcm_sha256,
         tls::cipher_suite::dhe_rsa_with_aes_256_cbc_sha256,
         tls::cipher_suite::dhe_rsa_with_aes_128_cbc_sha256,

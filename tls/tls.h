@@ -213,6 +213,18 @@ enum class compression_method : uint8 {
     null = 0
 };
 
+struct extension {
+    enum type : uint16_t {
+        elliptic_curves      = 10,
+        ec_point_formats     = 11,
+        signature_algorithms = 13,
+
+    };
+
+    enum type                        type;
+    tls::vector<uint8, 0, (1<<16)-1> data;
+};
+
 struct client_hello {
     static constexpr tls::handshake_type handshake_type = tls::handshake_type::client_hello;
 
@@ -221,6 +233,7 @@ struct client_hello {
     tls::session_id                                     session_id;
     tls::vector<tls::cipher_suite, 2, (1<<16)-2>        cipher_suites;
     tls::vector<tls::compression_method, 1, (1<<8)-1>   compression_methods;
+    std::vector<extension>                              extensions; //<0..2^16-1>;
 };
 
 struct server_hello {
@@ -407,12 +420,25 @@ inline void append_to_buffer(std::vector<uint8_t>& buffer, const random& item) {
     append_to_buffer(buffer, item.random_bytes);
 }
 
+inline void append_to_buffer(std::vector<uint8_t>& buffer, const extension& item) {
+    append_to_buffer(buffer, item.type);
+    append_to_buffer(buffer, item.data);
+}
+
 inline void append_to_buffer(std::vector<uint8_t>& buffer, const client_hello& item) {
     append_to_buffer(buffer, item.client_version);
     append_to_buffer(buffer, item.random);
     append_to_buffer(buffer, item.session_id);
     append_to_buffer(buffer, item.cipher_suites);
     append_to_buffer(buffer, item.compression_methods);
+
+    if (!item.extensions.empty()) {
+        assert(item.extensions.size() < 65535);
+        append_to_buffer(buffer, uint16(item.extensions.size()));
+        for (const auto& ext : item.extensions) {
+            append_to_buffer(buffer, ext);
+        }
+    }
 }
 
 inline void append_to_buffer(std::vector<uint8_t>& buffer, const certificate& item) {

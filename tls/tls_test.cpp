@@ -142,6 +142,7 @@ void test_cipher_parsing()
     TEST_IN(rsa_with_aes_256_cbc_sha256,         "aes256-SHA256");
     TEST_IN(rsa_with_aes_128_gcm_sha256,         "AES128-GCM-SHA256");
     TEST_IN(ecdhe_ecdsa_with_aes_128_gcm_sha256, "ECDHE-ECDSA-AES128-GCM-SHA256");
+    TEST_IN(ecdhe_ecdsa_with_aes_128_gcm_sha256, "ecdhe_ecdsa_with_aes_128_gcm_sha256");
 #undef TEST_IN
 }
 
