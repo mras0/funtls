@@ -244,6 +244,7 @@ struct server_hello {
     tls::session_id         session_id;
     tls::cipher_suite       cipher_suite;
     tls::compression_method compression_method;
+    std::vector<extension>  extensions; //<0..2^16-1>;
 };
 
 using asn1cert = tls::vector<tls::uint8, 1, (1<<24)-1>;
@@ -277,7 +278,6 @@ enum class signature_algorithm : uint8 {
 };
 
 std::ostream& operator<<(std::ostream& os, signature_algorithm s);
-
 
 // Ephemeral DH parameters
 struct server_dh_params {
@@ -544,17 +544,42 @@ inline void from_bytes(protocol_version& item, util::buffer_view& buffer) {
     item.major = buffer.get();
     item.minor = buffer.get();
 }
+
 inline void from_bytes(random& item, util::buffer_view& buffer) {
     from_bytes(item.gmt_unix_time, buffer);
     from_bytes(item.random_bytes, buffer);
 }
+
+inline void from_bytes(extension& item, util::buffer_view& buffer) {
+    from_bytes(item.type, buffer);
+    from_bytes(item.data, buffer);
+}
+
 inline void from_bytes(server_hello& item, util::buffer_view& buffer) {
     from_bytes(item.server_version, buffer);
     from_bytes(item.random, buffer);
     from_bytes(item.session_id, buffer);
     from_bytes(item.cipher_suite, buffer);
     from_bytes(item.compression_method, buffer);
+    if (buffer.remaining()) {
+        // Extensions
+        assert(item.server_version == protocol_version_tls_1_2);
+
+        uint16 bytes;
+        from_bytes(bytes, buffer);
+        // TODO: Better length validation
+        if (bytes != buffer.remaining()) {
+            throw std::runtime_error("Invalid ServerHello extensions list length got " + std::to_string(bytes) + " expected " + std::to_string(buffer.remaining()));
+        }
+        assert(item.extensions.empty());
+        while (buffer.remaining()) {
+            extension e;
+            from_bytes(e, buffer);
+            item.extensions.push_back(e);
+        }
+    }
 }
+
 inline void from_bytes(certificate& item, util::buffer_view& buffer) {
     // TODO: XXX: This is ugly...
     uint24 length;
@@ -585,10 +610,10 @@ inline void from_bytes(server_dh_params& item, util::buffer_view& buffer) {
     from_bytes(item.dh_Ys, buffer);
 }
 
-inline void from_bytes(server_hello_done& item, util::buffer_view& buffer) {
+inline void from_bytes(server_hello_done&, util::buffer_view& buffer) {
     assert(buffer.remaining() == 0);
-    (void)item; (void)buffer;
 }
+
 inline void from_bytes(server_key_exchange_dhe& item, util::buffer_view& buffer) {
     from_bytes(item.params, buffer);
     from_bytes(item.hash_algorithm, buffer);
@@ -627,6 +652,13 @@ inline HandshakeType get_as(const handshake& h) {
         throw std::runtime_error("Unread data in handshake of type " + std::to_string(int(HandshakeType::handshake_type)));
     }
     return inner;
+}
+
+template<typename T>
+std::vector<uint8_t> as_buffer(const T& item) {
+    std::vector<uint8_t> buffer;
+    append_to_buffer(buffer, item);
+    return buffer;
 }
 
 // TODO: remove

@@ -14,6 +14,7 @@
 #include <util/test.h>
 #include <util/buffer.h>
 #include <tls/tls.h>
+#include <tls/tls_ecc.h>
 
 #include <boost/multiprecision/cpp_int.hpp>
 using int_type = boost::multiprecision::cpp_int;
@@ -33,14 +34,22 @@ public:
     }
 
     void certificate_list(const std::vector<x509::certificate>& certificate_list) {
-        if (server_public_key_rsa_) FUNTLS_CHECK_FAILURE("");
-        server_public_key_rsa_.reset(new x509::rsa_public_key(rsa_public_key_from_certificate(certificate_list[0])));
+        do_certificate_list(certificate_list);
     }
 
     void server_key_exchange(const tls::handshake& ske) {
         do_server_key_exchange(ske);
     }
 
+private:
+    virtual result_type do_result() const = 0;
+    virtual void do_certificate_list(const std::vector<x509::certificate>& certificate_list) = 0;
+    virtual void do_server_key_exchange(const tls::handshake&) {
+        FUNTLS_CHECK_FAILURE("Not expecting ServerKeyExchange message");
+    }
+};
+
+class rsa_client_kex_protocol_base : public client_key_exchange_protocol {
 protected:
     const x509::rsa_public_key& server_public_key_rsa() const {
         if (!server_public_key_rsa_) FUNTLS_CHECK_FAILURE("");
@@ -49,13 +58,15 @@ protected:
 
 private:
     std::unique_ptr<x509::rsa_public_key> server_public_key_rsa_;
-    virtual result_type do_result() const = 0;
-    virtual void do_server_key_exchange(const tls::handshake&) {
-        FUNTLS_CHECK_FAILURE("Not expecting ServerKeyExchange message");
+
+    virtual void do_certificate_list(const std::vector<x509::certificate>& certificate_list) override {
+        assert(!certificate_list.empty());
+        if (server_public_key_rsa_) FUNTLS_CHECK_FAILURE("");
+        server_public_key_rsa_.reset(new x509::rsa_public_key(rsa_public_key_from_certificate(certificate_list[0])));
     }
 };
 
-class rsa_client_kex_protocol : public client_key_exchange_protocol {
+class rsa_client_kex_protocol : public rsa_client_kex_protocol_base {
 public:
     rsa_client_kex_protocol(tls::protocol_version protocol_version)
         : protocol_version_(protocol_version) {
@@ -105,7 +116,7 @@ void verify_dhe_signature(const tls::server_key_exchange_dhe& dhe_kex, const x50
     }
 }
 
-class dhe_rsa_client_kex_protocol : public client_key_exchange_protocol {
+class dhe_rsa_client_kex_protocol : public rsa_client_kex_protocol_base {
 public:
     dhe_rsa_client_kex_protocol(const tls::random& client_random, const tls::random& server_random) {
         tls::append_to_buffer(digest_buf, client_random);
@@ -158,6 +169,34 @@ private:
         auto dh_Z  = x509::base256_encode(Z, key_size);
         //std::cout << "Negotaited key = " << util::base16_encode(dh_Z) << std::endl;
         return std::make_pair(std::move(dh_Z), std::move(handshake));
+    }
+};
+
+class ecdhe_ecdsa_client_kex_protocol : public client_key_exchange_protocol {
+public:
+    ecdhe_ecdsa_client_kex_protocol() {
+    }
+
+private:
+    virtual result_type do_result() const override {
+        FUNTLS_CHECK_FAILURE("Not implemented");
+    }
+    virtual void do_certificate_list(const std::vector<x509::certificate>& certificate_list) override  {
+        assert(!certificate_list.empty());
+        std::cout << "Ignoring certificates:\n";
+        for (const auto& c : certificate_list) {
+            std::cout << c << std::endl;
+        }
+    }
+    virtual void do_server_key_exchange(const tls::handshake& ske) override {
+        auto kex = tls::get_as<tls::server_key_exchange_ec_dhe>(ske);
+        std::cout << "curve_type=" << kex.params.curve_params.curve_type << std::endl;
+        FUNTLS_CHECK_BINARY(kex.params.curve_params.curve_type, ==, tls::ec_curve_type::named_curve, "Unsupported curve type");
+        std::cout << "named_curve=" << kex.params.curve_params.named_curve << std::endl;
+        FUNTLS_CHECK_BINARY(kex.params.curve_params.named_curve, ==, tls::named_curve::secp256r1, "Unsupported curve");
+        std::cout << "public_key=" << util::base16_encode(kex.params.public_key.as_vector()) << std::endl;
+        std::cout << "signature: " << util::base16_encode(kex.signature) << std::endl;
+        FUNTLS_CHECK_FAILURE("Not implemented");
     }
 };
 
@@ -444,39 +483,18 @@ private:
         // Only send elliptic curve list if requesting at least one ECC cipher
         if (use_ecc) {
             // TODO: Order by preference
-            tls::vector<tls::uint16, 2, (1<<16)-2> named_curves {
-                /* sect163k1 */ 1,
-                /* sect163r1 */ 2,
-                /* sect163r2 */ 3,
-                /* sect193r1 */ 4,
-                /* sect193r2 */ 5,
-                /* sect233k1 */ 6,
-                /* sect233r1 */ 7,
-                /* sect239k1 */ 8,
-                /* sect283k1 */ 9,
-                /* sect283r1 */ 10,
-                /* sect409k1 */ 11,
-                /* sect409r1 */ 12,
-                /* sect571k1 */ 13,
-                /* sect571r1 */ 14,
-                /* secp160k1 */ 15,
-                /* secp160r1 */ 16,
-                /* secp160r2 */ 17,
-                /* secp192k1 */ 18,
-                /* secp192r1 */ 19,
-                /* secp224k1 */ 20,
-                /* secp224r1 */ 21,
-                /* secp256k1 */ 22,
-                /* secp256r1 */ 23,
-                /* secp384r1 */ 24,
-                /* secp521r1 */ 25,
-                /* arbitrary_explicit_prime_curves */ 0xFF01,
-                /* arbitrary_explicit_char2_curves */ 0xFF02,
+            static tls::named_curve named_curves[] = {
+                tls::named_curve::sect163k1, tls::named_curve::sect163r1, tls::named_curve::sect163r2, tls::named_curve::sect193r1,
+                tls::named_curve::sect193r2, tls::named_curve::sect233k1, tls::named_curve::sect233r1, tls::named_curve::sect239k1,
+                tls::named_curve::sect283k1, tls::named_curve::sect283r1, tls::named_curve::sect409k1, tls::named_curve::sect409r1,
+                tls::named_curve::sect571k1, tls::named_curve::sect571r1, tls::named_curve::secp160k1, tls::named_curve::secp160r1,
+                tls::named_curve::secp160r2, tls::named_curve::secp192k1, tls::named_curve::secp192r1, tls::named_curve::secp224k1,
+                tls::named_curve::secp224r1, tls::named_curve::secp256k1, tls::named_curve::secp256r1, tls::named_curve::secp384r1,
+                tls::named_curve::secp521r1, tls::named_curve::arbitrary_explicit_prime_curves, tls::named_curve::arbitrary_explicit_char2_curves,
             };
             // OpenSSL requires a list of supported named curves to support ECDH(E)_ECDSA
-            std::vector<uint8_t> ecl_buf; // elliptic_curve_list;
-            tls::append_to_buffer(ecl_buf, named_curves);
-            extensions.push_back(tls::extension{tls::extension::elliptic_curves, ecl_buf});
+            extensions.push_back(tls::make_named_curves(named_curves));
+            extensions.push_back(tls::make_ec_point_formats({tls::ec_point_format::uncompressed}));
         }
 
         send_handshake(tls::make_handshake(
@@ -501,6 +519,15 @@ private:
         if (server_hello.compression_method != tls::compression_method::null) {
             throw std::runtime_error("Invalid compression method " + std::to_string((int)server_hello.compression_method));
         }
+        for (const auto& e : server_hello.extensions) {
+            if (e.type == tls::extension::ec_point_formats) {
+                std::cerr << "Ignoring ec_point_formats extension in " << __FILE__ << ":" << __LINE__ << std::endl;
+            } else {
+                std::ostringstream msg;
+                msg << "Unsupported TLS ServerHello extension " << std::hex << e.type;
+                FUNTLS_CHECK_FAILURE(msg.str());
+            }
+        }
         server_random = server_hello.random;
         sesion_id = server_hello.session_id;
         std::cout << "Negotiated cipher suite:\n" << tls::parameters_from_suite(negotiated_cipher_) << std::endl;
@@ -512,6 +539,8 @@ private:
             client_kex.reset(new rsa_client_kex_protocol{current_protocol_version()});
         } else if (cipher_param.key_exchange_algorithm == tls::key_exchange_algorithm::dhe_rsa) {
             client_kex.reset(new dhe_rsa_client_kex_protocol{client_random, server_random});
+        } else if (cipher_param.key_exchange_algorithm == tls::key_exchange_algorithm::ecdhe_ecdsa) {
+            client_kex.reset(new ecdhe_ecdsa_client_kex_protocol{});
         } else {
             FUNTLS_CHECK_FAILURE("Internal error: Unsupported KeyExchangeAlgorithm " + std::to_string((int)(cipher_param.key_exchange_algorithm)));
         }
@@ -530,7 +559,10 @@ private:
             }
 
             FUNTLS_CHECK_BINARY(certificate_list.size(), >, 0, "Empty certificate chain not allowed");
-            verify_certificate_chain_(certificate_list);
+            if (cipher_param.key_exchange_algorithm == tls::key_exchange_algorithm::ecdhe_ecdsa)
+                std::cerr << "HACK HACK HACK - Skipping certificate chain validation in " << __FILE__ << ":" << __LINE__ << std::endl;
+            else
+                verify_certificate_chain_(certificate_list);
             client_kex->certificate_list(certificate_list);
 
             handshake = read_handshake();

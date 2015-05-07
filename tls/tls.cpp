@@ -54,34 +54,6 @@ std::vector<uint8_t> random::as_vector() const {
     return buf;
 }
 
-#if 0
-handshake handshake_from_bytes(util::buffer_view& buffer)
-{
-    tls::handshake_type handshake_type;
-    tls::uint24 body_size;
-    tls::from_bytes(handshake_type, buffer);
-    tls::from_bytes(body_size, buffer);
-    if (handshake_type == tls::handshake_type::server_hello) {
-        tls::server_hello server_hello;
-        tls::from_bytes(server_hello, buffer);
-        assert(buffer.remaining() == 0);
-        return tls::handshake{std::move(server_hello)};
-    } else if (handshake_type == tls::handshake_type::certificate) {
-        tls::certificate certificate;
-        tls::from_bytes(certificate, buffer);
-        assert(buffer.remaining() == 0);
-        return tls::handshake{std::move(certificate)};
-    } else if (handshake_type == tls::handshake_type::server_hello_done) {
-        if (body_size != 0) {
-            throw std::runtime_error("Got body " + std::to_string(body_size) + " for server_hello_done");
-        }
-        assert(buffer.remaining() == 0);
-        return tls::handshake{tls::server_hello_done{}};
-    }
-    throw std::runtime_error("Unknown handshake type " + std::to_string((int)handshake_type));
-}
-#endif
-
 std::ostream& operator<<(std::ostream& os, content_type type)
 {
     switch (type) {

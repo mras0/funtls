@@ -355,6 +355,9 @@ public:
     string_base(const der_encoded_value& repr)
         : raw_string(detail::read_string(id, repr)) {
     }
+    string_base(const std::string& repr)
+        : raw_string(repr) {
+    }
 };
 
 class any_string : public raw_string {
@@ -380,7 +383,15 @@ inline bool operator!=(const any_string& lhs, const any_string& rhs) {
     return !(lhs == rhs);
 }
 
-using octet_string = string_base<identifier::octet_string>;
+class octet_string : public string_base<identifier::octet_string> {
+public:
+    octet_string(const der_encoded_value& repr)
+        : string_base(repr) {
+    }
+    octet_string(const std::vector<uint8_t>& repr)
+        : string_base(std::string(repr.begin(), repr.end())) {
+    }
+};
 using utf8_string = string_base<identifier::utf8_string>;
 using printable_string = string_base<identifier::printable_string>;
 using t61_string = string_base<identifier::t61_string>;

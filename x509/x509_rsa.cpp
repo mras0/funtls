@@ -2,6 +2,7 @@
 #include <util/test.h>
 #include <util/base_conversion.h>
 #include <util/buffer.h>
+#include <hash/hash.h>
 
 #include <boost/multiprecision/cpp_int.hpp>
 using int_type = boost::multiprecision::cpp_int;
@@ -24,22 +25,6 @@ hash::hash_algorithm get_hash(const asn1::object_id& oid)
 
     std::ostringstream oss;
     oss << "Unknown hash algorithm " << oid;
-    FUNTLS_CHECK_FAILURE(oss.str());
-}
-
-asn1::object_id public_key_algo_from_signature_algo(const x509::algorithm_id& sig_algo)
-{
-    if (sig_algo.id() == x509::id_md2WithRSAEncryption
-     || sig_algo.id() == x509::id_md5WithRSAEncryption
-     || sig_algo.id() == x509::id_sha1WithRSAEncryption
-     || sig_algo.id() == x509::id_sha256WithRSAEncryption
-     || sig_algo.id() == x509::id_sha384WithRSAEncryption
-     || sig_algo.id() == x509::id_sha512WithRSAEncryption) {
-        FUNTLS_CHECK_BINARY(sig_algo.null_parameters(), ==, true, "Invalid algorithm parameters");
-        return x509::id_rsaEncryption;
-    }
-    std::ostringstream oss;
-    oss << "Unknown signature algorithm " << sig_algo;
     FUNTLS_CHECK_FAILURE(oss.str());
 }
 
@@ -175,7 +160,7 @@ rsa_public_key rsa_public_key_from_certificate(const certificate& cert)
     return x509::rsa_public_key::parse(asn1::read_der_encoded_value(pk_buf));
 }
 
-void verify_x509_signature(const certificate& subject_cert, const certificate& issuer_cert)
+void verify_x509_signature_rsa(const certificate& subject_cert, const certificate& issuer_cert)
 {
     auto c = subject_cert.tbs();
     FUNTLS_CHECK_BINARY(x509::id_rsaEncryption, ==, public_key_algo_from_signature_algo(subject_cert.signature_algorithm()), "Only RSA supported");
@@ -197,30 +182,6 @@ void verify_x509_signature(const certificate& subject_cert, const certificate& i
         oss << "Computed:  " << util::base16_encode(computed_sig) << "\n";
         oss << "Signature: " << util::base16_encode(digest.digest);
         FUNTLS_CHECK_FAILURE(oss.str());
-    }
-}
-
-void verify_x509_certificate_chain(const std::vector<certificate>& chain)
-{
-    FUNTLS_CHECK_BINARY(chain.size(), >=, 2, "Chain too short"); // This function shouldn't be used to check a single self-signed certificate
-    for (const auto& cert : chain) {
-        // Don't allow any critical extensions
-        for (const auto& ext : cert.tbs().extensions) {
-            static const std::vector<asn1::object_id> ignored_extensions {
-                id_ce_keyUsage,
-                    id_ce_basicConstraints,
-            };
-            if (ext.critical && std::find(ignored_extensions.begin(), ignored_extensions.end(), ext.id) == ignored_extensions.end()) {
-                std::ostringstream msg;
-                msg << "Unsupported critical certificate extension " << ext;
-                FUNTLS_CHECK_FAILURE(msg.str());
-            }
-        }
-    }
-    verify_x509_signature(chain.back(), chain.back());
-    size_t i = chain.size() - 1;
-    while (i--) {
-        verify_x509_signature(chain[i], chain[i+1]);
     }
 }
 

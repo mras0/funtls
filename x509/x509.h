@@ -89,6 +89,10 @@ std::ostream& operator<<(std::ostream& os, const name& n);
 
 class algorithm_id {
 public:
+    algorithm_id(const asn1::object_id& id, const std::vector<uint8_t>& parameters = {})
+        : id_(id)
+        , parameters_(parameters) {
+    }
     algorithm_id(const asn1::der_encoded_value& repr);
 
     const asn1::object_id& id() const {
@@ -176,6 +180,24 @@ private:
 
 std::ostream& operator<<(std::ostream& os, const certificate& cert);
 
+
+//
+// Checks the signature of the X509 v3 certificate 'subject_cert' against the issuers certificate
+// 'issuer_cert' (Note: ONLY against this issuer, i.e. the validity of the issuers certificate is
+// NOT verified).
+// NOTE: validaty dates are not yet checked (as are probably lots of other stuff)
+// Throws an exception if the verification failed.
+//
+void verify_x509_signature(const certificate& subject_cert, const certificate& issuer_cert);
+
+//
+// Checks the trust chain backwards from the last element of 'chain' to the first
+// Ending with a self-signed root certificate. NOTE: The chain must contain at least
+// 2 elements.
+// NOTE: validaty dates are not yet checked (as well of lots and lots of other things)
+//
+void verify_x509_certificate_chain(const std::vector<certificate>& chain);
+
 static const asn1::object_id id_rsaEncryption{1,2,840,113549,1,1,1};
 static const asn1::object_id id_ecPublicKey{1,2,840,10045,2,1}; // https://tools.ietf.org/html/rfc5480
 
@@ -186,15 +208,71 @@ static const asn1::object_id id_sha256WithRSAEncryption{1,2,840,113549,1,1,11};
 static const asn1::object_id id_sha384WithRSAEncryption{1,2,840,113549,1,1,12};
 static const asn1::object_id id_sha512WithRSAEncryption{1,2,840,113549,1,1,13};
 
+static const asn1::object_id id_ecdsaWithSHA256{1,2,840,10045,4,3,2};
+static const asn1::object_id id_ecdsaWithSHA384{1,2,840,10045,4,3,3};
+static const asn1::object_id id_ecdsaWithSHA512{1,2,840,10045,4,3,4};
+
 static const asn1::object_id id_sha1{1,3,14,3,2,26};
 static const asn1::object_id id_sha256{2,16,840,1,101,3,4,2,1};
 static const asn1::object_id id_sha384{2,16,840,1,101,3,4,2,2};
 static const asn1::object_id id_sha512{2,16,840,1,101,3,4,2,3};
 
+asn1::object_id public_key_algo_from_signature_algo(const algorithm_id& sig_algo);
+
 // X509v3 certificate extensions
 static const asn1::object_id id_ce_subjectKeyIdentifier{2,5,29,14};
 static const asn1::object_id id_ce_keyUsage{2,5,29,15};
 static const asn1::object_id id_ce_basicConstraints{2,5,29,19};
+
+// Actually PKCS#1 RFC3447 stuff:
+template<typename IntType, typename Iterator>
+IntType base256_decode(Iterator first, Iterator last)
+{
+    IntType res = 0;
+    for (; first != last; ++first) {
+        res <<= 8;
+        res |= *first;
+    }
+    return res;
+}
+
+template<typename IntType, size_t sz>
+IntType base256_decode(const uint8_t (&arr)[sz])
+{
+    return base256_decode<IntType>(arr, arr+sz);
+}
+
+template<typename IntType>
+IntType base256_decode(const std::vector<uint8_t>& bs)
+{
+    return base256_decode<IntType>(bs.begin(), bs.end());
+}
+
+template<typename IntType>
+IntType base256_decode(const asn1::raw_string& r)
+{
+    return base256_decode<IntType>(r.as_vector());
+}
+
+template<typename IntType>
+std::vector<uint8_t> base256_encode(IntType i, size_t byte_count)
+{
+    std::vector<uint8_t> result(byte_count);
+    while (byte_count--) {
+        result[byte_count] = static_cast<uint8_t>(i);
+        i >>= 8;
+    }
+    assert(!i);
+    return result;
+}
+
+template<typename T>
+T from_buffer(const std::vector<uint8_t>& b)
+{
+    assert(!b.empty());
+    util::buffer_view view(b.data(), b.size());
+    return T(asn1::read_der_encoded_value(view));
+}
 
 } } // namespace funtls::x509
 

@@ -158,9 +158,16 @@ int main()
     const auto cert3 = x509::read_pem_certificate_from_string(test_cert3);
     std::ostringstream cert3_subject_name;
     cert3_subject_name << cert3.tbs().subject;
+    FUNTLS_ASSERT_EQUAL(int_type("0x055556bcf25ea43535c3a40fd5ab4572"), cert3.tbs().serial_number.as<int_type>());
     FUNTLS_ASSERT_EQUAL(cert3_subject_name.str(), test_cert3_subject_name);
     FUNTLS_ASSERT_EQUAL(cert3.tbs().issuer, cert3.tbs().subject);
-    // x509::verify_x509_certificate(cert3, cert3); // TODO
+    FUNTLS_ASSERT_EQUAL(x509::id_ecdsaWithSHA384, cert3.tbs().signature_algorithm.id());
+    FUNTLS_ASSERT_EQUAL("", util::base16_encode(cert3.tbs().signature_algorithm.parameters()));
+    FUNTLS_ASSERT_EQUAL(x509::id_ecPublicKey, cert3.tbs().subject_public_key_algo.id());
+    FUNTLS_ASSERT_EQUAL((asn1::object_id{1,3,132,0,34}), x509::from_buffer<asn1::object_id>(cert3.tbs().subject_public_key_algo.parameters())); //secp384r1
+    FUNTLS_ASSERT_EQUAL(x509::id_ecdsaWithSHA384, cert3.signature_algorithm().id());
+    FUNTLS_ASSERT_EQUAL(true, cert3.signature_algorithm().null_parameters());
+    x509::verify_x509_signature(cert3, cert3);
     test_load_save(test_cert3);
 
     {

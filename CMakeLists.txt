@@ -36,6 +36,7 @@ add_definitions("-DBOOST_ALL_NO_LIB -DBOOST_SYSTEM_NO_DEPRECATED")
 add_library(boost STATIC ${boost_dir}/libs/system/src/error_code.cpp)
 
 add_subdirectory(util)
+add_subdirectory(ec)
 add_subdirectory(3des)
 add_subdirectory(rc4)
 add_subdirectory(aes)
