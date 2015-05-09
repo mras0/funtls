@@ -559,10 +559,7 @@ private:
             }
 
             FUNTLS_CHECK_BINARY(certificate_list.size(), >, 0, "Empty certificate chain not allowed");
-            if (cipher_param.key_exchange_algorithm == tls::key_exchange_algorithm::ecdhe_ecdsa)
-                std::cerr << "HACK HACK HACK - Skipping certificate chain validation in " << __FILE__ << ":" << __LINE__ << std::endl;
-            else
-                verify_certificate_chain_(certificate_list);
+            verify_certificate_chain_(certificate_list);
             client_kex->certificate_list(certificate_list);
 
             handshake = read_handshake();

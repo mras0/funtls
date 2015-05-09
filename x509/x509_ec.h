@@ -5,6 +5,7 @@
 
 namespace funtls { namespace x509 {
 
+static const asn1::object_id id_secp256r1{1,2,840,10045,3,1,7};
 static const asn1::object_id id_secp384r1{1,3,132,0,34};
 
 void verify_x509_signature_ec(const certificate& subject_cert, const certificate& issuer_cert);

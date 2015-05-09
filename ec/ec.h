@@ -49,6 +49,7 @@ struct curve {
     point mul(const point& point, const field_elem& m) const;
 };
 
+extern const curve secp256r1;
 extern const curve secp384r1;
 
 } } // namespace funtls::ec

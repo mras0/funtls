@@ -59,6 +59,14 @@ hash::hash_algorithm hash_from_ecdsa_signature_algo(const x509::algorithm_id& si
     FUNTLS_CHECK_FAILURE(oss.str());
 }
 
+const ec::curve& curve_from_name(const asn1::object_id& id) {
+    if (id == x509::id_secp256r1) return ec::secp256r1;
+    if (id == x509::id_secp384r1) return ec::secp384r1;
+
+    std::ostringstream msg;
+    msg << "Unsupported named elliptic curve: " << id;
+    FUNTLS_CHECK_FAILURE(msg.str());
+}
 
 } // unnamed namespace
 
@@ -99,8 +107,7 @@ void verify_x509_signature_ec(const certificate& subject_cert, const certificate
     std::cout << subject_cert << std::endl;
     std::cout << issuer_cert << std::endl;
     auto issuer_pk = ec_public_key_from_certificate(issuer_cert);
-    FUNTLS_CHECK_BINARY(issuer_pk.curve_name, ==, id_secp384r1, "Unsupported named elliptic curve");
-    const auto& curve = ec::secp384r1;
+    const auto& curve = curve_from_name(issuer_pk.curve_name);
     curve.check();
     const auto& Q = issuer_pk.Q;
     std::cout << "public key " << Q << std::endl;
