@@ -139,7 +139,8 @@ inline bool is_ecc(key_exchange_algorithm kea) {
 }
 
 enum class prf_algorithm {
-    tls_prf_sha256
+    sha256,
+    sha384
 };
 
 enum class bulk_cipher_algorithm {
@@ -225,28 +226,28 @@ struct null_mac_algo_triats {
     static constexpr auto mac_algorithm          = tls::mac_algorithm::null;
     static constexpr uint8_t mac_length          = 0;
     static constexpr uint8_t mac_key_length      = 0;
-    static constexpr auto prf_algorithm          = tls::prf_algorithm::tls_prf_sha256;
+    static constexpr auto prf_algorithm          = tls::prf_algorithm::sha256;
 };
 
 struct hmac_md5_algo_traits {
     static constexpr auto mac_algorithm          = tls::mac_algorithm::hmac_md5;
     static constexpr uint8_t mac_length          = 128/8;
     static constexpr uint8_t mac_key_length      = 128/8;
-    static constexpr auto prf_algorithm          = tls::prf_algorithm::tls_prf_sha256;
+    static constexpr auto prf_algorithm          = tls::prf_algorithm::sha256;
 };
 
 struct hmac_sha_algo_traits {
     static constexpr auto mac_algorithm          = tls::mac_algorithm::hmac_sha1;
     static constexpr uint8_t mac_length          = 160/8;
     static constexpr uint8_t mac_key_length      = 160/8;
-    static constexpr auto prf_algorithm          = tls::prf_algorithm::tls_prf_sha256;
+    static constexpr auto prf_algorithm          = tls::prf_algorithm::sha256;
 };
 
 struct hmac_sha256_algo_traits {
     static constexpr auto mac_algorithm          = tls::mac_algorithm::hmac_sha256;
     static constexpr uint8_t mac_length          = 256/8;
     static constexpr uint8_t mac_key_length      = 256/8;
-    static constexpr auto prf_algorithm          = tls::prf_algorithm::tls_prf_sha256;
+    static constexpr auto prf_algorithm          = tls::prf_algorithm::sha256;
 };
 
 namespace detail {
@@ -297,12 +298,21 @@ struct hmac_gcm_sha256_algo_traits {
     static constexpr auto mac_algorithm          = tls::mac_algorithm::hmac_sha256;
     static constexpr uint8_t mac_length          = 256/8;
     static constexpr uint8_t mac_key_length      = 0;
-    static constexpr auto prf_algorithm          = tls::prf_algorithm::tls_prf_sha256;
+    static constexpr auto prf_algorithm          = tls::prf_algorithm::sha256;
+};
+struct hmac_gcm_sha384_algo_traits {
+    static constexpr auto mac_algorithm          = tls::mac_algorithm::hmac_sha384;
+    static constexpr uint8_t mac_length          = 384/8;
+    static constexpr uint8_t mac_key_length      = 0;
+    static constexpr auto prf_algorithm          = tls::prf_algorithm::sha384;
 };
 
 CS_TRAITS_SPEC(rsa_with_aes_128_gcm_sha256, rsa, aes_gcm_traits<128>, hmac_gcm_sha256_algo_traits);
+CS_TRAITS_SPEC(rsa_with_aes_256_gcm_sha384, rsa, aes_gcm_traits<256>, hmac_gcm_sha384_algo_traits);
 CS_TRAITS_SPEC(ecdhe_ecdsa_with_aes_128_gcm_sha256, ecdhe_ecdsa, aes_gcm_traits<128>, hmac_gcm_sha256_algo_traits);
+CS_TRAITS_SPEC(ecdhe_ecdsa_with_aes_256_gcm_sha384, ecdhe_ecdsa, aes_gcm_traits<256>, hmac_gcm_sha384_algo_traits);
 CS_TRAITS_SPEC(ecdhe_rsa_with_aes_128_gcm_sha256, ecdhe_rsa, aes_gcm_traits<128>, hmac_gcm_sha256_algo_traits);
+CS_TRAITS_SPEC(ecdhe_rsa_with_aes_256_gcm_sha384, ecdhe_rsa, aes_gcm_traits<256>, hmac_gcm_sha384_algo_traits);
 
 #undef CS_TRAITS_SPEC
 

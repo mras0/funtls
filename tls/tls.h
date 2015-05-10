@@ -693,9 +693,8 @@ inline extension make_supported_signature_algorithms(const supported_signature_a
 
 // TODO: remove
 std::vector<uint8_t> vec_concat(const std::vector<uint8_t>& a, const std::vector<uint8_t>& b);
-std::vector<uint8_t> P_hash(const std::vector<uint8_t>& secret, const std::vector<uint8_t>& seed, size_t wanted_size);
 
-std::vector<uint8_t> PRF(const std::vector<uint8_t>& secret, const std::string& label, const std::vector<uint8_t>& seed, size_t wanted_size);
+std::vector<uint8_t> PRF(prf_algorithm algo, const std::vector<uint8_t>& secret, const std::string& label, const std::vector<uint8_t>& seed, size_t wanted_size);
 
 std::vector<uint8_t> verification_buffer(uint64_t seq_no, content_type content_type, protocol_version version, uint16 length);
 

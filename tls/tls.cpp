@@ -1,14 +1,17 @@
 #include "tls.h"
 #include <util/base_conversion.h>
+#include <util/test.h>
 #include <hash/hash.h> // TODO: remove from this file
 #include <sys/time.h> // gettimeofday
 #include <fstream>
+
+using namespace funtls;
 
 namespace {
 template<typename T>
 void get_random_bytes(T& t) {
     static_assert(std::is_pod<T>::value && !std::is_pointer<T>::value, "");
-    funtls::tls::get_random_bytes(&t, sizeof(T));
+    tls::get_random_bytes(&t, sizeof(T));
 }
 
 uint32_t get_gmt_unix_time()
@@ -16,6 +19,44 @@ uint32_t get_gmt_unix_time()
     struct timeval tv;
     gettimeofday(&tv, nullptr);
     return static_cast<uint32_t>(tv.tv_sec);
+}
+
+template<typename T>
+std::vector<uint8_t> HMAC_hash(const std::vector<uint8_t>& secret, const std::vector<uint8_t>& data) {
+    assert(!secret.empty());
+    assert(!data.empty());
+    return T{secret}.input(data).result();
+}
+
+template<typename hmac_func_type>
+std::vector<uint8_t> P_hash(const hmac_func_type& HMAC_hash, const std::vector<uint8_t>& seed, size_t wanted_size) {
+    assert(!seed.empty());
+    assert(wanted_size != 0);
+    // P_hash(secret, seed) = HMAC_hash(secret, A(1) + seed) +
+    //                        HMAC_hash(secret, A(2) + seed) +
+    //                        HMAC_hash(secret, A(3) + seed) + ...
+    // A() is defined as:
+    //    A(0) = seed
+    //    A(i) = HMAC_hash(secret, A(i-1))
+
+    std::vector<uint8_t> a = seed; // A(0) = seed
+
+    // P_hash can be iterated as many times as necessary to produce the
+    // required quantity of data.  For example, if P_SHA256 is being used to
+    // create 80 bytes of data, it will have to be iterated three times
+    // (through A(3)), creating 96 bytes of output data; the last 16 bytes
+    // of the final iteration will then be discarded, leaving 80 bytes of
+    // output data.
+
+    std::vector<uint8_t> result;
+    while (result.size() < wanted_size) {
+        a = HMAC_hash(a); // A(i) = HMAC_hash(secret, A(i-1))
+        auto digest = HMAC_hash(tls::vec_concat(a, seed));
+        result.insert(result.end(), digest.begin(), digest.end());
+    }
+
+    assert(result.size() >= wanted_size);
+    return {result.begin(), result.begin() + wanted_size};
 }
 
 } // unnamed namespace
@@ -138,48 +179,21 @@ std::vector<uint8_t> vec_concat(const std::vector<uint8_t>& a, const std::vector
     return combined;
 }
 
-std::vector<uint8_t> HMAC_hash(const std::vector<uint8_t>& secret, const std::vector<uint8_t>& data) {
-    // Assumes HMAC is SHA256 based
-    assert(!secret.empty());
-    assert(!data.empty());
-    return hash::hmac_sha256{secret}.input(data).result();
-}
-
-std::vector<uint8_t> P_hash(const std::vector<uint8_t>& secret, const std::vector<uint8_t>& seed, size_t wanted_size) {
-    assert(!secret.empty());
-    assert(!seed.empty());
-    assert(wanted_size != 0);
-    // P_hash(secret, seed) = HMAC_hash(secret, A(1) + seed) +
-    //                        HMAC_hash(secret, A(2) + seed) +
-    //                        HMAC_hash(secret, A(3) + seed) + ...
-    // A() is defined as:
-    //    A(0) = seed
-    //    A(i) = HMAC_hash(secret, A(i-1))
-
-    std::vector<uint8_t> a = seed; // A(0) = seed
-
-    // P_hash can be iterated as many times as necessary to produce the
-    // required quantity of data.  For example, if P_SHA256 is being used to
-    // create 80 bytes of data, it will have to be iterated three times
-    // (through A(3)), creating 96 bytes of output data; the last 16 bytes
-    // of the final iteration will then be discarded, leaving 80 bytes of
-    // output data.
-
-    std::vector<uint8_t> result;
-    while (result.size() < wanted_size) {
-        a = HMAC_hash(secret, a); // A(i) = HMAC_hash(secret, A(i-1))
-        auto digest = HMAC_hash(secret, vec_concat(a, seed));
-        result.insert(result.end(), digest.begin(), digest.end());
-    }
-
-    assert(result.size() >= wanted_size);
-    return {result.begin(), result.begin() + wanted_size};
-}
-
 // Pseudo Random Function rfc5246 section 5
-std::vector<uint8_t> PRF(const std::vector<uint8_t>& secret, const std::string& label, const std::vector<uint8_t>& seed, size_t wanted_size) {
+std::vector<uint8_t> PRF(prf_algorithm algo, const std::vector<uint8_t>& secret, const std::string& label, const std::vector<uint8_t>& seed, size_t wanted_size) {
+
+    auto HMAC_hash_func = &HMAC_hash<hash::hmac_sha256>;
+    if (algo == prf_algorithm::sha256) {
+    } else if (algo == prf_algorithm::sha384) {
+        HMAC_hash_func = HMAC_hash<hash::hmac_sha384>;
+    } else {
+        std::ostringstream msg;
+        msg << "Unsupported PRF algorithm " << algo;
+        FUNTLS_CHECK_FAILURE(msg.str());
+    }
     // PRF(secret, label, seed) = P_<hash>(secret, label + seed)
-    return P_hash(secret, vec_concat(std::vector<uint8_t>{label.begin(), label.end()}, seed), wanted_size);
+    auto HMAC_hash = [&](const std::vector<uint8_t>& data) { return HMAC_hash_func(secret, data); };
+    return P_hash(HMAC_hash, vec_concat(std::vector<uint8_t>{label.begin(), label.end()}, seed), wanted_size);
 }
 
 std::vector<uint8_t> verification_buffer(uint64_t seq_no, content_type content_type, protocol_version version, uint16 length)

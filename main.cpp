@@ -307,7 +307,7 @@ protected:
         FUNTLS_CHECK_BINARY(plaintext.size(), <=, record::max_plaintext_length, "Illegal plain text size");
 
         if (content_type == tls::content_type::handshake) {
-            handshake_message_digest_.input(plaintext);
+            append_to_buffer(handshake_messages_, plaintext);
         }
 
         // Compression would happen here
@@ -408,8 +408,8 @@ protected:
         return current_protocol_version_;
     }
 
-    std::vector<uint8_t> handshake_message_digest() const {
-        return handshake_message_digest_.result();
+    std::vector<uint8_t> handshake_messages() const {
+        return handshake_messages_;
     }
 
     void set_pending_ciphers(cipher_parameters&& client_cipher_parameters, cipher_parameters&& server_cipher_parameters) {
@@ -485,11 +485,11 @@ private:
     std::unique_ptr<cipher>      decrypt_cipher_           = make_cipher(null_cipher_parameters_d);
     std::unique_ptr<cipher>      pending_encrypt_cipher_;
     std::unique_ptr<cipher>      pending_decrypt_cipher_;
-    hash::sha256                 handshake_message_digest_;
+    std::vector<uint8_t>         handshake_messages_;
     std::vector<uint8_t>         pending_handshake_messages_;
 
     void collapse_pending() {
-        handshake_message_digest_.input(pending_handshake_messages_);
+        append_to_buffer(handshake_messages_, pending_handshake_messages_);
         pending_handshake_messages_.clear();
     }
 
@@ -672,18 +672,18 @@ private:
         // We can now compute the master_secret as specified in rfc5246 8.1
         // master_secret = PRF(pre_master_secret, "master secret", ClientHello.random + ServerHello.random)[0..47]
 
+        const auto cipher_param = tls::parameters_from_suite(negotiated_cipher_);
         std::vector<uint8_t> rand_buf;
         tls::append_to_buffer(rand_buf, client_random);
         tls::append_to_buffer(rand_buf, server_random);
-        master_secret = tls::PRF(pre_master_secret, "master secret", rand_buf, tls::master_secret_size);
+        master_secret = tls::PRF(cipher_param.prf_algorithm, pre_master_secret, "master secret", rand_buf, tls::master_secret_size);
         assert(master_secret.size() == tls::master_secret_size);
         //std::cout << "Master secret: " << util::base16_encode(master_secret) << std::endl;
 
         // Now do Key Calculation http://tools.ietf.org/html/rfc5246#section-6.3
         // key_block = PRF(SecurityParameters.master_secret, "key expansion", SecurityParameters.server_random + SecurityParameters.client_random)
-        const auto cipher_param = tls::parameters_from_suite(negotiated_cipher_);
         const size_t key_block_length  = 2 * cipher_param.mac_key_length + 2 * cipher_param.key_length + 2 * cipher_param.fixed_iv_length;
-        auto key_block = tls::PRF(master_secret, "key expansion", tls::vec_concat(server_random.as_vector(), client_random.as_vector()), key_block_length);
+        auto key_block = tls::PRF(cipher_param.prf_algorithm, master_secret, "key expansion", tls::vec_concat(server_random.as_vector(), client_random.as_vector()), key_block_length);
 
         //std::cout << "Keyblock:\n" << util::base16_encode(key_block) << "\n";
 
@@ -722,8 +722,20 @@ private:
         //      All of the data from all messages in this handshake (not
         //      including any HelloRequest messages) up to, but not including,
         //      this message
-        auto finished_label = ce == tls::connection_end::server ? "server finished" : "client finished";
-        return tls::PRF(master_secret, finished_label, handshake_message_digest(), tls::finished::verify_data_min_length);
+        const auto prf_algo       = tls::parameters_from_suite(negotiated_cipher_).prf_algorithm;
+        const auto finished_label = ce == tls::connection_end::server ? "server finished" : "client finished";
+
+        std::vector<uint8_t> handshake_digest;
+        if (prf_algo == tls::prf_algorithm::sha256) {
+            handshake_digest = hash::sha256{}.input(handshake_messages()).result();
+        } else if (prf_algo == tls::prf_algorithm::sha384) {
+             handshake_digest = hash::sha384{}.input(handshake_messages()).result();
+        } else {
+            std::ostringstream msg;
+            msg << "Unsupported PRF algorithm " << prf_algo;
+            FUNTLS_CHECK_FAILURE(msg.str());
+        }
+        return tls::PRF(prf_algo, master_secret, finished_label, handshake_digest, tls::finished::verify_data_min_length);
     }
 };
 
@@ -887,8 +899,11 @@ int main(int argc, char* argv[])
     std::cout << "path: " << path << std::endl;
 
     std::vector<tls::cipher_suite> wanted_ciphers{
+        tls::cipher_suite::ecdhe_ecdsa_with_aes_256_gcm_sha384,
         tls::cipher_suite::ecdhe_ecdsa_with_aes_128_gcm_sha256,
+        tls::cipher_suite::ecdhe_rsa_with_aes_256_gcm_sha384,
         tls::cipher_suite::ecdhe_rsa_with_aes_128_gcm_sha256,
+        tls::cipher_suite::rsa_with_aes_256_gcm_sha384,
         tls::cipher_suite::rsa_with_aes_128_gcm_sha256,
         tls::cipher_suite::dhe_rsa_with_aes_256_cbc_sha256,
         tls::cipher_suite::dhe_rsa_with_aes_128_cbc_sha256,

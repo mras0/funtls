@@ -338,7 +338,8 @@ std::ostream& operator<<(std::ostream& os, key_exchange_algorithm e)
 std::ostream& operator<<(std::ostream& os, prf_algorithm e)
 {
     switch (e) {
-    case prf_algorithm::tls_prf_sha256: return os << "TLS_PRF_SHA256";
+    case prf_algorithm::sha256: return os << "TLS_PRF_SHA256";
+    case prf_algorithm::sha384: return os << "TLS_PRF_SHA384";
     }
     assert(false);
     return os << "Unknown TLS PRF algorithm " << static_cast<unsigned>(e);
@@ -397,8 +398,11 @@ std::ostream& operator<<(std::ostream& os, mac_algorithm e)
         f(dhe_rsa_with_aes_128_cbc_sha256);\
         f(dhe_rsa_with_aes_256_cbc_sha256);\
         f(rsa_with_aes_128_gcm_sha256);\
+        f(rsa_with_aes_256_gcm_sha384);\
         f(ecdhe_ecdsa_with_aes_128_gcm_sha256);\
-        f(ecdhe_rsa_with_aes_128_gcm_sha256);
+        f(ecdhe_ecdsa_with_aes_256_gcm_sha384);\
+        f(ecdhe_rsa_with_aes_128_gcm_sha256);\
+        f(ecdhe_rsa_with_aes_256_gcm_sha384);
 
 cipher_suite_parameters parameters_from_suite(cipher_suite suite)
 {
@@ -494,7 +498,9 @@ std::istream& operator>>(std::istream& is, cipher_suite& suite)
 
     // Parse MAC algorithm
     mac_algorithm mac_algo = mac_algorithm::null;
-    if (try_consume(text, "sha256")) {
+    if (try_consume(text, "sha384")) {
+        mac_algo = mac_algorithm::hmac_sha384;
+    } else if (try_consume(text, "sha256")) {
         mac_algo = mac_algorithm::hmac_sha256;
     } else if (try_consume(text, "sha")) {
         mac_algo = mac_algorithm::hmac_sha1;
