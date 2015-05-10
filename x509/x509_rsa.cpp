@@ -13,7 +13,9 @@ namespace {
 
 hash::hash_algorithm get_hash(const asn1::object_id& oid)
 {
-    if (oid == x509::id_sha1) {
+    if (oid == x509::id_md5) {
+        return hash::md5{};
+    } else if (oid == x509::id_sha1) {
         return hash::sha1{};
     } else if (oid == x509::id_sha256) {
         return hash::sha256{};
@@ -33,7 +35,9 @@ asn1::object_id digest_algo_from_signature_algo(const x509::algorithm_id& sig_al
     if (public_key_algo_from_signature_algo(sig_algo) == x509::id_rsaEncryption) {
         FUNTLS_CHECK_BINARY(sig_algo.null_parameters(), ==, true, "Invalid algorithm parameters");
     }
-    if (sig_algo.id() == x509::id_sha1WithRSAEncryption) {
+    if (sig_algo.id() == x509::id_md5WithRSAEncryption) {
+        return x509::id_md5;
+    } else if (sig_algo.id() == x509::id_sha1WithRSAEncryption) {
         return x509::id_sha1;
     } else if (sig_algo.id() == x509::id_sha256WithRSAEncryption) {
         return x509::id_sha256;

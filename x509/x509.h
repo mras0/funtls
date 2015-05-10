@@ -212,6 +212,7 @@ static const asn1::object_id id_ecdsaWithSHA256{1,2,840,10045,4,3,2};
 static const asn1::object_id id_ecdsaWithSHA384{1,2,840,10045,4,3,3};
 static const asn1::object_id id_ecdsaWithSHA512{1,2,840,10045,4,3,4};
 
+static const asn1::object_id id_md5{1,2,840,113549,2,5};
 static const asn1::object_id id_sha1{1,3,14,3,2,26};
 static const asn1::object_id id_sha256{2,16,840,1,101,3,4,2,1};
 static const asn1::object_id id_sha384{2,16,840,1,101,3,4,2,2};

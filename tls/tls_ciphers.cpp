@@ -397,7 +397,8 @@ std::ostream& operator<<(std::ostream& os, mac_algorithm e)
         f(dhe_rsa_with_aes_128_cbc_sha256);\
         f(dhe_rsa_with_aes_256_cbc_sha256);\
         f(rsa_with_aes_128_gcm_sha256);\
-        f(ecdhe_ecdsa_with_aes_128_gcm_sha256)
+        f(ecdhe_ecdsa_with_aes_128_gcm_sha256);\
+        f(ecdhe_rsa_with_aes_128_gcm_sha256);
 
 cipher_suite_parameters parameters_from_suite(cipher_suite suite)
 {
@@ -458,6 +459,8 @@ std::istream& operator>>(std::istream& is, cipher_suite& suite)
         kex_algo = key_exchange_algorithm::ecdh_ecdsa;
     } else if (try_consume(text, "ecdhe_ecdsa_")) {
         kex_algo = key_exchange_algorithm::ecdhe_ecdsa;
+    } else if (try_consume(text, "ecdhe_rsa_")) {
+        kex_algo = key_exchange_algorithm::ecdhe_rsa;
     }
 
     // Skip (optional) with_

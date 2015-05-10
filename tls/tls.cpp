@@ -218,4 +218,14 @@ std::ostream& operator<<(std::ostream& os, signature_algorithm s)
     return os << "Unknown SignatureAlgorithm " << static_cast<unsigned>(s);
 }
 
+std::ostream& operator<<(std::ostream& os, extension::extension_type et)
+{
+    switch (et) {
+        case extension::elliptic_curves:      return os << "elliptic_curves";
+        case extension::ec_point_formats:     return os << "ec_point_formats";
+        case extension::signature_algorithms: return os << "signature_algorithms";
+    }
+    return os << "Unknown ExtensionType " << static_cast<unsigned>(et);
+}
+
 } } // namespace funtls::tls

@@ -116,6 +116,24 @@ void test_cipher_traits()
         FUNTLS_ASSERT_EQUAL(256/8,                                    csp.mac_length);
         FUNTLS_ASSERT_EQUAL(0,                                        csp.mac_key_length);
     }
+    {
+        const auto suite = tls::cipher_suite::ecdhe_rsa_with_aes_128_gcm_sha256;
+        const auto csp   = tls::parameters_from_suite(suite);
+        std::cout << csp << std::endl;
+
+        FUNTLS_ASSERT_EQUAL(suite,                                    csp.cipher_suite);
+        FUNTLS_ASSERT_EQUAL(tls::key_exchange_algorithm::ecdhe_rsa,   csp.key_exchange_algorithm);
+        FUNTLS_ASSERT_EQUAL(tls::prf_algorithm::tls_prf_sha256,       csp.prf_algorithm);
+        FUNTLS_ASSERT_EQUAL(tls::bulk_cipher_algorithm::aes_gcm,      csp.bulk_cipher_algorithm);
+        FUNTLS_ASSERT_EQUAL(tls::cipher_type::aead,                   csp.cipher_type);
+        FUNTLS_ASSERT_EQUAL(128/8,                                    csp.key_length);
+        FUNTLS_ASSERT_EQUAL(128/8,                                    csp.block_length);
+        FUNTLS_ASSERT_EQUAL(4,                                        csp.fixed_iv_length);
+        FUNTLS_ASSERT_EQUAL(8,                                        csp.record_iv_length);
+        FUNTLS_ASSERT_EQUAL(tls::mac_algorithm::hmac_sha256,          csp.mac_algorithm);
+        FUNTLS_ASSERT_EQUAL(256/8,                                    csp.mac_length);
+        FUNTLS_ASSERT_EQUAL(0,                                        csp.mac_key_length);
+    }
 }
 
 void test_cipher_parsing()
@@ -143,6 +161,7 @@ void test_cipher_parsing()
     TEST_IN(rsa_with_aes_128_gcm_sha256,         "AES128-GCM-SHA256");
     TEST_IN(ecdhe_ecdsa_with_aes_128_gcm_sha256, "ECDHE-ECDSA-AES128-GCM-SHA256");
     TEST_IN(ecdhe_ecdsa_with_aes_128_gcm_sha256, "ecdhe_ecdsa_with_aes_128_gcm_sha256");
+    TEST_IN(ecdhe_rsa_with_aes_128_gcm_sha256,   "ecdhe_rsa_with_aes_128_gcm_sha256");
 #undef TEST_IN
 }
 

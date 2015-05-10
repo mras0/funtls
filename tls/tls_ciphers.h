@@ -302,6 +302,7 @@ struct hmac_gcm_sha256_algo_traits {
 
 CS_TRAITS_SPEC(rsa_with_aes_128_gcm_sha256, rsa, aes_gcm_traits<128>, hmac_gcm_sha256_algo_traits);
 CS_TRAITS_SPEC(ecdhe_ecdsa_with_aes_128_gcm_sha256, ecdhe_ecdsa, aes_gcm_traits<128>, hmac_gcm_sha256_algo_traits);
+CS_TRAITS_SPEC(ecdhe_rsa_with_aes_128_gcm_sha256, ecdhe_rsa, aes_gcm_traits<128>, hmac_gcm_sha256_algo_traits);
 
 #undef CS_TRAITS_SPEC
 

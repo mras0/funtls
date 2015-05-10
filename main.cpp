@@ -49,39 +49,31 @@ public:
     }
 
     void certificate_list(const std::vector<x509::certificate>& certificate_list) {
-        do_certificate_list(certificate_list);
+        assert(!server_certificate_);
+        assert(!certificate_list.empty());
+        server_certificate_.reset(new x509::certificate(certificate_list.front()));
     }
 
     void server_key_exchange(const tls::handshake& ske) {
         do_server_key_exchange(ske);
     }
 
+protected:
+    const x509::certificate& server_certificate() const {
+        if (!server_certificate_) FUNTLS_CHECK_FAILURE("No server certificate provided");
+        return *server_certificate_;
+    }
+
 private:
+    std::unique_ptr<x509::certificate> server_certificate_;
+
     virtual result_type do_result() const = 0;
-    virtual void do_certificate_list(const std::vector<x509::certificate>& certificate_list) = 0;
     virtual void do_server_key_exchange(const tls::handshake&) {
         FUNTLS_CHECK_FAILURE("Not expecting ServerKeyExchange message");
     }
 };
 
-class rsa_client_kex_protocol_base : public client_key_exchange_protocol {
-protected:
-    const x509::rsa_public_key& server_public_key_rsa() const {
-        if (!server_public_key_rsa_) FUNTLS_CHECK_FAILURE("");
-        return *server_public_key_rsa_;
-    }
-
-private:
-    std::unique_ptr<x509::rsa_public_key> server_public_key_rsa_;
-
-    virtual void do_certificate_list(const std::vector<x509::certificate>& certificate_list) override {
-        assert(!certificate_list.empty());
-        if (server_public_key_rsa_) FUNTLS_CHECK_FAILURE("");
-        server_public_key_rsa_.reset(new x509::rsa_public_key(rsa_public_key_from_certificate(certificate_list[0])));
-    }
-};
-
-class rsa_client_kex_protocol : public rsa_client_kex_protocol_base {
+class rsa_client_kex_protocol : public client_key_exchange_protocol {
 public:
     rsa_client_kex_protocol(tls::protocol_version protocol_version)
         : protocol_version_(protocol_version) {
@@ -91,6 +83,7 @@ private:
     tls::protocol_version protocol_version_;
 
     virtual result_type do_result() const override {
+        auto server_pk = rsa_public_key_from_certificate(server_certificate());
         // OK, now it's time to do ClientKeyExchange
         // Since we're doing RSA, we'll be sending the EncryptedPreMasterSecret
         // Prepare pre-master secret (version + 46 random bytes)
@@ -99,20 +92,21 @@ private:
         pre_master_secret[1] = protocol_version_.minor;
         tls::get_random_bytes(&pre_master_secret[2], pre_master_secret.size()-2);
 
-        const auto C = x509::pkcs1_encode(server_public_key_rsa(), pre_master_secret, &tls::get_random_bytes);
+        const auto C = x509::pkcs1_encode(server_pk, pre_master_secret, &tls::get_random_bytes);
         tls::client_key_exchange_rsa client_key_exchange{tls::vector<tls::uint8,0,(1<<16)-1>{C}};
         return std::make_pair(std::move(pre_master_secret), make_handshake(client_key_exchange));
     }
 };
 
-void verify_dhe_signature(const tls::server_key_exchange_dhe& dhe_kex, const x509::rsa_public_key& public_key, const std::vector<uint8_t>& digest_buf)
+void verify_signature_rsa(const x509::certificate& cert, const tls::signed_signature& sig, const std::vector<uint8_t>& digest_buf)
 {
+    auto public_key = rsa_public_key_from_certificate(cert);
     //std::cout << "Verifying server DHE signature\n";
-    FUNTLS_CHECK_BINARY(dhe_kex.signature.signature_algorithm, ==, tls::signature_algorithm::rsa, "");
-    const auto digest = x509::pkcs1_decode(public_key, dhe_kex.signature.value.as_vector());
+    FUNTLS_CHECK_BINARY(sig.signature_algorithm, ==, tls::signature_algorithm::rsa, "");
+    const auto digest = x509::pkcs1_decode(public_key, sig.value.as_vector());
     if (digest.digest_algorithm.id() == x509::id_sha1) {
         FUNTLS_CHECK_BINARY(digest.digest_algorithm.null_parameters(), ==, true, "Invalid algorithm parameters");
-        FUNTLS_CHECK_BINARY(tls::hash_algorithm::sha1, ==, dhe_kex.signature.hash_algorithm, "");
+        FUNTLS_CHECK_BINARY(tls::hash_algorithm::sha1, ==, sig.hash_algorithm, "");
     } else {
         // What hash algorithm should be used? What if there's a mismatch?
         std::ostringstream oss;
@@ -120,7 +114,7 @@ void verify_dhe_signature(const tls::server_key_exchange_dhe& dhe_kex, const x50
         FUNTLS_CHECK_FAILURE(oss.str());
     }
 
-    const auto calced_digest = tls::get_hash(dhe_kex.signature.hash_algorithm).input(digest_buf).result();
+    const auto calced_digest = tls::get_hash(sig.hash_algorithm).input(digest_buf).result();
     //std::cout << "Calculated digest: " << util::base16_encode(calced_digest) << std::endl;
 
     FUNTLS_CHECK_BINARY(calced_digest.size(), ==, digest.digest.size(), "Wrong digest size");
@@ -131,7 +125,7 @@ void verify_dhe_signature(const tls::server_key_exchange_dhe& dhe_kex, const x50
     }
 }
 
-class dhe_rsa_client_kex_protocol : public rsa_client_kex_protocol_base {
+class dhe_rsa_client_kex_protocol : public client_key_exchange_protocol {
 public:
     dhe_rsa_client_kex_protocol(const tls::random& client_random, const tls::random& server_random) {
         tls::append_to_buffer(digest_buf, client_random);
@@ -146,7 +140,7 @@ private:
         assert(!server_dh_params_);
         auto kex = tls::get_as<tls::server_key_exchange_dhe>(ske);
         tls::append_to_buffer(digest_buf, kex.params);
-        verify_dhe_signature(kex, server_public_key_rsa(), digest_buf);
+        verify_signature_rsa(server_certificate(), kex.signature, digest_buf);
         server_dh_params_.reset(new tls::server_dh_params(kex.params));
     }
 
@@ -175,32 +169,43 @@ private:
     }
 };
 
-class ecdhe_ecdsa_client_kex_protocol : public client_key_exchange_protocol {
+void verify_signature_ecdsa(const x509::certificate& cert, const tls::signed_signature& sig, const std::vector<uint8_t>& digest_buf)
+{
+    auto public_key = x509::ec_public_key_from_certificate(cert);
+
+    FUNTLS_CHECK_BINARY(tls::signature_algorithm::ecdsa, ==, sig.signature_algorithm, "Invalid key exchange algorithm");
+    const auto ecdsa_sig = x509::ecdsa_sig_value::parse(sig.value.as_vector());
+    const auto H = tls::get_hash(sig.hash_algorithm).input(digest_buf).result();
+    const auto e = x509::base256_decode<ec::field_elem>(H);
+
+    const auto& curve = x509::curve_from_name(public_key.curve_name);
+    curve.verify_ecdsa_signature(public_key.Q, ecdsa_sig.r, ecdsa_sig.s, e);
+}
+
+class ecdhe_client_kex_protocol : public client_key_exchange_protocol {
 public:
-    ecdhe_ecdsa_client_kex_protocol(const tls::random& client_random, const tls::random& server_random) {
+    ecdhe_client_kex_protocol(tls::signature_algorithm sig_algo, const tls::random& client_random, const tls::random& server_random) {
         tls::append_to_buffer(digest_buf_, client_random);
         tls::append_to_buffer(digest_buf_, server_random);
+        if (sig_algo == tls::signature_algorithm::rsa) {
+            verify_signature_ = &verify_signature_rsa;
+        } else if (sig_algo == tls::signature_algorithm::ecdsa) {
+            verify_signature_ = &verify_signature_ecdsa;
+        } else {
+            std::ostringstream msg;
+            msg << "Unsupported signature algorithm " << sig_algo;
+            FUNTLS_CHECK_FAILURE(msg.str());
+        }
     }
 
 private:
-    std::unique_ptr<x509::ec_public_key> server_public_key_ec_;
-    std::vector<uint8_t>                 digest_buf_;
     struct params {
         tls::named_curve curve_name;
         ec::point        Q;
     };
-    std::unique_ptr<params> params_;
-
-    const x509::ec_public_key& server_public_key_ec() const {
-        if (!server_public_key_ec_) FUNTLS_CHECK_FAILURE("");
-        return *server_public_key_ec_;
-    }
-
-    virtual void do_certificate_list(const std::vector<x509::certificate>& certificate_list) override  {
-        assert(!certificate_list.empty());
-        if (server_public_key_ec_) FUNTLS_CHECK_FAILURE("");
-        server_public_key_ec_.reset(new x509::ec_public_key(x509::ec_public_key_from_certificate(certificate_list[0])));
-    }
+    std::unique_ptr<params>         params_;
+    std::vector<uint8_t>            digest_buf_;
+    decltype(verify_signature_rsa)* verify_signature_;
 
     virtual void do_server_key_exchange(const tls::handshake& ske) override {
         assert(params_ == nullptr);
@@ -212,20 +217,14 @@ private:
         const auto ephemeral_public_key = ec::point_from_bytes(kex.params.public_key.as_vector());
         std::cout << "ephemeral_public_key=" << ephemeral_public_key << std::endl;
         curve.check_public_key(ephemeral_public_key);
-        FUNTLS_CHECK_BINARY(tls::signature_algorithm::ecdsa, ==, kex.signature.signature_algorithm, "Invalid key exchange algorithm");
-        const auto sig = x509::ecdsa_sig_value::parse(kex.signature.value.as_vector());
-        std::cout << "signature:\ns " << sig.s << "\nr " << sig.r << std::endl;
         tls::append_to_buffer(digest_buf_, kex.params);
-        const auto H = tls::get_hash(kex.signature.hash_algorithm).input(digest_buf_).result();
-        const auto e = x509::base256_decode<ec::field_elem>(H);
-        curve.verify_ecdsa_signature(server_public_key_ec().Q, sig.r, sig.s, e);
+        verify_signature_(server_certificate(), kex.signature, digest_buf_);
         params_.reset(new params{kex.params.curve_params.named_curve, ephemeral_public_key});
     }
 
     virtual result_type do_result() const override {
         if (!params_) FUNTLS_CHECK_FAILURE("");
         const auto& curve = tls::curve_from_name(params_->curve_name);
-        (void)curve;
 
         const size_t size = ilog256(curve.n);
         std::cout << "size = " << size << std::endl;
@@ -410,6 +409,7 @@ protected:
     }
 
     void send_change_cipher_spec() {
+        std::cout << "Sending change cipher spec." << std::endl;
         if (!pending_encrypt_cipher_) {
             FUNTLS_CHECK_FAILURE("Sending ChangeCipherSpec without a pending cipher suite");
         }
@@ -549,23 +549,31 @@ private:
                 end(wanted_ciphers_),
                 [](tls::cipher_suite cs) { return tls::is_ecc(tls::parameters_from_suite(cs).key_exchange_algorithm); }
                 );
+
+        static const std::vector<tls::signature_and_hash_algorithm> supported_signature_algorithms = {
+            //{ tls::hash_algorithm::sha512 , tls::signature_algorithm::ecdsa },
+            //{ tls::hash_algorithm::sha384 , tls::signature_algorithm::ecdsa },
+            //{ tls::hash_algorithm::sha256 , tls::signature_algorithm::ecdsa },
+            { tls::hash_algorithm::sha1   , tls::signature_algorithm::ecdsa },
+            //{ tls::hash_algorithm::sha512 , tls::signature_algorithm::rsa   },
+            //{ tls::hash_algorithm::sha384 , tls::signature_algorithm::rsa   },
+            //{ tls::hash_algorithm::sha256 , tls::signature_algorithm::rsa   },
+            { tls::hash_algorithm::sha1   , tls::signature_algorithm::rsa   },
+        };
+        extensions.push_back(tls::make_supported_signature_algorithms(supported_signature_algorithms));
+
         // Only send elliptic curve list if requesting at least one ECC cipher
         if (use_ecc) {
-            // TODO: Order by preference
-            static tls::named_curve named_curves[] = {
-                tls::named_curve::sect163k1, tls::named_curve::sect163r1, tls::named_curve::sect163r2, tls::named_curve::sect193r1,
-                tls::named_curve::sect193r2, tls::named_curve::sect233k1, tls::named_curve::sect233r1, tls::named_curve::sect239k1,
-                tls::named_curve::sect283k1, tls::named_curve::sect283r1, tls::named_curve::sect409k1, tls::named_curve::sect409r1,
-                tls::named_curve::sect571k1, tls::named_curve::sect571r1, tls::named_curve::secp160k1, tls::named_curve::secp160r1,
-                tls::named_curve::secp160r2, tls::named_curve::secp192k1, tls::named_curve::secp192r1, tls::named_curve::secp224k1,
-                tls::named_curve::secp224r1, tls::named_curve::secp256k1, tls::named_curve::secp256r1, tls::named_curve::secp384r1,
-                tls::named_curve::secp521r1, tls::named_curve::arbitrary_explicit_prime_curves, tls::named_curve::arbitrary_explicit_char2_curves,
+            static const tls::named_curve named_curves[] = {
+                tls::named_curve::secp384r1,
+                tls::named_curve::secp256r1,
             };
             // OpenSSL requires a list of supported named curves to support ECDH(E)_ECDSA
             extensions.push_back(tls::make_named_curves(named_curves));
             extensions.push_back(tls::make_ec_point_formats({tls::ec_point_format::uncompressed}));
         }
 
+        std::cout << "Sending client hello." << std::endl;
         send_handshake(tls::make_handshake(
             tls::client_hello{
                 current_protocol_version(),
@@ -579,6 +587,7 @@ private:
     }
 
     void read_server_hello() {
+        std::cout << "Reading server hello." << std::endl;
         auto handshake = read_handshake();
         auto server_hello = tls::get_as<tls::server_hello>(handshake);
         negotiated_cipher_ = server_hello.cipher_suite;
@@ -593,7 +602,7 @@ private:
                 std::cerr << "Ignoring ec_point_formats extension in " << __FILE__ << ":" << __LINE__ << std::endl;
             } else {
                 std::ostringstream msg;
-                msg << "Unsupported TLS ServerHello extension " << std::hex << e.type;
+                msg << "Unsupported TLS ServerHello extension " << e.type;
                 FUNTLS_CHECK_FAILURE(msg.str());
             }
         }
@@ -609,7 +618,9 @@ private:
         } else if (cipher_param.key_exchange_algorithm == tls::key_exchange_algorithm::dhe_rsa) {
             client_kex.reset(new dhe_rsa_client_kex_protocol{client_random, server_random});
         } else if (cipher_param.key_exchange_algorithm == tls::key_exchange_algorithm::ecdhe_ecdsa) {
-            client_kex.reset(new ecdhe_ecdsa_client_kex_protocol{client_random, server_random});
+            client_kex.reset(new ecdhe_client_kex_protocol{tls::signature_algorithm::ecdsa, client_random, server_random});
+        } else if (cipher_param.key_exchange_algorithm == tls::key_exchange_algorithm::ecdhe_rsa) {
+            client_kex.reset(new ecdhe_client_kex_protocol{tls::signature_algorithm::rsa, client_random, server_random});
         } else {
             FUNTLS_CHECK_FAILURE("Internal error: Unsupported KeyExchangeAlgorithm " + std::to_string((int)(cipher_param.key_exchange_algorithm)));
         }
@@ -620,6 +631,7 @@ private:
 
         auto handshake = read_handshake();
         if (handshake.type == tls::handshake_type::certificate) {
+            std::cout << "Reading server certificate list." << std::endl;
             auto cert_message = tls::get_as<tls::certificate>(handshake);
             for (const auto& c : cert_message.certificate_list) {
                 const auto v = c.as_vector();
@@ -635,11 +647,13 @@ private:
         }
 
         if (handshake.type == tls::handshake_type::server_key_exchange) {
+            std::cout << "Reading server key exchange." << std::endl;
             client_kex->server_key_exchange(handshake);
             handshake = read_handshake();
         }
 
         // Only CertificateRequest allowed before ServerHelloDone
+        std::cout << "Reading server hello done." << std::endl;
 
         (void) tls::get_as<tls::server_hello_done>(handshake);
     }
@@ -684,6 +698,7 @@ private:
         tls::handshake       client_key_exchange;
         assert(client_kex);
         std::tie(pre_master_secret, client_key_exchange) = client_kex->result();
+        std::cout << "Sending client key exchange." << std::endl;
         send_handshake(client_key_exchange);
         request_cipher_change(pre_master_secret);
     }
@@ -706,14 +721,20 @@ class trust_store {
 public:
     trust_store() {}
 
-    void add(x509::certificate&& cert)      { certs_.push_back(std::move(cert)); }
-    void add(const x509::certificate& cert) { certs_.push_back(cert); }
+    void add(const x509::certificate& cert) {
+        certs_.push_back(cert);
+    }
 
     std::vector<const x509::certificate*> find(const x509::name& subject_name) const {
         std::vector<const x509::certificate*> res;
         for (const auto& cert : certs_) {
             if (cert.tbs().subject == subject_name) {
-                res.push_back(&cert);
+                try {
+                    x509::verify_x509_signature(cert, cert);
+                    res.push_back(&cert);
+                } catch (const std::exception& e) {
+                    std::cout << cert << "Not used: " << e.what() << std::endl;
+                }
             }
         }
         return res;
@@ -782,8 +803,6 @@ void add_all_certs_to_trust_store(trust_store& ts, const std::string& filename){
     if (!in) throw std::runtime_error("Error reading from " + filename);
 }
 
-
-
 void verify_cert_chain(const std::vector<x509::certificate>& certlist, const trust_store& ts)
 {
     FUNTLS_CHECK_BINARY(certlist.size(), >, 0, "Empty certificate chain not allowed");
@@ -805,15 +824,11 @@ void verify_cert_chain(const std::vector<x509::certificate>& certlist, const tru
         }
         const x509::certificate* cert = nullptr;
         for (const auto& c : certs) {
-            try {
-                verify_x509_signature(*c, *c);
-                if (!cert) {
-                    cert = c;
-                } else {
-                    std::cout << "Warning multiple certificates could be used for " << c->tbs().subject << std::endl;
-                }
-            } catch (const std::exception& e) {
-                std::cout << "Warning: Could not use " << c->tbs().subject << " : " << e.what() << std::endl;
+            verify_x509_signature(*c, *c);
+            if (!cert) {
+                cert = c;
+            } else {
+                std::cout << "Warning multiple certificates could be used for " << c->tbs().subject << std::endl;
             }
         }
         if (!cert) {
@@ -862,7 +877,8 @@ int main(int argc, char* argv[])
     std::cout << "path: " << path << std::endl;
 
     std::vector<tls::cipher_suite> wanted_ciphers{
-        //tls::cipher_suite::ecdhe_ecdsa_with_aes_128_gcm_sha256,
+        tls::cipher_suite::ecdhe_ecdsa_with_aes_128_gcm_sha256,
+        tls::cipher_suite::ecdhe_rsa_with_aes_128_gcm_sha256,
         tls::cipher_suite::rsa_with_aes_128_gcm_sha256,
         tls::cipher_suite::dhe_rsa_with_aes_256_cbc_sha256,
         tls::cipher_suite::dhe_rsa_with_aes_128_cbc_sha256,

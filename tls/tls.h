@@ -214,16 +214,17 @@ enum class compression_method : uint8 {
 };
 
 struct extension {
-    enum type : uint16_t {
+    enum extension_type : uint16_t {
         elliptic_curves      = 10,
         ec_point_formats     = 11,
         signature_algorithms = 13,
-
     };
 
-    enum type                        type;
+    extension_type                   type;
     tls::vector<uint8, 0, (1<<16)-1> data;
 };
+
+std::ostream& operator<<(std::ostream& os, extension::extension_type etype);
 
 struct client_hello {
     static constexpr tls::handshake_type handshake_type = tls::handshake_type::client_hello;
@@ -277,6 +278,7 @@ enum class signature_algorithm : uint8 {
       ecdsa     = 3
 };
 
+
 std::ostream& operator<<(std::ostream& os, signature_algorithm s);
 
 struct signed_signature {
@@ -284,6 +286,11 @@ struct signed_signature {
     tls::signature_algorithm         signature_algorithm;
     tls::vector<uint8, 1, (1<<16)-1> value;
 
+};
+
+struct signature_and_hash_algorithm {
+    hash_algorithm       hash;
+    signature_algorithm  signature;
 };
 
 // Ephemeral DH parameters
@@ -437,11 +444,13 @@ inline void append_to_buffer(std::vector<uint8_t>& buffer, const client_hello& i
     append_to_buffer(buffer, item.compression_methods);
 
     if (!item.extensions.empty()) {
-        assert(item.extensions.size() < 65535);
-        append_to_buffer(buffer, uint16(item.extensions.size()));
+        std::vector<uint8_t> extension_buf;
         for (const auto& ext : item.extensions) {
-            append_to_buffer(buffer, ext);
+            append_to_buffer(extension_buf, ext);
         }
+        assert(extension_buf.size() < 65535);
+        append_to_buffer(buffer, uint16(extension_buf.size()));
+        append_to_buffer(buffer, extension_buf);
     }
 }
 
@@ -667,6 +676,19 @@ std::vector<uint8_t> as_buffer(const T& item) {
     std::vector<uint8_t> buffer;
     append_to_buffer(buffer, item);
     return buffer;
+}
+
+inline void append_to_buffer(std::vector<uint8_t>& buffer, const signature_and_hash_algorithm& item) {
+    append_to_buffer(buffer, item.hash);
+    append_to_buffer(buffer, item.signature);
+}
+
+using supported_signature_algorithms_list = vector<signature_and_hash_algorithm, 2, (1<<16)-2>;
+
+inline extension make_supported_signature_algorithms(const supported_signature_algorithms_list& supported_signature_algorithms) {
+    std::vector<uint8_t> buf;
+    append_to_buffer(buf, supported_signature_algorithms);
+    return extension{extension::signature_algorithms, buf};
 }
 
 // TODO: remove

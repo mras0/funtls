@@ -4,7 +4,7 @@
 #include "tls.h"
 
 namespace funtls { namespace ec {
-class curve;
+struct curve;
 } }
 
 namespace funtls { namespace tls {
