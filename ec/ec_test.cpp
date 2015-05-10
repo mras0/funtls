@@ -1,6 +1,7 @@
 #include <ec/ec.h>
 #include <util/base_conversion.h>
 #include <util/test.h>
+#include <util/int_util.h>
 
 #include <iostream>
 
@@ -27,7 +28,7 @@ int main()
     {
         const auto C = make_curve(2147483647, -2, 4);
         const auto P = ec::point{3, 5};
-        const auto min_2 = C.mod_p(-2);
+        const auto min_2 = pmod(-2, C.p);
         const auto Q = ec::point{min_2, 0};
         FUNTLS_ASSERT_EQUAL(true, C.on_curve(P));
         FUNTLS_ASSERT_EQUAL(true, C.on_curve(Q));

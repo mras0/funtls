@@ -1,7 +1,19 @@
 #include "tls_ecc.h"
+#include <util/test.h>
 #include <util/base_conversion.h>
+#include <util/int_util.h>
+#include <ec/ec.h>
 
 namespace funtls { namespace tls {
+
+const ec::curve& curve_from_name(named_curve nc)
+{
+    if (nc == named_curve::secp256r1) return ec::secp256r1;
+    if (nc == named_curve::secp384r1) return ec::secp384r1;
+    std::ostringstream msg;
+    msg << "Unsupported curve " << nc;
+    FUNTLS_CHECK_FAILURE(msg.str());
+}
 
 std::ostream& operator<<(std::ostream& os, named_curve nc)
 {
@@ -25,13 +37,35 @@ std::ostream& operator<<(std::ostream& os, ec_curve_type ct)
     return os << "<ec_curve_type " << (unsigned)ct << ">";
 }
 
-void from_bytes(server_key_exchange_ec_dhe& item, util::buffer_view& buffer)
-{
+void from_bytes(ec_parameters& item, util::buffer_view& buffer) {
+    from_bytes(item.curve_type, buffer);
+    FUNTLS_CHECK_BINARY(item.curve_type, ==, ec_curve_type::named_curve, "Unsupported curve type");
+    from_bytes(item.named_curve, buffer);
+}
+
+void append_to_buffer(std::vector<uint8_t>& buffer, const ec_parameters& item) {
+    FUNTLS_CHECK_BINARY(item.curve_type, ==, ec_curve_type::named_curve, "Unsupported curve type");
+    append_to_buffer(buffer, item.curve_type);
+    append_to_buffer(buffer, item.named_curve);
+}
+
+void append_to_buffer(std::vector<uint8_t>& buffer, const server_ec_dh_params& item) {
+    append_to_buffer(buffer, item.curve_params);
+    append_to_buffer(buffer, item.public_key);
+}
+
+void from_bytes(server_ec_dh_params& item, util::buffer_view& buffer) {
+    from_bytes(item.curve_params, buffer);
+    from_bytes(item.public_key, buffer);
+}
+
+void from_bytes(server_key_exchange_ec_dhe& item, util::buffer_view& buffer) {
     from_bytes(item.params, buffer);
-    item.signature.resize(buffer.remaining());
-    if (buffer.remaining()) {
-        buffer.read(&item.signature[0], buffer.remaining());
-    }
+    from_bytes(item.signature, buffer);
+}
+
+void append_to_buffer(std::vector<uint8_t>& buffer, const client_key_exchange_ecdhe_ecdsa& item) {
+    append_to_buffer(buffer, item.ecdh_Yc);
 }
 
 } } // namespace funtls::tls

@@ -1,4 +1,5 @@
-#!/bin/sh
+#!/bin/bash
+set -e
 
 supported_ciphers=\
 "rsa_with_rc4_128_md5 "\
@@ -14,6 +15,7 @@ supported_ciphers=\
 "dhe_rsa_with_aes_128_cbc_sha256 "\
 "dhe_rsa_with_aes_256_cbc_sha256 "\
 "rsa_with_aes_128_gcm_sha256 "\
+"ecdhe_ecdsa_with_aes_128_gcm_sha256 "\
 
 uri=https://localhost:4433/
 builddir=$(dirname $(readlink -f $0))/build

@@ -9,10 +9,12 @@
 #include <hash/hash.h>
 #include <x509/x509.h>
 #include <x509/x509_rsa.h>
+#include <x509/x509_ec.h>
 #include <x509/x509_io.h>
 #include <util/base_conversion.h>
 #include <util/test.h>
 #include <util/buffer.h>
+#include <util/int_util.h>
 #include <tls/tls.h>
 #include <tls/tls_ecc.h>
 
@@ -22,6 +24,19 @@ using int_type = boost::multiprecision::cpp_int;
 using namespace funtls;
 
 namespace {
+
+template<typename IntType>
+IntType rand_positive_int_less(const IntType& n) {
+    const auto byte_count = ilog256(n);
+    assert(byte_count != 0);
+    std::vector<uint8_t> bytes(byte_count);
+    IntType res;
+    do {
+        tls::get_random_bytes(&bytes[0], bytes.size());
+        res = be_uint_from_bytes<IntType>(bytes);
+    } while (res == 0 || res >= n);
+    return res;
+}
 
 class client_key_exchange_protocol {
 public:
@@ -93,11 +108,11 @@ private:
 void verify_dhe_signature(const tls::server_key_exchange_dhe& dhe_kex, const x509::rsa_public_key& public_key, const std::vector<uint8_t>& digest_buf)
 {
     //std::cout << "Verifying server DHE signature\n";
-    FUNTLS_CHECK_BINARY(dhe_kex.signature_algorithm, ==, tls::signature_algorithm::rsa, "");
-    const auto digest = x509::pkcs1_decode(public_key, dhe_kex.signature.as_vector());
+    FUNTLS_CHECK_BINARY(dhe_kex.signature.signature_algorithm, ==, tls::signature_algorithm::rsa, "");
+    const auto digest = x509::pkcs1_decode(public_key, dhe_kex.signature.value.as_vector());
     if (digest.digest_algorithm.id() == x509::id_sha1) {
         FUNTLS_CHECK_BINARY(digest.digest_algorithm.null_parameters(), ==, true, "Invalid algorithm parameters");
-        FUNTLS_CHECK_BINARY(tls::hash_algorithm::sha1, ==, dhe_kex.hash_algorithm, "");
+        FUNTLS_CHECK_BINARY(tls::hash_algorithm::sha1, ==, dhe_kex.signature.hash_algorithm, "");
     } else {
         // What hash algorithm should be used? What if there's a mismatch?
         std::ostringstream oss;
@@ -105,7 +120,7 @@ void verify_dhe_signature(const tls::server_key_exchange_dhe& dhe_kex, const x50
         FUNTLS_CHECK_FAILURE(oss.str());
     }
 
-    const auto calced_digest = tls::get_hash(dhe_kex.hash_algorithm).input(digest_buf).result();
+    const auto calced_digest = tls::get_hash(dhe_kex.signature.hash_algorithm).input(digest_buf).result();
     //std::cout << "Calculated digest: " << util::base16_encode(calced_digest) << std::endl;
 
     FUNTLS_CHECK_BINARY(calced_digest.size(), ==, digest.digest.size(), "Wrong digest size");
@@ -130,12 +145,6 @@ private:
     virtual void do_server_key_exchange(const tls::handshake& ske) override {
         assert(!server_dh_params_);
         auto kex = tls::get_as<tls::server_key_exchange_dhe>(ske);
-        std::cout << "Got server key exchange! hash=" << kex.hash_algorithm << " signature=" << kex.signature_algorithm << std::endl;
-        std::cout << "Signature: " << util::base16_encode(kex.signature.as_vector()) << std::endl;
-        std::cout << "dh_p:      " << util::base16_encode(kex.params.dh_p.as_vector()) << std::endl;
-        std::cout << "dh_g:      " << util::base16_encode(kex.params.dh_g.as_vector()) << std::endl;
-        std::cout << "dh_Ys:     " << util::base16_encode(kex.params.dh_Ys.as_vector()) << std::endl;
-
         tls::append_to_buffer(digest_buf, kex.params);
         verify_dhe_signature(kex, server_public_key_rsa(), digest_buf);
         server_dh_params_.reset(new tls::server_dh_params(kex.params));
@@ -143,26 +152,20 @@ private:
 
     virtual result_type do_result() const override {
         if (!server_dh_params_) FUNTLS_CHECK_FAILURE("");
-        const size_t key_size = server_dh_params_->dh_p.size();
-        //std::cout << "Should generate int of size " << key_size*8 << " bits " << std::endl;
-        std::vector<uint8_t> rand_int(key_size);
-        do {
-            tls::get_random_bytes(&rand_int[0], rand_int.size());
-        } while (std::find_if(rand_int.begin(), rand_int.end(), [](uint8_t i) { return i != 0; }) == rand_int.end());
-
-        const int_type private_key = x509::base256_decode<int_type>(rand_int);
-
-        //std::cout << "DHE client private key: " << std::hex << private_key << std::dec << std::endl;
-
         const int_type p  = x509::base256_decode<int_type>(server_dh_params_->dh_p.as_vector());
         const int_type g  = x509::base256_decode<int_type>(server_dh_params_->dh_g.as_vector());
         const int_type Ys = x509::base256_decode<int_type>(server_dh_params_->dh_Ys.as_vector());
+        const size_t key_size = server_dh_params_->dh_p.size();
+        const int_type private_key = rand_positive_int_less(p);
+
+        //std::cout << "DHE client private key: " << std::hex << private_key << std::dec << std::endl;
+
         const int_type Yc = powm(g, private_key, p);
         const auto dh_Yc  = x509::base256_encode(Yc, key_size);
 
         //std::cout << "dh_Yc = " << util::base16_encode(dh_Yc) << std::endl;
 
-        tls::client_key_exchange_dhe_rsa client_key_exchange{tls::vector<tls::uint8,1,(1<<16)-1>{dh_Yc}};
+        tls::client_key_exchange_dhe_rsa client_key_exchange{dh_Yc};
         auto handshake = make_handshake(client_key_exchange);
 
         const int_type Z = powm(Ys, private_key, p);
@@ -174,30 +177,96 @@ private:
 
 class ecdhe_ecdsa_client_kex_protocol : public client_key_exchange_protocol {
 public:
-    ecdhe_ecdsa_client_kex_protocol() {
+    ecdhe_ecdsa_client_kex_protocol(const tls::random& client_random, const tls::random& server_random) {
+        tls::append_to_buffer(digest_buf_, client_random);
+        tls::append_to_buffer(digest_buf_, server_random);
     }
 
 private:
-    virtual result_type do_result() const override {
-        FUNTLS_CHECK_FAILURE("Not implemented");
+    std::unique_ptr<x509::ec_public_key> server_public_key_ec_;
+    std::vector<uint8_t>                 digest_buf_;
+    struct params {
+        tls::named_curve curve_name;
+        ec::point        Q;
+    };
+    std::unique_ptr<params> params_;
+
+    const x509::ec_public_key& server_public_key_ec() const {
+        if (!server_public_key_ec_) FUNTLS_CHECK_FAILURE("");
+        return *server_public_key_ec_;
     }
+
     virtual void do_certificate_list(const std::vector<x509::certificate>& certificate_list) override  {
         assert(!certificate_list.empty());
-        std::cout << "Ignoring certificates:\n";
-        for (const auto& c : certificate_list) {
-            std::cout << c << std::endl;
-        }
+        if (server_public_key_ec_) FUNTLS_CHECK_FAILURE("");
+        server_public_key_ec_.reset(new x509::ec_public_key(x509::ec_public_key_from_certificate(certificate_list[0])));
     }
+
     virtual void do_server_key_exchange(const tls::handshake& ske) override {
+        assert(params_ == nullptr);
         auto kex = tls::get_as<tls::server_key_exchange_ec_dhe>(ske);
         std::cout << "curve_type=" << kex.params.curve_params.curve_type << std::endl;
         FUNTLS_CHECK_BINARY(kex.params.curve_params.curve_type, ==, tls::ec_curve_type::named_curve, "Unsupported curve type");
         std::cout << "named_curve=" << kex.params.curve_params.named_curve << std::endl;
-        FUNTLS_CHECK_BINARY(kex.params.curve_params.named_curve, ==, tls::named_curve::secp256r1, "Unsupported curve");
-        std::cout << "public_key=" << util::base16_encode(kex.params.public_key.as_vector()) << std::endl;
-        std::cout << "signature: " << util::base16_encode(kex.signature) << std::endl;
-        FUNTLS_CHECK_FAILURE("Not implemented");
+        const auto& curve = tls::curve_from_name(kex.params.curve_params.named_curve);
+        const auto ephemeral_public_key = ec::point_from_bytes(kex.params.public_key.as_vector());
+        std::cout << "ephemeral_public_key=" << ephemeral_public_key << std::endl;
+        curve.check_public_key(ephemeral_public_key);
+        FUNTLS_CHECK_BINARY(tls::signature_algorithm::ecdsa, ==, kex.signature.signature_algorithm, "Invalid key exchange algorithm");
+        const auto sig = x509::ecdsa_sig_value::parse(kex.signature.value.as_vector());
+        std::cout << "signature:\ns " << sig.s << "\nr " << sig.r << std::endl;
+        tls::append_to_buffer(digest_buf_, kex.params);
+        const auto H = tls::get_hash(kex.signature.hash_algorithm).input(digest_buf_).result();
+        const auto e = x509::base256_decode<ec::field_elem>(H);
+        curve.verify_ecdsa_signature(server_public_key_ec().Q, sig.r, sig.s, e);
+        params_.reset(new params{kex.params.curve_params.named_curve, ephemeral_public_key});
     }
+
+    virtual result_type do_result() const override {
+        if (!params_) FUNTLS_CHECK_FAILURE("");
+        const auto& curve = tls::curve_from_name(params_->curve_name);
+        (void)curve;
+
+        const size_t size = ilog256(curve.n);
+        std::cout << "size = " << size << std::endl;
+        assert(size == ilog256(curve.p));
+
+        const auto d_U = rand_positive_int_less(curve.n); // private key
+        assert(d_U >= 1);
+        assert(d_U < curve.n);
+
+        ec::point Yc = curve.mul(d_U, curve.G); // ephemeral client public key
+        std::cout << "Client public key: " << Yc << std::endl;
+#ifndef NDEBUG
+        curve.check_public_key(Yc);
+#endif
+
+        ec::point P = curve.mul(d_U, params_->Q);  // shared secret
+        assert(curve.on_curve(P));
+
+        std::cout << "Shared secret: " << P << std::endl;
+
+        FUNTLS_CHECK_BINARY(P, !=, ec::infinity, "Invalid shared secret obtained");
+
+        // Make handshake with client public key
+        assert(Yc.x < curve.p);
+        assert(Yc.x < curve.n);
+        assert(Yc.x < (ec::field_elem(1)<<(8*size)));
+        assert(Yc.y < curve.p);
+        assert(Yc.y < curve.n);
+        assert(Yc.y < (ec::field_elem(1)<<(8*size)));
+        auto handshake = tls::make_handshake(tls::client_key_exchange_ecdhe_ecdsa{ec::point_to_bytes(Yc, size)});
+
+        // z: shared secret
+        const auto& z = P.x;
+
+        // Return shared secret and handshake
+        assert(z < curve.p);
+        assert(z < curve.n);
+        assert(z < (ec::field_elem(1)<<(8*size)));
+        return std::make_pair(x509::base256_encode(z, size), std::move(handshake));
+    }
+
 };
 
 } // unnamed namespace
@@ -540,7 +609,7 @@ private:
         } else if (cipher_param.key_exchange_algorithm == tls::key_exchange_algorithm::dhe_rsa) {
             client_kex.reset(new dhe_rsa_client_kex_protocol{client_random, server_random});
         } else if (cipher_param.key_exchange_algorithm == tls::key_exchange_algorithm::ecdhe_ecdsa) {
-            client_kex.reset(new ecdhe_ecdsa_client_kex_protocol{});
+            client_kex.reset(new ecdhe_ecdsa_client_kex_protocol{client_random, server_random});
         } else {
             FUNTLS_CHECK_FAILURE("Internal error: Unsupported KeyExchangeAlgorithm " + std::to_string((int)(cipher_param.key_exchange_algorithm)));
         }
@@ -824,40 +893,32 @@ int main(int argc, char* argv[])
     //add_certificates_from_directory_to_trust_store(ts, "/etc/ssl/certs");
     add_all_certs_to_trust_store(ts, "/etc/ssl/certs/ca-certificates.crt");
 
-    try {
-        boost::asio::io_service         io_service;
-        boost::asio::ip::tcp::socket    socket(io_service);
-        boost::asio::ip::tcp::resolver  resolver(io_service);
+    boost::asio::io_service         io_service;
+    boost::asio::ip::tcp::socket    socket(io_service);
+    boost::asio::ip::tcp::resolver  resolver(io_service);
 
-        std::cout << "Connecting to " << host << ":" << port << " ..." << std::flush;
-        boost::asio::connect(socket, resolver.resolve({host, port}));
-        std::cout << " OK" << std::endl;
-        tls_client::verify_certificate_chain_func cf = std::bind(&verify_cert_chain, std::placeholders::_1, ts);
-        tls_client ts{std::move(socket), wanted_ciphers, cf};
+    std::cout << "Connecting to " << host << ":" << port << " ..." << std::flush;
+    boost::asio::connect(socket, resolver.resolve({host, port}));
+    std::cout << " OK" << std::endl;
+    tls_client::verify_certificate_chain_func cf = std::bind(&verify_cert_chain, std::placeholders::_1, ts);
+    tls_client client{std::move(socket), wanted_ciphers, cf};
 
-        const auto data = "GET "+path+" HTTP/1.1\r\nHost: "+host+"\r\nConnection: close\r\n\r\n";
-        ts.send_app_data(std::vector<uint8_t>(data.begin(), data.end()));
+    const auto data = "GET "+path+" HTTP/1.1\r\nHost: "+host+"\r\nConnection: close\r\n\r\n";
+    client.send_app_data(std::vector<uint8_t>(data.begin(), data.end()));
 
-        // Ugly!
-        bool got_app_data = false;
-        for (;;) {
-            try {
-                const auto res = ts.next_app_data();
-                std::cout << std::string(res.begin(), res.end()) << std::endl;
-                got_app_data = true;
-            } catch (const std::exception& e) {
-                if (!got_app_data) throw;
-                std::cout << e.what() << std::endl;
-                break;
-            }
+    // Ugly!
+    bool got_app_data = false;
+    for (;;) {
+        try {
+            const auto res = client.next_app_data();
+            std::cout << std::string(res.begin(), res.end()) << std::endl;
+            got_app_data = true;
+        } catch (const std::exception& e) {
+            if (!got_app_data) throw;
+            std::cout << e.what() << std::endl;
+            break;
         }
-
-    } catch (const std::exception& e) {
-        std::cerr << e.what() << std::endl;
-        return 1;
-    } catch (...) {
-        std::cerr << "Caught unknown exception" << std::endl;
-        return 1;
     }
+
     return 0;
 }

@@ -279,6 +279,13 @@ enum class signature_algorithm : uint8 {
 
 std::ostream& operator<<(std::ostream& os, signature_algorithm s);
 
+struct signed_signature {
+    tls::hash_algorithm              hash_algorithm;
+    tls::signature_algorithm         signature_algorithm;
+    tls::vector<uint8, 1, (1<<16)-1> value;
+
+};
+
 // Ephemeral DH parameters
 struct server_dh_params {
     tls::vector<uint8, 1, (1<<16)-1> dh_p;  // The prime modulus used for the Diffie-Hellman operation.
@@ -289,11 +296,8 @@ struct server_dh_params {
 struct server_key_exchange_dhe {
     static constexpr tls::handshake_type handshake_type = tls::handshake_type::server_key_exchange;
 
-    server_dh_params                 params;
-    // signature
-    tls::hash_algorithm              hash_algorithm;
-    tls::signature_algorithm         signature_algorithm;
-    tls::vector<uint8, 1, (1<<16)-1> signature;
+    server_dh_params params;
+    signed_signature signature;
 };
 
 struct server_hello_done {
@@ -550,6 +554,12 @@ inline void from_bytes(random& item, util::buffer_view& buffer) {
     from_bytes(item.random_bytes, buffer);
 }
 
+inline void from_bytes(signed_signature& item, util::buffer_view& buffer) {
+    from_bytes(item.hash_algorithm, buffer);
+    from_bytes(item.signature_algorithm, buffer);
+    from_bytes(item.value, buffer);
+}
+
 inline void from_bytes(extension& item, util::buffer_view& buffer) {
     from_bytes(item.type, buffer);
     from_bytes(item.data, buffer);
@@ -616,8 +626,6 @@ inline void from_bytes(server_hello_done&, util::buffer_view& buffer) {
 
 inline void from_bytes(server_key_exchange_dhe& item, util::buffer_view& buffer) {
     from_bytes(item.params, buffer);
-    from_bytes(item.hash_algorithm, buffer);
-    from_bytes(item.signature_algorithm, buffer);
     from_bytes(item.signature, buffer);
 }
 

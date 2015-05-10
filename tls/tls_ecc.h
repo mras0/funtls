@@ -3,6 +3,10 @@
 
 #include "tls.h"
 
+namespace funtls { namespace ec {
+class curve;
+} }
+
 namespace funtls { namespace tls {
 
 // elliptic_curves extension
@@ -36,6 +40,8 @@ enum class named_curve : uint16 {
     arbitrary_explicit_char2_curves = 0xFF02,
 };
 
+const ec::curve& curve_from_name(named_curve nc);
+
 std::ostream& operator<<(std::ostream& os, named_curve nc);
 
 using named_curves_list = vector<named_curve, 2, (1<<16)-2>;
@@ -64,10 +70,10 @@ enum class ec_curve_type : uint8 {
 std::ostream& operator<<(std::ostream& os, ec_curve_type ct);
 
 using ec_point = vector<uint8, 1, (1<<8)-1>;
-struct ec_curve {
-    ec_point a;
-    ec_point b;
-};
+//struct ec_curve {
+//    ec_point a;
+//    ec_point b;
+//};
 // enum { ec_basis_trinomial, ec_basis_pentanomial } ECBasisType;
 
 struct ec_parameters {
@@ -77,31 +83,34 @@ struct ec_parameters {
     };
 };
 
-inline void from_bytes(ec_parameters& item, util::buffer_view& buffer) {
-    from_bytes(item.curve_type, buffer);
-    assert(item.curve_type == ec_curve_type::named_curve);
-    from_bytes(item.named_curve, buffer);
-}
+void from_bytes(ec_parameters& item, util::buffer_view& buffer);
+void append_to_buffer(std::vector<uint8_t>& buffer, const ec_parameters& item);
 
 struct server_ec_dh_params {
     ec_parameters curve_params;
     ec_point      public_key;
 };
 
-inline void from_bytes(server_ec_dh_params& item, util::buffer_view& buffer) {
-    from_bytes(item.curve_params, buffer);
-    from_bytes(item.public_key, buffer);
-}
+void append_to_buffer(std::vector<uint8_t>& buffer, const server_ec_dh_params& item);
+void from_bytes(server_ec_dh_params& item, util::buffer_view& buffer);
 
 struct server_key_exchange_ec_dhe {
     static constexpr tls::handshake_type handshake_type = tls::handshake_type::server_key_exchange;
 
-    server_ec_dh_params  params;
-    std::vector<uint8_t> signature;
+    server_ec_dh_params params;
+    signed_signature    signature;
     // signature
 };
 
 void from_bytes(server_key_exchange_ec_dhe& item, util::buffer_view& buffer);
+
+struct client_key_exchange_ecdhe_ecdsa {
+    static constexpr tls::handshake_type handshake_type = tls::handshake_type::client_key_exchange;
+    ec_point ecdh_Yc;
+};
+
+void append_to_buffer(std::vector<uint8_t>& buffer, const client_key_exchange_ecdhe_ecdsa& item);
+
 } } // namespace funtls::tls
 
 #endif
