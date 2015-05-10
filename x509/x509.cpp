@@ -302,7 +302,8 @@ std::ostream& operator<<(std::ostream& os, const certificate& cert)
     auto c = cert.tbs();
     os << "Certificate " << c.version << ":\n";
     os << " Serial number: 0x" << util::base16_encode(c.serial_number.as_vector()) << "\n";
-    os << " Signature algorithm: " << c.signature_algorithm << " [Actual " << cert.signature_algorithm() << "]\n";
+    assert(c.signature_algorithm == cert.signature_algorithm());
+    os << " Signature algorithm: " << c.signature_algorithm << "\n";
     os << " Issuer: " << c.issuer << "\n";
     os << " Validity: Between " << c.validity_not_before << " and " << c.validity_not_after << "\n";
     os << " Subject: " << c.subject << "\n";

@@ -38,6 +38,17 @@ IntType rand_positive_int_less(const IntType& n) {
     return res;
 }
 
+tls::hash_algorithm hash_algorithm_from_oid(const asn1::object_id& oid) {
+    if (oid == x509::id_md5) return tls::hash_algorithm::md5;
+    if (oid == x509::id_sha1) return tls::hash_algorithm::sha1;
+    if (oid == x509::id_sha256) return tls::hash_algorithm::sha256;
+    if (oid == x509::id_sha384) return tls::hash_algorithm::sha384;
+    if (oid == x509::id_sha512) return tls::hash_algorithm::sha512;
+    std::ostringstream msg;
+    msg << "Unknown hash algorithm " << oid;
+    FUNTLS_CHECK_FAILURE(msg.str());
+}
+
 class client_key_exchange_protocol {
 public:
     typedef std::pair<std::vector<uint8_t>, tls::handshake> result_type;
@@ -100,23 +111,14 @@ private:
 
 void verify_signature_rsa(const x509::certificate& cert, const tls::signed_signature& sig, const std::vector<uint8_t>& digest_buf)
 {
+    std::cout << "Verify RSA " << sig.hash_algorithm << " signature" << std::endl;
     auto public_key = rsa_public_key_from_certificate(cert);
-    //std::cout << "Verifying server DHE signature\n";
     FUNTLS_CHECK_BINARY(sig.signature_algorithm, ==, tls::signature_algorithm::rsa, "");
     const auto digest = x509::pkcs1_decode(public_key, sig.value.as_vector());
-    if (digest.digest_algorithm.id() == x509::id_sha1) {
-        FUNTLS_CHECK_BINARY(digest.digest_algorithm.null_parameters(), ==, true, "Invalid algorithm parameters");
-        FUNTLS_CHECK_BINARY(tls::hash_algorithm::sha1, ==, sig.hash_algorithm, "");
-    } else {
-        // What hash algorithm should be used? What if there's a mismatch?
-        std::ostringstream oss;
-        oss << "Untested digest algorithm " << digest.digest_algorithm << ". Digest=" << util::base16_encode(digest.digest);
-        FUNTLS_CHECK_FAILURE(oss.str());
-    }
+    FUNTLS_CHECK_BINARY(digest.digest_algorithm.null_parameters(), ==, true, "Invalid algorithm parameters");
+    FUNTLS_CHECK_BINARY(hash_algorithm_from_oid(digest.digest_algorithm.id()), ==, sig.hash_algorithm, "");
 
     const auto calced_digest = tls::get_hash(sig.hash_algorithm).input(digest_buf).result();
-    //std::cout << "Calculated digest: " << util::base16_encode(calced_digest) << std::endl;
-
     FUNTLS_CHECK_BINARY(calced_digest.size(), ==, digest.digest.size(), "Wrong digest size");
     if (!std::equal(calced_digest.begin(), calced_digest.end(), digest.digest.begin())) {
         throw std::runtime_error("Digest mismatch in " + std::string(__PRETTY_FUNCTION__) + " Calculated: " +
@@ -171,14 +173,20 @@ private:
 
 void verify_signature_ecdsa(const x509::certificate& cert, const tls::signed_signature& sig, const std::vector<uint8_t>& digest_buf)
 {
+    std::cout << "Verify ECDSA " << sig.hash_algorithm << " signature" << std::endl;
     auto public_key = x509::ec_public_key_from_certificate(cert);
+    const auto& curve = x509::curve_from_name(public_key.curve_name);
 
     FUNTLS_CHECK_BINARY(tls::signature_algorithm::ecdsa, ==, sig.signature_algorithm, "Invalid key exchange algorithm");
     const auto ecdsa_sig = x509::ecdsa_sig_value::parse(sig.value.as_vector());
-    const auto H = tls::get_hash(sig.hash_algorithm).input(digest_buf).result();
+    auto H = tls::get_hash(sig.hash_algorithm).input(digest_buf).result();
+    const auto max_size = ilog256(curve.n);
+    if (H.size() > max_size) {
+        H.erase(H.begin() + max_size, H.end());
+    }
     const auto e = x509::base256_decode<ec::field_elem>(H);
 
-    const auto& curve = x509::curve_from_name(public_key.curve_name);
+    assert(e >= 0 && e < curve.n);
     curve.verify_ecdsa_signature(public_key.Q, ecdsa_sig.r, ecdsa_sig.s, e);
 }
 
@@ -274,9 +282,9 @@ namespace funtls { namespace tls {
 
 enum class connection_end { server, client };
 
+// TODO: Handle record fragmentation/coalescence
 class socket {
 public:
-
     void send_app_data(const std::vector<uint8_t>& d) {
         send_record(content_type::application_data, d);
     }
@@ -390,7 +398,9 @@ protected:
         util::buffer_view frag_buf{&record.fragment[0], record.fragment.size()};
         handshake handshake;
         from_bytes(handshake, frag_buf);
-        assert(frag_buf.remaining() == 0);
+        if (frag_buf.remaining()) {
+            FUNTLS_CHECK_FAILURE("Unread handshake data. Fragment: " + util::base16_encode(record.fragment));
+        }
         return handshake;
     }
 
@@ -551,13 +561,13 @@ private:
                 );
 
         static const std::vector<tls::signature_and_hash_algorithm> supported_signature_algorithms = {
-            //{ tls::hash_algorithm::sha512 , tls::signature_algorithm::ecdsa },
-            //{ tls::hash_algorithm::sha384 , tls::signature_algorithm::ecdsa },
-            //{ tls::hash_algorithm::sha256 , tls::signature_algorithm::ecdsa },
+            { tls::hash_algorithm::sha512 , tls::signature_algorithm::ecdsa },
+            { tls::hash_algorithm::sha384 , tls::signature_algorithm::ecdsa },
+            { tls::hash_algorithm::sha256 , tls::signature_algorithm::ecdsa },
             { tls::hash_algorithm::sha1   , tls::signature_algorithm::ecdsa },
-            //{ tls::hash_algorithm::sha512 , tls::signature_algorithm::rsa   },
-            //{ tls::hash_algorithm::sha384 , tls::signature_algorithm::rsa   },
-            //{ tls::hash_algorithm::sha256 , tls::signature_algorithm::rsa   },
+            { tls::hash_algorithm::sha512 , tls::signature_algorithm::rsa   },
+            { tls::hash_algorithm::sha384 , tls::signature_algorithm::rsa   },
+            { tls::hash_algorithm::sha256 , tls::signature_algorithm::rsa   },
             { tls::hash_algorithm::sha1   , tls::signature_algorithm::rsa   },
         };
         extensions.push_back(tls::make_supported_signature_algorithms(supported_signature_algorithms));
