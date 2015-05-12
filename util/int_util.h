@@ -4,6 +4,7 @@
 #include <boost/multiprecision/miller_rabin.hpp>
 #include <cassert>
 #include <vector>
+#include <util/random.h>
 
 namespace funtls {
 
@@ -74,6 +75,19 @@ size_t ilog256(const int_type& n)
         ++size;
     }
     return size;
+}
+
+template<typename IntType>
+IntType rand_positive_int_less(const IntType& n) {
+    const auto byte_count = ilog256(n);
+    assert(byte_count != 0);
+    std::vector<uint8_t> bytes(byte_count);
+    IntType res;
+    do {
+        util::get_random_bytes(&bytes[0], bytes.size());
+        res = be_uint_from_bytes<IntType>(bytes);
+    } while (res == 0 || res >= n);
+    return res;
 }
 
 } // namespace funtls

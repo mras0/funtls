@@ -2,6 +2,7 @@
 #include <util/test.h>
 #include <util/base_conversion.h>
 #include <util/buffer.h>
+#include <util/random.h>
 #include <hash/hash.h>
 
 #include <boost/multiprecision/cpp_int.hpp>
@@ -66,7 +67,7 @@ rsa_public_key rsa_public_key::parse(const asn1::der_encoded_value& repr)
 
 digest_info pkcs1_decode(const rsa_public_key& pk, const std::vector<uint8_t>& data)
 {
-    FUNTLS_CHECK_BINARY(pk.key_length() & (pk.key_length()-1), ==, 0, "Non pow2 key length?");
+    FUNTLS_CHECK_BINARY(pk.key_length() & (pk.key_length()-1), ==, 0, "Non pow2 key length? " + std::to_string(pk.key_length()));
     // The signatureValue field contains a digital signature computed upon
     // the ASN.1 DER encoded tbsCertificate.  The ASN.1 DER encoded
     // tbsCertificate is used as the input to the signature function.
@@ -111,7 +112,7 @@ digest_info pkcs1_decode(const rsa_public_key& pk, const std::vector<uint8_t>& d
     return x509::digest_info{digest_algo, digest};
 }
 
-std::vector<uint8_t> pkcs1_encode(const x509::rsa_public_key& key, const std::vector<uint8_t>& message, void (*get_random_bytes)(void*, size_t))
+std::vector<uint8_t> pkcs1_encode(const x509::rsa_public_key& key, const std::vector<uint8_t>& message)
 {
     FUNTLS_CHECK_BINARY(key.key_length() & (key.key_length()-1), ==, 0, "Non pow2 key length?");
     const auto n = key.modolus.as<int_type>();
@@ -127,10 +128,10 @@ std::vector<uint8_t> pkcs1_encode(const x509::rsa_public_key& key, const std::ve
     EM[0] = 0x00;
     EM[1] = 0x02;
     // PS = at least 8 pseudo random characters (must be non-zero for type 0x02)
-    get_random_bytes(&EM[2], EM.size()-3);
+    util::get_random_bytes(&EM[2], EM.size()-3);
     for (size_t i = 2; i < EM.size()-1; ++i) {
         while (!EM[i]) {
-            get_random_bytes(&EM[i], 1);
+            util::get_random_bytes(&EM[i], 1);
         }
     }
     EM[EM.size()-1] = 0x00;

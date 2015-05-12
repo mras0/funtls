@@ -7,7 +7,7 @@
 #include <util/base_conversion.h>
 #include <util/test.h>
 
-#define FUNTLS_CHECK_ID(actual_id) FUNTLS_CHECK_BINARY(id, ==, actual_id, "Unexpected ASN.1 indentifer")
+#define FUNTLS_CHECK_ID(actual_id) FUNTLS_CHECK_BINARY(this->id, ==, actual_id, "Unexpected ASN.1 indentifer")
 
 namespace {
 

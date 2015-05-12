@@ -1,0 +1,9 @@
+#!/bin/bash
+
+while true; do
+    echo
+    echo
+    echo
+    echo
+    @SSHD_COMMAND@ -ddd -f @CMAKE_CURRENT_BINARY_DIR@/sshd_config
+done

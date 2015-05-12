@@ -44,6 +44,7 @@ add_subdirectory(hash)
 add_subdirectory(asn1)
 add_subdirectory(x509)
 add_subdirectory(tls)
+add_subdirectory(ssh)
 
 include_directories(${funtls_SOURCE_DIR})
 add_executable(funtls main.cpp)

@@ -25,19 +25,6 @@ using namespace funtls;
 
 namespace {
 
-template<typename IntType>
-IntType rand_positive_int_less(const IntType& n) {
-    const auto byte_count = ilog256(n);
-    assert(byte_count != 0);
-    std::vector<uint8_t> bytes(byte_count);
-    IntType res;
-    do {
-        tls::get_random_bytes(&bytes[0], bytes.size());
-        res = be_uint_from_bytes<IntType>(bytes);
-    } while (res == 0 || res >= n);
-    return res;
-}
-
 tls::hash_algorithm hash_algorithm_from_oid(const asn1::object_id& oid) {
     if (oid == x509::id_md5) return tls::hash_algorithm::md5;
     if (oid == x509::id_sha1) return tls::hash_algorithm::sha1;
@@ -101,9 +88,9 @@ private:
         std::vector<uint8_t> pre_master_secret(tls::master_secret_size);
         pre_master_secret[0] = protocol_version_.major;
         pre_master_secret[1] = protocol_version_.minor;
-        tls::get_random_bytes(&pre_master_secret[2], pre_master_secret.size()-2);
+        util::get_random_bytes(&pre_master_secret[2], pre_master_secret.size()-2);
 
-        const auto C = x509::pkcs1_encode(server_pk, pre_master_secret, &tls::get_random_bytes);
+        const auto C = x509::pkcs1_encode(server_pk, pre_master_secret);
         tls::client_key_exchange_rsa client_key_exchange{tls::vector<tls::uint8,0,(1<<16)-1>{C}};
         return std::make_pair(std::move(pre_master_secret), make_handshake(client_key_exchange));
     }

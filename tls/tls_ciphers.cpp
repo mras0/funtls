@@ -2,6 +2,7 @@
 #include "tls.h"
 #include <util/base_conversion.h>
 #include <util/test.h>
+#include <util/random.h>
 #include <rc4/rc4.h>
 #include <3des/3des.h>
 #include <aes/aes.h>
@@ -167,7 +168,7 @@ private:
             assert(parameters().operation() == tls::cipher_parameters::encrypt);
             // Generate initialization vector
             std::vector<uint8_t> message(iv_length);
-            tls::get_random_bytes(&message[0], message.size());
+            util::get_random_bytes(&message[0], message.size());
             tls::append_to_buffer(message, process_function_(parameters().enc_key(), message, data));
             return message;
         }
@@ -227,7 +228,7 @@ std::vector<uint8_t> aes_gcm_cipher::do_process(const std::vector<uint8_t>& data
         assert(parameters().operation() == tls::cipher_parameters::encrypt);
         // Generate initialization vector
         std::vector<uint8_t> message(record_iv_length);
-        tls::get_random_bytes(&message[0], message.size());
+        util::get_random_bytes(&message[0], message.size());
         std::vector<uint8_t> iv = parameters().fixed_iv();
         tls::append_to_buffer(iv, message); // IV = salt || nonce_explicit
         //std::cout << "Calling aes_encrypt_gcm.\n";

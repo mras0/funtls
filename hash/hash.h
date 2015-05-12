@@ -40,6 +40,11 @@ public:
         return *this;
     }
 
+    template<size_t size>
+    hash_algorithm& input(const uint8_t (&arr)[size]) {
+        return input(arr, size);
+    }
+
     hash_algorithm& input(const std::vector<uint8_t>& v) {
         return input(v.size() ? &v[0] : nullptr, v.size());
     }

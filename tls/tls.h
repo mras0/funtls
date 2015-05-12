@@ -141,8 +141,6 @@ static constexpr protocol_version protocol_version_tls_1_0{3, 1};
 static constexpr protocol_version protocol_version_tls_1_1{3, 2};
 static constexpr protocol_version protocol_version_tls_1_2{3, 3};
 
-void get_random_bytes(void* dest, size_t count);
-
 constexpr size_t log256(size_t n) {
     return n < 256 ? 1 : 1 + log256(n/256);
 }

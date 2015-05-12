@@ -188,7 +188,21 @@ public:
         return repr_;
     }
 
+    static integer from_bytes(const std::vector<uint8_t>& repr) {
+        return integer{repr};
+    }
+
+    static integer from_bytes_unsigned(const std::vector<uint8_t>& repr) {
+        integer i{repr};
+        if (!repr.empty() && (repr[0]&0x80)) {
+            i.repr_.insert(i.repr_.begin(), 0);
+        }
+        return i;
+    }
 private:
+    explicit integer(const std::vector<uint8_t>& repr) : repr_(repr) {
+    }
+
     std::vector<uint8_t> repr_;
 
 

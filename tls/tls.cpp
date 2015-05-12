@@ -1,6 +1,7 @@
 #include "tls.h"
 #include <util/base_conversion.h>
 #include <util/test.h>
+#include <util/random.h>
 #include <hash/hash.h> // TODO: remove from this file
 #include <sys/time.h> // gettimeofday
 #include <fstream>
@@ -11,7 +12,7 @@ namespace {
 template<typename T>
 void get_random_bytes(T& t) {
     static_assert(std::is_pod<T>::value && !std::is_pointer<T>::value, "");
-    tls::get_random_bytes(&t, sizeof(T));
+    util::get_random_bytes(&t, sizeof(T));
 }
 
 uint32_t get_gmt_unix_time()
@@ -62,25 +63,6 @@ std::vector<uint8_t> P_hash(const hmac_func_type& HMAC_hash, const std::vector<u
 } // unnamed namespace
 
 namespace funtls { namespace tls {
-
-void get_random_bytes(void* dest, size_t count) {
-#if 1
-    std::ifstream urandom("/dev/urandom", std::ifstream::binary);
-    if (!urandom || !urandom.is_open()) {
-        throw std::runtime_error("Could not open /dev/urandom");
-    }
-    if (!urandom.read(reinterpret_cast<char*>(dest), count)) {
-        throw std::runtime_error("Could not read from /dev/urandom");
-    }
-#else
-    // "random" but reproducable results
-    static uint8_t seed = 0;
-    uint8_t* b = static_cast<uint8_t*>(dest);
-    while (count--) {
-        *b++ = seed++;
-    }
-#endif
-}
 
 random make_random() {
     random r;
