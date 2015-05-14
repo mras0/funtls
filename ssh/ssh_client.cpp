@@ -175,6 +175,16 @@ std::vector<uint8_t> mpint_to_string(const IntType& i, size_t size)
     return bytes;
 }
 
+std::vector<uint8_t> generate_key(const std::vector<uint8_t>& K, const std::vector<uint8_t>& H, char letter, const std::vector<uint8_t>& session_id)
+{
+    const uint32_t x = K.size();
+    const uint8_t klen[4] = { static_cast<uint8_t>(x>>24), static_cast<uint8_t>(x>>16), static_cast<uint8_t>(x>>8), static_cast<uint8_t>(x) };
+    auto key = hash::sha1{}.input(klen).input(K).input(H).input(&letter, 1).input(session_id).result();
+    std::cout << "key " << letter << std::endl;
+    hexdump(std::cout, key);
+    return key;
+}
+
 #define CHECK_CONTAINS(nl, n) FUNTLS_CHECK_BINARY(nl.contains(n), ==, true, nl2s(nl) + " doesn't contain " + n)
 
 void test_client(const char* host, const char* port)
@@ -292,6 +302,8 @@ void test_client(const char* host, const char* port)
         send_ssh_packet(socket, c_payload);
     }
 
+    std::vector<uint8_t> K; // shared secret
+    std::vector<uint8_t> H; // exchange hash
     {
         // Do kexdh_init
         // http://tools.ietf.org/html/rfc4253#section-8
@@ -300,10 +312,10 @@ void test_client(const char* host, const char* port)
         int_type x = rand_positive_int_less(p);
         int_type e = boost::multiprecision::powm(int_type(modp2048_g), x, p);
         std::cout << "e=" << e << std::endl;
-        buffer_builder b;
-        put(b, ssh::message_type::kexdh_init);
         auto e_bytes = be_uint_to_bytes(e, ilog256(modp2048_p));
         if (e_bytes[0]&0x80) e_bytes.insert(e_bytes.begin(), 0);
+        buffer_builder b;
+        put(b, ssh::message_type::kexdh_init);
         put_string(b, e_bytes);
         send_ssh_packet(socket, b.as_vector());
 
@@ -315,11 +327,7 @@ void test_client(const char* host, const char* port)
         const auto f = ssh::get_string(kexdh_reply);
         const auto sig_H = ssh::get_string(kexdh_reply);
 
-        auto di = x509::pkcs1_decode(parse_rsa_key(K_S), parse_rsa_sig(sig_H));
-        FUNTLS_CHECK_BINARY(di.digest_algorithm, ==, x509::id_sha1, "Invalid hash algorithm");
-
-        int_type K = powm(ssh::string_to_int<int_type>(f), x, p);
-        std::cout << "K " << K << std::endl;
+        K = mpint_to_string(int_type(powm(ssh::string_to_int<int_type>(f), x, p)), ilog256(p));
 
         buffer_builder hashb;
         put_string(hashb, client_id);
@@ -329,10 +337,12 @@ void test_client(const char* host, const char* port)
         put_string(hashb, K_S);
         put_string(hashb, e_bytes);
         put_string(hashb, f);
-        put_string(hashb, mpint_to_string(K, ilog256(p)));
-        hexdump(std::cout, hashb.as_vector());
-        const auto H = hash::sha1{}.input(hashb.as_vector()).result();
+        put_string(hashb, K);
+        H = hash::sha1{}.input(hashb.as_vector()).result();
+
         const auto calced_hash = hash::sha1{}.input(H).result();
+        auto di = x509::pkcs1_decode(parse_rsa_key(K_S), parse_rsa_sig(sig_H));
+        FUNTLS_CHECK_BINARY(di.digest_algorithm, ==, x509::id_sha1, "Invalid hash algorithm");
         std::cout << "H received " << util::base16_encode(di.digest) << std::endl;
         std::cout << "H calced   " << util::base16_encode(calced_hash) << std::endl;
         if (calced_hash != di.digest) {
@@ -341,6 +351,33 @@ void test_client(const char* host, const char* port)
             FUNTLS_CHECK_FAILURE(msg.str());
         }
     }
+
+    // Exchange SSH_MSG_NEWKEYS messages
+    {
+        send_ssh_packet(socket, {static_cast<uint8_t>(ssh::message_type::newkeys)});
+        auto payload = read_ssh_packet(socket);
+        FUNTLS_CHECK_BINARY(payload.size(), ==, 1, "Unexpected packet size for SSH_MSG_NEWKEYS");
+        FUNTLS_CHECK_BINARY(ssh::message_type::newkeys, ==, static_cast<ssh::message_type>(payload[0]), "Unexpect message type");
+    }
+
+    const std::vector<uint8_t> session_id = H; // the session id is the exchange hash from the first key exchange
+
+    const auto client_iv      = generate_key(K, H, 'A', session_id);
+    const auto server_iv      = generate_key(K, H, 'B', session_id);
+    const auto client_key     = generate_key(K, H, 'C', session_id);
+    const auto server_key     = generate_key(K, H, 'D', session_id);
+    const auto client_mac_key = generate_key(K, H, 'E', session_id);
+    const auto server_mac_key = generate_key(K, H, 'F', session_id);
+
+    // TODO: Encrypt + Add MAC
+    // Service request
+    {
+        buffer_builder b;
+        put(b, ssh::message_type::service_request);
+        put_string(b, "ssh-userauth");
+        send_ssh_packet(socket, b.as_vector());
+    }
+
 }
 
 int main()
