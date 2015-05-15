@@ -3,8 +3,9 @@ ListenAddress           127.0.0.1
 HostKey                 @funtls_SOURCE_DIR@/ec-key.pem
 HostKey                 @funtls_SOURCE_DIR@/rsa-key.pem
 UsePrivilegeSeparation  no
+AuthorizedKeysFile      @CMAKE_CURRENT_BINARY_DIR@/tmp/authorized_keys
 
-#	$OpenBSD: sshd_config,v 1.94 2015/02/02 01:57:44 deraadt Exp $
+#   $OpenBSD: sshd_config,v 1.94 2015/02/02 01:57:44 deraadt Exp $
 
 # This is the sshd server system-wide configuration file.  See
 # sshd_config(5) for more information.
@@ -57,7 +58,7 @@ UsePrivilegeSeparation  no
 
 # The default is to check both .ssh/authorized_keys and .ssh/authorized_keys2
 # but this is overridden so installations will only check .ssh/authorized_keys
-AuthorizedKeysFile	.ssh/authorized_keys
+#AuthorizedKeysFile .ssh/authorized_keys
 
 #AuthorizedPrincipalsFile none
 
@@ -113,7 +114,7 @@ AuthorizedKeysFile	.ssh/authorized_keys
 #PrintLastLog yes
 #TCPKeepAlive yes
 #UseLogin no
-#UsePrivilegeSeparation sandbox		# Default for new installations.
+#UsePrivilegeSeparation sandbox     # Default for new installations.
 #PermitUserEnvironment no
 #Compression delayed
 #ClientAliveInterval 0
@@ -129,11 +130,11 @@ AuthorizedKeysFile	.ssh/authorized_keys
 #Banner none
 
 # override default of no subsystems
-Subsystem	sftp	/usr/libexec/sftp-server
+Subsystem   sftp    /usr/libexec/sftp-server
 
 # Example of overriding settings on a per-user basis
 #Match User anoncvs
-#	X11Forwarding no
-#	AllowTcpForwarding no
-#	PermitTTY no
-#	ForceCommand cvs server
+#   X11Forwarding no
+#   AllowTcpForwarding no
+#   PermitTTY no
+#   ForceCommand cvs server

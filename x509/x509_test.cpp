@@ -101,10 +101,8 @@ std::vector<x509::certificate> read_pem_cert_chain(std::istream& in)
 #include "test_cert3.h"
 #include "test_cert_chain0.h"
 
-int main()
+void test_cert()
 {
-    // TODO: Check x509::name equals operations. Only exact matches should be allowed (with order being important) etc.
-
     const auto cert0 = x509::read_pem_certificate_from_string(test_cert0);
     x509::verify_x509_signature(cert0, cert0);
     test_load_save(test_cert0);
@@ -203,4 +201,42 @@ int main()
     FUNTLS_ASSERT_THROWS(x509::verify_x509_certificate_chain(std::vector<x509::certificate>{}), std::runtime_error);
     FUNTLS_ASSERT_THROWS(x509::verify_x509_certificate_chain(std::vector<x509::certificate>{cert0}), std::runtime_error);
     x509::verify_x509_certificate_chain(std::vector<x509::certificate>{cert0, cert0});
+}
+
+#include "test_pkey0.h"
+void test_pkey()
+{
+    auto pki = x509::read_pem_private_key_from_string(test_pkey0);
+    FUNTLS_ASSERT_EQUAL(0,                      pki.version.as<int>());
+    FUNTLS_ASSERT_EQUAL(x509::id_rsaEncryption, pki.algorithm);
+
+    auto pkey = x509::rsa_private_key_from_pki(pki);
+
+#define P(f) std::cout << #f << " " << std::hex << pkey.f.as<int_type>() << std::endl
+    P(version);
+    P(modulus);
+    P(public_exponent);
+    P(private_exponent);
+    P(prime1);
+    P(prime2);
+    P(exponent1);
+    P(exponent2);
+    P(coefficient);
+#undef P
+    FUNTLS_ASSERT_EQUAL(0,            pkey.version.as<int>());
+    FUNTLS_ASSERT_EQUAL(test_pkey0_n, util::base16_encode(pkey.modulus.as_vector()));
+    FUNTLS_ASSERT_EQUAL(test_pkey0_e, util::base16_encode(pkey.public_exponent.as_vector()));
+    FUNTLS_ASSERT_EQUAL(test_pkey0_d, util::base16_encode(pkey.private_exponent.as_vector()));
+    FUNTLS_ASSERT_EQUAL(test_pkey0_p, util::base16_encode(pkey.prime1.as_vector()));
+    FUNTLS_ASSERT_EQUAL(test_pkey0_q, util::base16_encode(pkey.prime2.as_vector()));
+    FUNTLS_ASSERT_EQUAL(test_pkey0_e1, util::base16_encode(pkey.exponent1.as_vector()));
+    FUNTLS_ASSERT_EQUAL(test_pkey0_e2, util::base16_encode(pkey.exponent2.as_vector()));
+    FUNTLS_ASSERT_EQUAL(test_pkey0_c, util::base16_encode(pkey.coefficient.as_vector()));
+}
+
+int main()
+{
+    // TODO: Check x509::name equals operations. Only exact matches should be allowed (with order being important) etc.
+    test_cert();
+    test_pkey();
 }

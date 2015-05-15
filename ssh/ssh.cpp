@@ -30,6 +30,7 @@ std::ostream& operator<<(std::ostream& os, message_type mt)
     case message_type::userauth_failure:           return os << "SSH_MSG_USERAUTH_FAILURE";
     case message_type::userauth_success:           return os << "SSH_MSG_USERAUTH_SUCCESS";
     case message_type::userauth_banner:            return os << "SSH_MSG_USERAUTH_BANNER";
+    case message_type::userauth_pk_ok:             return os << "SSH_MSG_USERAUTH_PK_OK";
     case message_type::global_request:             return os << "SSH_MSG_GLOBAL_REQUEST";
     case message_type::request_success:            return os << "SSH_MSG_REQUEST_SUCCESS";
     case message_type::request_failure:            return os << "SSH_MSG_REQUEST_FAILURE";

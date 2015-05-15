@@ -3,6 +3,7 @@
 #include <util/base_conversion.h>
 #include <util/buffer.h>
 #include <util/random.h>
+#include <util/int_util.h>
 #include <hash/hash.h>
 
 #include <boost/multiprecision/cpp_int.hpp>
@@ -80,7 +81,7 @@ digest_info pkcs1_decode(const rsa_public_key& pk, const std::vector<uint8_t>& d
     FUNTLS_CHECK_BINARY(pk.key_length(), ==, em_len, "Invalid PKCS#1 1.5 signature");
 
     // Decode the signature using the issuers public key (here using the subjects PK since the cert is selfsigned)
-    int_type d = powm(sig_int, pk.public_exponent.as<int_type>(), pk.modolus.as<int_type>());
+    int_type d = powm(sig_int, pk.public_exponent.as<int_type>(), pk.modulus.as<int_type>());
     const auto decoded = x509::base256_encode(d, em_len);
 
     // EM = 0x00 || 0x01 || PS || 0x00 || T (T=DER encoded DigestInfo)
@@ -112,10 +113,33 @@ digest_info pkcs1_decode(const rsa_public_key& pk, const std::vector<uint8_t>& d
     return x509::digest_info{digest_algo, digest};
 }
 
-std::vector<uint8_t> pkcs1_encode(const x509::rsa_public_key& key, const std::vector<uint8_t>& message)
+std::vector<uint8_t> pkcs1_encode(const rsa_private_key& key, const std::vector<uint8_t>& message)
+{
+    const auto n = key.modulus.as<int_type>();
+    const auto d = key.private_exponent.as<int_type>();
+    const size_t k = ilog256(n);
+
+    std::vector<uint8_t> EM(k-message.size());
+    EM[0] = 0x00;
+    EM[1] = 0x01;
+    for (size_t i = 2; i < EM.size()-1; ++i) {
+        EM[i] = 0xFF;
+    }
+    EM[EM.size()-1] = 0x00;
+    EM.insert(EM.end(), std::begin(message), std::end(message));
+    assert(EM.size()==k);
+    // 3.a
+    const auto m = x509::base256_decode<int_type>(EM); // m = OS2IP (EM)
+    assert(m < n); // Is the message too long?
+    // 3.b
+    const int_type c = powm(m, d, n);
+    return x509::base256_encode(c, k);
+}
+
+std::vector<uint8_t> pkcs1_encode(const rsa_public_key& key, const std::vector<uint8_t>& message)
 {
     FUNTLS_CHECK_BINARY(key.key_length() & (key.key_length()-1), ==, 0, "Non pow2 key length?");
-    const auto n = key.modolus.as<int_type>();
+    const auto n = key.modulus.as<int_type>();
     const auto e = key.public_exponent.as<int_type>();
 
     // Perform RSAES-PKCS1-V1_5-ENCRYPT (http://tools.ietf.org/html/rfc3447 7.2.1)
@@ -163,6 +187,39 @@ rsa_public_key rsa_public_key_from_certificate(const certificate& cert)
     const auto vec = cert.tbs().subject_public_key.as_vector();
     util::buffer_view pk_buf{&vec[0], vec.size()};
     return x509::rsa_public_key::parse(asn1::read_der_encoded_value(pk_buf));
+}
+
+rsa_private_key rsa_private_key::parse(const asn1::der_encoded_value& repr)
+{
+    asn1::sequence_view key_seq{repr};
+
+    auto version = asn1::integer{key_seq.next()};
+    FUNTLS_CHECK_BINARY(version.as<int>(), ==, 0, "Invalid version");
+
+    asn1::integer n{key_seq.next()};
+    asn1::integer e{key_seq.next()};
+    asn1::integer d{key_seq.next()};
+    asn1::integer p{key_seq.next()};
+    asn1::integer q{key_seq.next()};
+    asn1::integer e1{key_seq.next()};
+    asn1::integer e2{key_seq.next()};
+    asn1::integer c{key_seq.next()};
+
+    FUNTLS_CHECK_BINARY(key_seq.has_next(), ==, false, "Extra data in RSA private key");
+
+    return {version, n, e, d, p, q, e1, e2, c};
+}
+
+rsa_private_key rsa_private_key_from_pki(const private_key_info& pki)
+{
+    FUNTLS_CHECK_BINARY(pki.version.as<int>(), ==, 0, "Unsupported private key version");
+    FUNTLS_CHECK_BINARY(pki.algorithm, ==, x509::id_rsaEncryption, "Invalid private key algorithm");
+
+    auto key_data = pki.key.as_vector();
+    util::buffer_view key_buf(key_data.data(), key_data.size());
+    auto pkey = rsa_private_key::parse(asn1::read_der_encoded_value(key_buf));
+    FUNTLS_CHECK_BINARY(key_buf.remaining(), ==, 0, "Extra data in RSA private key");
+    return pkey;
 }
 
 void verify_x509_signature_rsa(const certificate& subject_cert, const certificate& issuer_cert)

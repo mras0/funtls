@@ -4,6 +4,7 @@
 #include <util/base_conversion.h>
 #include <util/int_util.h>
 #include <x509/x509_rsa.h>
+#include <x509/x509_io.h>
 #include <hash/hash.h>
 #include <aes/aes.h>
 
@@ -163,10 +164,21 @@ x509::rsa_public_key parse_rsa_key(const std::vector<uint8_t>& blob)
 {
     util::buffer_view buf{blob.data(), blob.size()};
     check_rsa_sig(buf);
-    auto e = asn1::integer::from_bytes_unsigned(ssh::get_string(buf));
-    auto n = asn1::integer::from_bytes_unsigned(ssh::get_string(buf));
+    auto e = asn1::integer::from_bytes(ssh::get_string(buf));
+    auto n = asn1::integer::from_bytes(ssh::get_string(buf));
     FUNTLS_CHECK_BINARY(buf.remaining(), ==, 0, "Invalid RSA key");
     return {n, e};
+}
+
+std::vector<uint8_t> make_rsa_key(const asn1::integer& exponent, const asn1::integer& modolus)
+{
+    buffer_builder b;
+    put_string(b, "ssh-rsa");
+    auto e = exponent.as_vector();
+    auto n = modolus.as_vector();
+    put_string(b, e);
+    put_string(b, n);
+    return b.as_vector();
 }
 
 std::vector<uint8_t> parse_rsa_sig(const std::vector<uint8_t>& blob)
@@ -174,6 +186,14 @@ std::vector<uint8_t> parse_rsa_sig(const std::vector<uint8_t>& blob)
     util::buffer_view buf{blob.data(), blob.size()};
     check_rsa_sig(buf);
     return ssh::get_string(buf);
+}
+
+std::vector<uint8_t> make_rsa_sig(const std::vector<uint8_t>& sig_blob)
+{
+    buffer_builder b;
+    put_string(b, "ssh-rsa");
+    put_string(b, sig_blob);
+    return b.as_vector();
 }
 
 template<typename IntType>
@@ -217,7 +237,7 @@ std::vector<uint8_t> aes_ctr(const std::vector<uint8_t>& K, std::vector<uint8_t>
 }
 
 #define CHECK_CONTAINS(nl, n) FUNTLS_CHECK_BINARY(nl.contains(n), ==, true, nl2s(nl) + " doesn't contain " + n)
-void test_client(const char* host, const char* port)
+void test_client(const char* host, const char* port, const char* user_name, const x509::rsa_private_key& key)
 {
     boost::asio::io_service         io_service;
     boost::asio::ip::tcp::socket    socket(io_service);
@@ -402,18 +422,10 @@ void test_client(const char* host, const char* port)
     const auto client_mac_key = generate_key(K, H, 'E', session_id, hmac_sha1_key_len);
     const auto server_mac_key = generate_key(K, H, 'F', session_id, hmac_sha1_key_len);
 
-    // TODO: Encrypt + Add MAC
-    // Service request
-    auto client_ctr = client_iv;
     uint32_t client_sequence_number = 3;
-    uint32_t server_sequence_number = 3;
-    auto server_ctr = server_iv;
-    {
-        buffer_builder b;
-        put(b, ssh::message_type::service_request);
-        put_string(b, "ssh-userauth");
+    auto client_ctr = client_iv;
 
-        const auto payload = b.as_vector();
+    auto send_encrypted = [&] (const std::vector<uint8_t>& payload) {
         const auto unecrypted_packet = make_ssh_packet(payload, aes::block_size_bytes);
         const auto mac = hash::hmac_sha1{client_mac_key}.input(u32buf(client_sequence_number)).input(unecrypted_packet).result();
 
@@ -424,74 +436,160 @@ void test_client(const char* host, const char* port)
         put(packet, mac);
         boost::asio::write(socket, boost::asio::buffer(packet.as_vector()));
         ++client_sequence_number;
+    };
+
+    uint32_t server_sequence_number = 3;
+    auto server_ctr = server_iv;
+    // Read service request response
+    auto recv_encrypted = [&] {
+        for (;;) {
+            std::vector<uint8_t> buf(16);
+            boost::asio::read(socket, boost::asio::buffer(buf));
+
+            hash::hmac_sha1 mac{server_mac_key};
+            mac.input(u32buf(server_sequence_number));
+
+            const auto first_block = aes_ctr(server_key, server_ctr, buf);
+            mac.input(first_block);
+            const auto packet_size = u32_from_bytes(&first_block[0]);
+            const auto pad_size    = first_block[4];
+            FUNTLS_CHECK_BINARY(packet_size, <, 40000, "Invalid header: " + util::base16_encode(first_block));
+            std::cout << "Packet size " << packet_size << " padding " << (unsigned)pad_size << std::endl;
+
+            std::vector<uint8_t> payload(first_block.begin()+5,first_block.end());
+            if (packet_size > 12) {
+                buf.resize(packet_size - 1 - 11); // we already read the padding length byte and up to 11 bytes of data
+                boost::asio::read(socket, boost::asio::buffer(buf));
+                buf = aes_ctr(server_key, server_ctr, buf);
+                mac.input(buf);
+                payload.insert(payload.end(), buf.begin(), buf.end());
+            }
+            // discard padding
+            FUNTLS_CHECK_BINARY(payload.size(), >=, pad_size, "Not enough data");
+            payload.erase(payload.end() - pad_size, payload.end());
+            std::cout << util::base16_encode(payload) << std::endl;
+
+            buf.resize(result_size(hash::algorithm::sha1));
+            boost::asio::read(socket, boost::asio::buffer(buf));
+            const auto calced_mac = mac.result();
+            if (buf != calced_mac) {
+                FUNTLS_CHECK_FAILURE("MAC check failed for server packet " + std::to_string(server_sequence_number));
+            }
+            ++server_sequence_number;
+            if (!payload.empty()) {
+                util::buffer_view msg{payload.data(), payload.size()};
+                const auto msg_type = static_cast<ssh::message_type>(msg.get());
+                if (msg_type == ssh::message_type::ignore) {
+                    auto msg_to_ignore = ssh::get_string(msg);
+                    FUNTLS_CHECK_BINARY(msg.remaining(), ==, 0, "Unexpected data");
+                    std::cout << msg_type << " " << std::string(msg_to_ignore.begin(), msg_to_ignore.end()) << std::endl;
+                    continue;
+                } else if (msg_type == ssh::message_type::disconnect) {
+                    const auto reason      = static_cast<ssh::disconnect_reason>(util::get_be_uint32(msg));
+                    const auto description = ssh::get_string(msg);
+                    const auto language    = ssh::get_string(msg);
+                    FUNTLS_CHECK_BINARY(msg.remaining(), ==, 0, "Unexpected data");
+                    FUNTLS_CHECK_BINARY(std::string(language.begin(), language.end()), ==, "", "Untested");
+                    std::ostringstream oss;
+                    oss << "Disconnected: " << reason << " " << std::string(description.begin(), description.end()) << std::endl;
+                    throw std::runtime_error(oss.str());
+                }
+            }
+            return payload;
+        }
+    };
+
+
+    // Do ssh-userauth
+    // Service request
+    {
+        const std::string wanted_service{"ssh-userauth"};
+        buffer_builder b;
+        put(b, ssh::message_type::service_request);
+        put_string(b, wanted_service);
+        send_encrypted(b.as_vector());
+
+        const auto msg_buf = recv_encrypted();
+        util::buffer_view msg{msg_buf.data(), msg_buf.size()};
+        FUNTLS_CHECK_BINARY(ssh::message_type::service_accept, ==, static_cast<ssh::message_type>(msg.get()), "Unexpected message");
+        auto service_name = ssh::get_string(msg);
+        FUNTLS_CHECK_BINARY(msg.remaining(), ==, 0, "Unexpected data");
+        FUNTLS_CHECK_BINARY(std::string(service_name.begin(), service_name.end()), ==, wanted_service, "");
     }
 
-    // Read service request response
+    bool include_sig = false;
     for (;;) {
-        std::vector<uint8_t> buf(16);
-        boost::asio::read(socket, boost::asio::buffer(buf));
+        const char* service   = "ssh-connection";
 
-        hash::hmac_sha1 mac{server_mac_key};
-        mac.input(u32buf(server_sequence_number));
+        buffer_builder b;
+        put(b, ssh::message_type::userauth_request);
+        put_string(b, user_name);
+        put_string(b, service);
 
-        const auto first_block = aes_ctr(server_key, server_ctr, buf);
-        mac.input(first_block);
-        const auto packet_size = u32_from_bytes(&first_block[0]);
-        const auto pad_size    = first_block[4];
-        FUNTLS_CHECK_BINARY(packet_size, <, 40000, "Invalid header: " + util::base16_encode(first_block));
-        std::cout << "Packet size " << packet_size << " padding " << (unsigned)pad_size << std::endl;
+        //put_string(b, "none");  // method
 
-        std::vector<uint8_t> payload(first_block.begin()+5,first_block.end());
-        if (packet_size > 12) {
-            buf.resize(packet_size - 1 - 11); // we already read the padding length byte and up to 11 bytes of data
-            boost::asio::read(socket, boost::asio::buffer(buf));
-            buf = aes_ctr(server_key, server_ctr, buf);
-            mac.input(buf);
-            payload.insert(payload.end(), buf.begin(), buf.end());
+        //put_string(b, "password");
+        //b.put_u8(0); // FALSE
+        //put_string(b, "plaintextpassword");
+        put_string(b, "publickey");
+        b.put_u8(include_sig);
+        put_string(b, "rsa");
+        auto pk_blob = make_rsa_key(key.public_exponent, key.modulus);
+        put_string(b, pk_blob);
+
+        if (include_sig) {
+            std::vector<uint8_t> verbuf = u32buf(session_id.size());
+            verbuf.insert(verbuf.end(), session_id.begin(), session_id.end());
+            verbuf.insert(verbuf.end(), b.as_vector().begin(), b.as_vector().end());
+            hexdump(std::cout, verbuf);
+            auto digest_info = hash::sha1{}.input(verbuf).result();
+            std::cout << "Calced " << util::base16_encode(digest_info) << std::endl;
+            digest_info.insert(digest_info.begin(), {0x30, 0x21, 0x30, 0x09, 0x06, 0x05, 0x2b, 0x0e, 0x03, 0x02, 0x1a, 0x05, 0x00, 0x04, 0x14});
+            std::vector<uint8_t> sig_blob = x509::pkcs1_encode(key, digest_info);
+            put_string(b, make_rsa_sig(sig_blob));
+            // Check that we can decode the message we produced
+            auto di = x509::pkcs1_decode(x509::rsa_public_key{key.modulus, key.public_exponent}, sig_blob);
+            FUNTLS_CHECK_BINARY(di.digest_algorithm.id(), ==, x509::id_sha1, "");
         }
-        // discard padding
-        FUNTLS_CHECK_BINARY(payload.size(), >=, pad_size, "Not enough data");
-        payload.erase(payload.end() - pad_size, payload.end());
-        std::cout << util::base16_encode(payload) << std::endl;
 
-        buf.resize(result_size(hash::algorithm::sha1));
-        boost::asio::read(socket, boost::asio::buffer(buf));
-        std::cout << "Received MAC   " << util::base16_encode(buf) << std::endl;
-        const auto calced_mac = mac.result();
-        std::cout << "Calculated MAC " << util::base16_encode(calced_mac) << std::endl;
-        if (buf != calced_mac) {
-            FUNTLS_CHECK_FAILURE("MAC check failed for server packet " + std::to_string(server_sequence_number));
-        }
-        ++server_sequence_number;
-
-        FUNTLS_CHECK_BINARY(payload.size(), >, 0, "Empty packet");
-        util::buffer_view msg{payload.data(), payload.size()};
-        const auto msg_type = static_cast<ssh::message_type>(msg.get());
-        if (msg_type == ssh::message_type::ignore) {
-            auto msg_to_ignore = ssh::get_string(msg);
+        send_encrypted(b.as_vector());
+        const auto msg_buf = recv_encrypted();
+        FUNTLS_CHECK_BINARY(msg_buf.empty(), ==, false, "Got empty reply to userauth request");
+        const auto msg_type = static_cast<ssh::message_type>(msg_buf[0]);
+        std::cout << "Got " << msg_type << std::endl;
+        if (msg_type == ssh::message_type::userauth_failure) {
+            util::buffer_view msg{msg_buf.data()+1, msg_buf.size()-1};
+            auto methods = ssh::name_list::from_buffer(msg);
+            auto partial_sucess = msg.get();
             FUNTLS_CHECK_BINARY(msg.remaining(), ==, 0, "Unexpected data");
-            std::cout << msg_type << " " << std::string(msg_to_ignore.begin(), msg_to_ignore.end()) << std::endl;
-        } else if (msg_type == ssh::message_type::disconnect) {
-            const auto reason      = static_cast<ssh::disconnect_reason>(util::get_be_uint32(msg));
-            const auto description = ssh::get_string(msg);
-            const auto language    = ssh::get_string(msg);
+            std::cout << "Methods that can continue: " << nl2s(methods) << std::endl;
+            if (partial_sucess) std::cout << "Partial sucess\n";
+            FUNTLS_CHECK_FAILURE("");
+        } else if (msg_type == ssh::message_type::userauth_pk_ok) {
+            util::buffer_view msg{msg_buf.data()+1, msg_buf.size()-1};
+            auto algo = ssh::get_string(msg);
+            auto blob = ssh::get_string(msg);
+            FUNTLS_CHECK_BINARY(std::string(algo.begin(), algo.end()), ==, "rsa", "");
+            FUNTLS_CHECK_BINARY(util::base16_encode(blob), ==, util::base16_encode(pk_blob), "");
             FUNTLS_CHECK_BINARY(msg.remaining(), ==, 0, "Unexpected data");
-            FUNTLS_CHECK_BINARY(std::string(language.begin(), language.end()), ==, "", "Untested");
-            std::cout << msg_type << " " << reason << " " << std::string(description.begin(), description.end()) << std::endl;
-        } else if (msg_type == ssh::message_type::service_accept) {
-            auto service_name = ssh::get_string(msg);
-            FUNTLS_CHECK_BINARY(msg.remaining(), ==, 0, "Unexpected data");
-            std::cout << msg_type << " " << std::string(service_name.begin(), service_name.end()) << std::endl;
+            include_sig = true;
+            continue;
+        } else if (msg_type == ssh::message_type::userauth_success) {
+            FUNTLS_CHECK_BINARY(msg_buf.size(), ==, 1, "Unexpected data");
             break;
         } else {
-            std::ostringstream oss;
-            oss << "Unexpected message type " << msg_type;
-            FUNTLS_CHECK_FAILURE(oss.str());
+            std::cout << util::base16_encode(msg_buf) << std::endl;
+            FUNTLS_CHECK_FAILURE("");
         }
     }
+
+    std::cout << "Sucessfully authed as " << user_name << std::endl;
 }
 
 int main()
 {
-    test_client("localhost", "1234");
+    const char* u = getenv("USER");
+    const char* user_name = u && u[0] ? u : "test";
+    const auto private_key = x509::rsa_private_key_from_pki(x509::read_pem_private_key_from_file("../rsa-key.pem"));
+    test_client("localhost", "1234", user_name, private_key);
 }

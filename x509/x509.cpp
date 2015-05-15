@@ -478,4 +478,23 @@ void verify_x509_certificate_chain(const std::vector<certificate>& chain)
     }
 }
 
+private_key_info private_key_info::parse(const asn1::der_encoded_value& repr)
+{
+    auto pkey_seq = asn1::sequence_view{repr};
+    auto version = asn1::integer{pkey_seq.next()};
+    auto algo    = x509::algorithm_id{pkey_seq.next()};
+    auto pkey    = asn1::octet_string{pkey_seq.next()};
+    FUNTLS_CHECK_BINARY(pkey_seq.has_next(), ==, false, "Extra data found at end of PKCS#8 private key");
+    return {version, algo, pkey};
+}
+
+std::ostream& operator<<(std::ostream& os, const private_key_info& pki)
+{
+    os << "Private key" << "\n";
+    os << " version   " << pki.version.as<unsigned long long>() << "\n";
+    os << " algorithm " << pki.algorithm << "\n";
+    os << " key       " << util::base16_encode(pki.key.as_vector()) << "\n";
+    return os;
+}
+
 } } // namespace funtls::x509

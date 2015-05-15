@@ -1,9 +1,11 @@
 #!/bin/bash
 
+"@OPENSSH_DIR@/ssh-keygen" -f "@funtls_SOURCE_DIR@/rsa-key.pem" -y > "@CMAKE_CURRENT_BINARY_DIR@/authorized_keys"
+
 while true; do
     echo
     echo
     echo
     echo
-    @SSHD_COMMAND@ -ddd -f @CMAKE_CURRENT_BINARY_DIR@/sshd_config
+    "@OPENSSH_DIR@/sshd" -ddd -f "@CMAKE_CURRENT_BINARY_DIR@/sshd_config"
 done

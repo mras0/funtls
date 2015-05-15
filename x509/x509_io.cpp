@@ -17,6 +17,8 @@ namespace {
 const char* const pem_line_end = "\r\n";
 const char* const cert_begin_line = "-----BEGIN CERTIFICATE-----";
 const char* const cert_end_line   = "-----END CERTIFICATE-----";
+const char* const pkey_begin_line = "-----BEGIN PRIVATE KEY-----";
+const char* const pkey_end_line   = "-----END PRIVATE KEY-----";
 
 std::vector<uint8_t> read_pem_data(std::istream& is, const char* const begin_line, const char* const end_line)
 {
@@ -70,6 +72,33 @@ void write_pem_data(std::ostream& os, const char* const begin_line, const char* 
     os << end_line << pem_line_end;
 }
 
+template<typename F>
+auto from_string_impl(const std::string& s, F f) -> decltype(f(std::declval<std::istream&>())) {
+    std::istringstream iss(s);
+    return f(iss);
+}
+
+template<typename F>
+auto from_file_impl(const std::string& filename, F f) -> decltype(f(std::declval<std::istream&>())) {
+    std::ifstream in(filename, std::ifstream::binary);
+
+    if (!in || !in.is_open()) {
+        FUNTLS_CHECK_FAILURE("Error opening '" + filename + "'");
+    }
+
+    auto data = f(in);
+
+    if (!in) {
+        FUNTLS_CHECK_FAILURE("Error while reading from '" + filename + "'");
+    }
+
+    if (in.peek() != std::char_traits<char>::eof()) {
+        FUNTLS_CHECK_FAILURE("Error while reading from '" + filename + "'");
+    }
+
+    return data;
+}
+
 } // unnamed namespace
 
 namespace funtls { namespace x509 {
@@ -84,33 +113,35 @@ certificate read_pem_certificate(std::istream& is)
 
 certificate read_pem_certificate_from_string(const std::string& s)
 {
-    std::istringstream iss(s);
-    return read_pem_certificate(iss);
+    return from_string_impl(s, &read_pem_certificate);
 }
 
 certificate read_pem_certificate_from_file(const std::string& filename)
 {
-    std::ifstream in(filename, std::ifstream::binary);
-
-    if (!in || !in.is_open()) {
-        FUNTLS_CHECK_FAILURE("Error opening '" + filename + "'");
-    }
-
-    auto cert = x509::read_pem_certificate(in);
-    if (!in) {
-        FUNTLS_CHECK_FAILURE("Error while reading from '" + filename + "'");
-    }
-
-    if (in.peek() != std::char_traits<char>::eof()) {
-        FUNTLS_CHECK_FAILURE("Error while reading from '" + filename + "'");
-    }
-
-    return cert;
+    return from_file_impl(filename, &read_pem_certificate);
 }
 
 void write_pem_certificate(std::ostream& os, const std::vector<uint8_t>& der_encoded_certificate)
 {
     write_pem_data(os, cert_begin_line, cert_end_line, der_encoded_certificate);
+}
+
+private_key_info read_pem_private_key(std::istream& is)
+{
+    auto pkey_der_data = read_pem_data(is, pkey_begin_line, pkey_end_line);
+    assert(pkey_der_data.size());
+    util::buffer_view pkey_buf(pkey_der_data.data(), pkey_der_data.size());
+    return private_key_info::parse(asn1::read_der_encoded_value(pkey_buf));
+}
+
+private_key_info read_pem_private_key_from_string(const std::string& s)
+{
+    return from_string_impl(s, &read_pem_private_key);
+}
+
+private_key_info read_pem_private_key_from_file(const std::string& filename)
+{
+    return from_file_impl(filename, &read_pem_private_key);
 }
 
 } } // namespace funtls::x509

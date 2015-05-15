@@ -36,6 +36,7 @@ enum class message_type : uint8_t {
     userauth_banner              =  53,
 //        60 to 79   User authentication method specific (numbers can be
 //                   reused for different authentication methods)
+    userauth_pk_ok               =  60,
 //      Connection protocol:
 //        80 to 89   Connection protocol generic
     global_request               =  80,

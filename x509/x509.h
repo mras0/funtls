@@ -275,6 +275,16 @@ T from_buffer(const std::vector<uint8_t>& b)
     return T(asn1::read_der_encoded_value(view));
 }
 
+
+struct private_key_info {
+    asn1::integer       version;
+    x509::algorithm_id  algorithm;
+    asn1::octet_string  key;
+
+    static private_key_info parse(const asn1::der_encoded_value&);
+};
+std::ostream& operator<<(std::ostream& os, const private_key_info& pki);
+
 } } // namespace funtls::x509
 
 #endif
