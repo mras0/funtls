@@ -5,6 +5,7 @@
 #include <util/int_util.h>
 #include <x509/x509_rsa.h>
 #include <hash/hash.h>
+#include <aes/aes.h>
 
 #include <boost/multiprecision/cpp_int.hpp>
 using int_type = boost::multiprecision::cpp_int;
@@ -110,11 +111,9 @@ void put(buffer_builder& b, const ssh::name_list& nl) {
 
 #include <boost/asio.hpp>
 
-// Unencrypted, no mac
-void send_ssh_packet(boost::asio::ip::tcp::socket& socket, const std::vector<uint8_t>& payload)
+std::vector<uint8_t> make_ssh_packet(const std::vector<uint8_t>& payload, const uint8_t padwidth = 8)
 {
     buffer_builder packet;
-    const uint8_t padwidth = 8;
     uint8_t padding = padwidth - (payload.size() + 4 + 1) % padwidth;
     if (padding < 4) padding += padwidth;
     packet.put_u32(payload.size() + 1 + padding);
@@ -125,7 +124,17 @@ void send_ssh_packet(boost::asio::ip::tcp::socket& socket, const std::vector<uin
     assert(packet_buf.size() >= 16);
     assert(packet_buf.size() % padwidth == 0);
     assert(packet_buf.size() == payload.size() + 1 + 4 + padding);
-    boost::asio::write(socket, boost::asio::buffer(packet_buf));
+    return packet_buf;
+}
+
+void send_ssh_packet(boost::asio::ip::tcp::socket& socket, const std::vector<uint8_t>& payload)
+{
+    boost::asio::write(socket, boost::asio::buffer(make_ssh_packet(payload)));
+}
+
+uint32_t u32_from_bytes(const uint8_t* b)
+{
+    return ((uint32_t)b[0]<<24)|((uint32_t)b[1]<<16)|((uint32_t)b[2]<<8)|b[3];
 }
 
 std::vector<uint8_t> read_ssh_packet(boost::asio::ip::tcp::socket& socket)
@@ -133,7 +142,7 @@ std::vector<uint8_t> read_ssh_packet(boost::asio::ip::tcp::socket& socket)
     // TODO: Validation
     std::vector<uint8_t> rbuf(5);
     boost::asio::read(socket, boost::asio::buffer(rbuf));
-    const auto r_size     = (((uint32_t)rbuf[0]<<24)|((uint32_t)rbuf[1]<<16)|((uint32_t)rbuf[2]<<8)|rbuf[3]);
+    const auto r_size     = u32_from_bytes(&rbuf[0]);
     const auto r_pad_size = rbuf[4];
     FUNTLS_CHECK_BINARY(r_size, <, 40000, "Invalid header: " + util::base16_encode(rbuf));
     rbuf.resize(r_size - r_pad_size - 1);
@@ -175,18 +184,39 @@ std::vector<uint8_t> mpint_to_string(const IntType& i, size_t size)
     return bytes;
 }
 
-std::vector<uint8_t> generate_key(const std::vector<uint8_t>& K, const std::vector<uint8_t>& H, char letter, const std::vector<uint8_t>& session_id)
+std::vector<uint8_t> u32buf(const uint32_t x) {
+    return { static_cast<uint8_t>(x>>24), static_cast<uint8_t>(x>>16), static_cast<uint8_t>(x>>8), static_cast<uint8_t>(x) };
+}
+
+std::vector<uint8_t> generate_key(const std::vector<uint8_t>& K, const std::vector<uint8_t>& H, char letter, const std::vector<uint8_t>& session_id, size_t needed)
 {
-    const uint32_t x = K.size();
-    const uint8_t klen[4] = { static_cast<uint8_t>(x>>24), static_cast<uint8_t>(x>>16), static_cast<uint8_t>(x>>8), static_cast<uint8_t>(x) };
-    auto key = hash::sha1{}.input(klen).input(K).input(H).input(&letter, 1).input(session_id).result();
+    auto key = hash::sha1{}.input(u32buf(K.size())).input(K).input(H).input(&letter, 1).input(session_id).result();
     std::cout << "key " << letter << std::endl;
     hexdump(std::cout, key);
+    // key expansion not implemented
+    assert(needed <= key.size());
+    key.erase(key.begin() + needed, key.end());
     return key;
 }
 
-#define CHECK_CONTAINS(nl, n) FUNTLS_CHECK_BINARY(nl.contains(n), ==, true, nl2s(nl) + " doesn't contain " + n)
+// *-ctr modes are described in RFC4344
+std::vector<uint8_t> aes_ctr(const std::vector<uint8_t>& K, std::vector<uint8_t>& X, const std::vector<uint8_t>& input)
+{
+    FUNTLS_CHECK_BINARY(X.size(), !=, 0, "Invalid counter size");
+    FUNTLS_CHECK_BINARY(input.size() % aes::block_size_bytes, ==, 0, "Input must be a multiple of 128-bit. Size="+std::to_string(input.size()));
 
+    std::vector<uint8_t> res = input;
+    for (size_t i = 0; i < input.size(); i += aes::block_size_bytes) {
+        const auto B = aes::aes_encrypt_ecb(K, X);
+        aes::increment_be_number(X.data(), X.size());
+        for (size_t j = 0; j < aes::block_size_bytes; ++j) {
+            res[i+j] ^= B[j];
+        }
+    }
+    return res;
+}
+
+#define CHECK_CONTAINS(nl, n) FUNTLS_CHECK_BINARY(nl.contains(n), ==, true, nl2s(nl) + " doesn't contain " + n)
 void test_client(const char* host, const char* port)
 {
     boost::asio::io_service         io_service;
@@ -362,22 +392,103 @@ void test_client(const char* host, const char* port)
 
     const std::vector<uint8_t> session_id = H; // the session id is the exchange hash from the first key exchange
 
-    const auto client_iv      = generate_key(K, H, 'A', session_id);
-    const auto server_iv      = generate_key(K, H, 'B', session_id);
-    const auto client_key     = generate_key(K, H, 'C', session_id);
-    const auto server_key     = generate_key(K, H, 'D', session_id);
-    const auto client_mac_key = generate_key(K, H, 'E', session_id);
-    const auto server_mac_key = generate_key(K, H, 'F', session_id);
+    constexpr size_t hmac_sha1_key_len = 20;
+    constexpr size_t aes_128_key_len   = 128/8;
+
+    const auto client_iv      = generate_key(K, H, 'A', session_id, aes::block_size_bytes);
+    const auto server_iv      = generate_key(K, H, 'B', session_id, aes::block_size_bytes);
+    const auto client_key     = generate_key(K, H, 'C', session_id, aes_128_key_len);
+    const auto server_key     = generate_key(K, H, 'D', session_id, aes_128_key_len);
+    const auto client_mac_key = generate_key(K, H, 'E', session_id, hmac_sha1_key_len);
+    const auto server_mac_key = generate_key(K, H, 'F', session_id, hmac_sha1_key_len);
 
     // TODO: Encrypt + Add MAC
     // Service request
+    auto client_ctr = client_iv;
+    uint32_t client_sequence_number = 3;
+    uint32_t server_sequence_number = 3;
+    auto server_ctr = server_iv;
     {
         buffer_builder b;
         put(b, ssh::message_type::service_request);
         put_string(b, "ssh-userauth");
-        send_ssh_packet(socket, b.as_vector());
+
+        const auto payload = b.as_vector();
+        const auto unecrypted_packet = make_ssh_packet(payload, aes::block_size_bytes);
+        const auto mac = hash::hmac_sha1{client_mac_key}.input(u32buf(client_sequence_number)).input(unecrypted_packet).result();
+
+        std::cout << "mac " << util::base16_encode(mac) << std::endl;
+
+        buffer_builder packet;
+        put(packet, aes_ctr(client_key, client_ctr, unecrypted_packet));
+        put(packet, mac);
+        boost::asio::write(socket, boost::asio::buffer(packet.as_vector()));
+        ++client_sequence_number;
     }
 
+    // Read service request response
+    for (;;) {
+        std::vector<uint8_t> buf(16);
+        boost::asio::read(socket, boost::asio::buffer(buf));
+
+        hash::hmac_sha1 mac{server_mac_key};
+        mac.input(u32buf(server_sequence_number));
+
+        const auto first_block = aes_ctr(server_key, server_ctr, buf);
+        mac.input(first_block);
+        const auto packet_size = u32_from_bytes(&first_block[0]);
+        const auto pad_size    = first_block[4];
+        FUNTLS_CHECK_BINARY(packet_size, <, 40000, "Invalid header: " + util::base16_encode(first_block));
+        std::cout << "Packet size " << packet_size << " padding " << (unsigned)pad_size << std::endl;
+
+        std::vector<uint8_t> payload(first_block.begin()+5,first_block.end());
+        if (packet_size > 12) {
+            buf.resize(packet_size - 1 - 11); // we already read the padding length byte and up to 11 bytes of data
+            boost::asio::read(socket, boost::asio::buffer(buf));
+            buf = aes_ctr(server_key, server_ctr, buf);
+            mac.input(buf);
+            payload.insert(payload.end(), buf.begin(), buf.end());
+        }
+        // discard padding
+        FUNTLS_CHECK_BINARY(payload.size(), >=, pad_size, "Not enough data");
+        payload.erase(payload.end() - pad_size, payload.end());
+        std::cout << util::base16_encode(payload) << std::endl;
+
+        buf.resize(result_size(hash::algorithm::sha1));
+        boost::asio::read(socket, boost::asio::buffer(buf));
+        std::cout << "Received MAC   " << util::base16_encode(buf) << std::endl;
+        const auto calced_mac = mac.result();
+        std::cout << "Calculated MAC " << util::base16_encode(calced_mac) << std::endl;
+        if (buf != calced_mac) {
+            FUNTLS_CHECK_FAILURE("MAC check failed for server packet " + std::to_string(server_sequence_number));
+        }
+        ++server_sequence_number;
+
+        FUNTLS_CHECK_BINARY(payload.size(), >, 0, "Empty packet");
+        util::buffer_view msg{payload.data(), payload.size()};
+        const auto msg_type = static_cast<ssh::message_type>(msg.get());
+        if (msg_type == ssh::message_type::ignore) {
+            auto msg_to_ignore = ssh::get_string(msg);
+            FUNTLS_CHECK_BINARY(msg.remaining(), ==, 0, "Unexpected data");
+            std::cout << msg_type << " " << std::string(msg_to_ignore.begin(), msg_to_ignore.end()) << std::endl;
+        } else if (msg_type == ssh::message_type::disconnect) {
+            const auto reason      = static_cast<ssh::disconnect_reason>(util::get_be_uint32(msg));
+            const auto description = ssh::get_string(msg);
+            const auto language    = ssh::get_string(msg);
+            FUNTLS_CHECK_BINARY(msg.remaining(), ==, 0, "Unexpected data");
+            FUNTLS_CHECK_BINARY(std::string(language.begin(), language.end()), ==, "", "Untested");
+            std::cout << msg_type << " " << reason << " " << std::string(description.begin(), description.end()) << std::endl;
+        } else if (msg_type == ssh::message_type::service_accept) {
+            auto service_name = ssh::get_string(msg);
+            FUNTLS_CHECK_BINARY(msg.remaining(), ==, 0, "Unexpected data");
+            std::cout << msg_type << " " << std::string(service_name.begin(), service_name.end()) << std::endl;
+            break;
+        } else {
+            std::ostringstream oss;
+            oss << "Unexpected message type " << msg_type;
+            FUNTLS_CHECK_FAILURE(oss.str());
+        }
+    }
 }
 
 int main()

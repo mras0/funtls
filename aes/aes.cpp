@@ -217,4 +217,14 @@ std::vector<uint8_t> aes_decrypt_gcm(const std::vector<uint8_t>& K, const std::v
     return aes_gcm_inner(E_K, Y, C);
 }
 
+void increment_be_number(uint8_t* n, size_t len)
+{
+    assert(len);
+    size_t i = len-1;
+    do {
+        ++n[i];
+        if (n[i]) break;
+    } while(i--);
+}
+
 } } // namespace funtls::aes

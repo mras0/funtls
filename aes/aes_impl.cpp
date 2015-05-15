@@ -394,20 +394,6 @@ state ghash(const std::vector<uint8_t>& H, const std::vector<uint8_t>& A, const 
     return X;
 }
 
-void incr32(state& s)
-{
-    ++s[15];
-    if (!s[15]) {
-        ++s[14];
-        if (!s[14]) {
-            ++s[13];
-            if (!s[13]) {
-                ++s[12];
-            }
-        }
-    }
-}
-
 template<typename E_K_type>
 std::vector<uint8_t> aes_gcm_inner(E_K_type E_K, state& Y, const std::vector<uint8_t>& P)
 {
@@ -421,7 +407,7 @@ std::vector<uint8_t> aes_gcm_inner(E_K_type E_K, state& Y, const std::vector<uin
         } else {
             memcpy(&c[0], &P[i], remaining);
         }
-        incr32(Y);
+        funtls::aes::increment_be_number(&Y[12], 4);
         const auto E_K_Y = state{E_K(Y.as_vector())};
         c ^= E_K_Y;
         std::copy(c.begin(), c.begin() + remaining, &C[i]);

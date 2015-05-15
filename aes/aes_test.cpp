@@ -33,7 +33,6 @@ void tests_aes_internals()
     // Untested:
     (void) AddRoundKey;
     (void) initial_y;
-    (void) incr32;
 
     //
     // Key expansion
@@ -594,8 +593,37 @@ void test_cgm_aes()
     }
 }
 
+void test_increment()
+{
+#define CHECK_INCR(...) do {\
+        std::vector<uint8_t> n{__VA_ARGS__};\
+        assert(n.size()%2==0);\
+        auto p=n.data();\
+        size_t q=n.size()/2;\
+        auto e=p+q;\
+        aes::increment_be_number(p, q);\
+        FUNTLS_ASSERT_EQUAL(std::vector<uint8_t>(e, e+q), std::vector<uint8_t>(p, p+q));\
+    } while (0)
+    CHECK_INCR(0, 1);
+    CHECK_INCR(42, 43);
+    CHECK_INCR(255, 0);
+    CHECK_INCR(0,0,0,0, 0,0,0,1);
+    CHECK_INCR(255,255,255,254, 255,255,255,255);
+    CHECK_INCR(255,255,255,255, 0,0,0,0);
+    CHECK_INCR(0,0,255,255, 0,1,0,0);
+#undef CHECK_INCR
+
+    auto large_number = util::base16_decode("b45c29367068d56d671dcd642543eda0abae9232");
+    aes::increment_be_number(large_number.data(), large_number.size());
+    FUNTLS_ASSERT_EQUAL(util::base16_decode("b45c29367068d56d671dcd642543eda0abae9233"), large_number);
+    auto large_number2 = util::base16_decode("ffffffffffffffffffffffffffffffffffffffffff");
+    aes::increment_be_number(large_number2.data(), large_number2.size());
+    FUNTLS_ASSERT_EQUAL(util::base16_decode("000000000000000000000000000000000000000000"), large_number2);
+}
+
 int main()
 {
+    test_increment();
     tests_aes_internals();
     test_ecb_aes128();
     test_ecb_aes192();

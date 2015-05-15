@@ -9,6 +9,7 @@
 
 #include <vector>
 #include <cstdint>
+#include <cstddef>
 
 namespace funtls { namespace aes {
 
@@ -30,6 +31,8 @@ std::vector<uint8_t> aes_decrypt_cbc(const std::vector<uint8_t>& key, const std:
 std::pair<std::vector<uint8_t>, std::vector<uint8_t>> aes_encrypt_gcm(const std::vector<uint8_t>& K, const std::vector<uint8_t>& IV, const std::vector<uint8_t>& P, const std::vector<uint8_t>& A);
 
 std::vector<uint8_t> aes_decrypt_gcm(const std::vector<uint8_t>& K, const std::vector<uint8_t>& IV, const std::vector<uint8_t>& C, const std::vector<uint8_t>& A, const std::vector<uint8_t>& T);
+
+void increment_be_number(uint8_t* n, size_t len);
 } } // namespace funtls::aes
 
 #endif

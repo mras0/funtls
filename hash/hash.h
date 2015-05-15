@@ -17,9 +17,14 @@ enum class algorithm {
     sha512
 };
 
-//SHA1HashSize = 20, SHA224HashSize = 28, SHA256HashSize = 32,
-//SHA384HashSize = 48, SHA512HashSize = 64,
-//USHAMaxHashSize = SHA512HashSize,
+constexpr size_t result_size(algorithm algo) {
+    return algo == algorithm::md5    ? 16
+         : algo == algorithm::sha1   ? 20
+         : algo == algorithm::sha224 ? 28
+         : algo == algorithm::sha256 ? 32
+         : algo == algorithm::sha384 ? 48
+         : /* algo == algorithm::sha512 ? */ 64;
+}
 
 namespace detail {
 class algorithm_impl {
