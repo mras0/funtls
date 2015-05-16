@@ -21,7 +21,7 @@ int_type modular_inverse(const a_expr& a, const int_type& n)
 {
     int_type r = n, newr = pmod(a, n);
     int_type t = 0, newt = 1;
-    while (newr) {
+    while (newr != 0) {
         int_type quotient = r / newr;
         int_type saved = newt;
         newt = t - quotient * saved;
