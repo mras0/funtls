@@ -79,30 +79,31 @@ bool operator<(const biguint& lhs, const biguint& rhs)
     }
 }
 
-biguint& biguint::operator+=(const biguint& rhs)
+biguint& biguint::add(biguint& res, const biguint& lhs, const biguint& rhs)
 {
-    check_repr();
+    lhs.check_repr();
     rhs.check_repr();
 
     // Handle 0
-    if (!size_) return *this = rhs;
-    if (!rhs.size_) return *this;
+    if (!lhs.size_) return res = rhs;
+    if (!rhs.size_) return res = lhs;
 
-    biguint res;
-    size_ = 1 + std::max(size_, rhs.size_);
-    if (size_ > max_bytes) size_--;
+    const auto ls = lhs.size_;
+    const auto rs = rhs.size_;
+
+    res.size_ = 1 + std::max(ls, rs);
+    if (res.size_ > max_bytes) res.size_--;
     uint16_t sum = 0;
-    size_t i = 0;
-    for (; i < size_; ++i) {
-        if (i < size_)     sum += v_[i];
-        if (i < rhs.size_) sum += rhs.v_[i];
+    for (size_type i = 0; i < res.size_; ++i) {
+        if (i < ls) sum += lhs.v_[i];
+        if (i < rs) sum += rhs.v_[i];
         assert(sum < 512);
-        v_[i] = static_cast<uint8_t>(sum);
+        res.v_[i] = static_cast<uint8_t>(sum);
         sum >>= 8;
     }
-    trim(); // TODO: possibly only the last elem of v_ needs trimming
-    check_repr();
-    return *this;
+    res.trim();
+    res.check_repr();
+    return res;
 }
 
 biguint& biguint::sub(biguint& res, const biguint& lhs, const biguint& rhs)

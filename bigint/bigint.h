@@ -42,9 +42,9 @@ public:
     }
     explicit biguint(const char* str);
 
-    biguint& operator+=(const biguint& rhs);
     biguint& operator>>=(uint32_t shift);
     biguint& operator<<=(uint32_t shift);
+    static biguint& add(biguint& res, const biguint& lhs, const biguint& rhs);
     static biguint& sub(biguint& res, const biguint& lhs, const biguint& rhs);
     static biguint& mul(biguint& res, const biguint& lhs, const biguint& rhs);
     static biguint& div(biguint& res, const biguint& lhs, const biguint& rhs);
@@ -98,61 +98,23 @@ inline bool operator<=(const biguint& lhs, const biguint& rhs) {
 }
 
 
-template<typename L, typename R>
-class add_expr : public detail::expr {
-public:
-    add_expr(const L& l, const R& r) : l_(l), r_(r) {}
-    void eval(biguint& res) const {
-        l_.eval(res);
-        res += biguint(r_);
-    }
-private:
-    L l_;
-    R r_;
-};
+enum class bin_expr_tag { add, sub, mul, div, mod };
 
-template<typename L, typename R>
-class sub_expr : public detail::expr {
+template<bin_expr_tag tag, typename L, typename R>
+class bin_expr : public detail::expr {
 public:
-    sub_expr(const L& l, const R& r) : l_(l), r_(r) {}
+    bin_expr(const L& l, const R& r) : l_(l), r_(r) {}
     void eval(biguint& res) const {
-        biguint::sub(res, l_, r_);
-    }
-private:
-    L l_;
-    R r_;
-};
-
-template<typename L, typename R>
-class mul_expr : public detail::expr {
-public:
-    mul_expr(const L& l, const R& r) : l_(l), r_(r) {}
-    void eval(biguint& res) const {
-        biguint::mul(res, l_, r_);
-    }
-private:
-    L l_;
-    R r_;
-};
-
-template<typename L, typename R>
-class div_expr : public detail::expr {
-public:
-    div_expr(const L& l, const R& r) : l_(l), r_(r) {}
-    void eval(biguint& res) const {
-        biguint::div(res, l_, r_);
-    }
-private:
-    L l_;
-    R r_;
-};
-
-template<typename L, typename R>
-class mod_expr : public detail::expr {
-public:
-    mod_expr(const L& l, const R& r) : l_(l), r_(r) {}
-    void eval(biguint& res) const {
-        biguint::mod(res, l_, r_);
+        biguint& (*op)(biguint&, const biguint&, const biguint&);
+        switch (tag) {
+        case bin_expr_tag::add: op = &biguint::add; break;
+        case bin_expr_tag::sub: op = &biguint::sub; break;
+        case bin_expr_tag::mul: op = &biguint::mul; break;
+        case bin_expr_tag::div: op = &biguint::div; break;
+        case bin_expr_tag::mod: op = &biguint::mod; break;
+        }
+        assert(op);
+        op(res, l_, r_);
     }
 private:
     L l_;
@@ -170,29 +132,9 @@ private:
     const biguint& x_;
 };
 
-template<typename L, typename R>
-add_expr<L, R> make_add_expr(L&& l, R&& r) {
-    return add_expr<L, R>(std::forward<L>(l), std::forward<R>(r));
-}
-
-template<typename L, typename R>
-sub_expr<L, R> make_sub_expr(L&& l, R&& r) {
-    return sub_expr<L, R>(std::forward<L>(l), std::forward<R>(r));
-}
-
-template<typename L, typename R>
-mul_expr<L, R> make_mul_expr(L&& l, R&& r) {
-    return mul_expr<L, R>(std::forward<L>(l), std::forward<R>(r));
-}
-
-template<typename L, typename R>
-div_expr<L, R> make_div_expr(L&& l, R&& r) {
-    return div_expr<L, R>(std::forward<L>(l), std::forward<R>(r));
-}
-
-template<typename L, typename R>
-mod_expr<L, R> make_mod_expr(L&& l, R&& r) {
-    return mod_expr<L, R>(std::forward<L>(l), std::forward<R>(r));
+template<bin_expr_tag tag, typename L, typename R>
+bin_expr<tag, L, R> make_bin_expr(L&& l, R&& r) {
+    return bin_expr<tag, L, R>(std::forward<L>(l), std::forward<R>(r));
 }
 
 template<typename Expr>
@@ -209,28 +151,28 @@ typename std::enable_if<!is_expr_t<Expr>::value, lit>::type wrap(const Expr& e)
 } // namespace detail
 
 template<typename L, typename R>
-auto operator+(const L& lhs, const R& rhs) -> decltype(detail::make_add_expr(detail::wrap(lhs), detail::wrap(rhs))) {
-    return detail::make_add_expr(detail::wrap(lhs), detail::wrap(rhs));
+auto operator+(const L& lhs, const R& rhs) -> decltype(detail::make_bin_expr<bin_expr_tag::add>(detail::wrap(lhs), detail::wrap(rhs))) {
+    return detail::make_bin_expr<bin_expr_tag::add>(detail::wrap(lhs), detail::wrap(rhs));
 }
 
 template<typename L, typename R>
-auto operator-(const L& lhs, const R& rhs) -> decltype(detail::make_sub_expr(detail::wrap(lhs), detail::wrap(rhs))) {
-    return detail::make_sub_expr(detail::wrap(lhs), detail::wrap(rhs));
+auto operator-(const L& lhs, const R& rhs) -> decltype(detail::make_bin_expr<bin_expr_tag::sub>(detail::wrap(lhs), detail::wrap(rhs))) {
+    return detail::make_bin_expr<bin_expr_tag::sub>(detail::wrap(lhs), detail::wrap(rhs));
 }
 
 template<typename L, typename R>
-auto operator*(const L& lhs, const R& rhs) -> decltype(detail::make_mul_expr(detail::wrap(lhs), detail::wrap(rhs))) {
-    return detail::make_mul_expr(detail::wrap(lhs), detail::wrap(rhs));
+auto operator*(const L& lhs, const R& rhs) -> decltype(detail::make_bin_expr<bin_expr_tag::mul>(detail::wrap(lhs), detail::wrap(rhs))) {
+    return detail::make_bin_expr<bin_expr_tag::mul>(detail::wrap(lhs), detail::wrap(rhs));
 }
 
 template<typename L, typename R>
-auto operator/(const L& lhs, const R& rhs) -> decltype(detail::make_div_expr(detail::wrap(lhs), detail::wrap(rhs))) {
-    return detail::make_div_expr(detail::wrap(lhs), detail::wrap(rhs));
+auto operator/(const L& lhs, const R& rhs) -> decltype(detail::make_bin_expr<bin_expr_tag::div>(detail::wrap(lhs), detail::wrap(rhs))) {
+    return detail::make_bin_expr<bin_expr_tag::div>(detail::wrap(lhs), detail::wrap(rhs));
 }
 
 template<typename L, typename R>
-auto operator%(const L& lhs, const R& rhs) -> decltype(detail::make_mod_expr(detail::wrap(lhs), detail::wrap(rhs))) {
-    return detail::make_mod_expr(detail::wrap(lhs), detail::wrap(rhs));
+auto operator%(const L& lhs, const R& rhs) -> decltype(detail::make_bin_expr<bin_expr_tag::mod>(detail::wrap(lhs), detail::wrap(rhs))) {
+    return detail::make_bin_expr<bin_expr_tag::mod>(detail::wrap(lhs), detail::wrap(rhs));
 }
 
 template<typename L, typename R>
