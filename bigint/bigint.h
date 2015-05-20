@@ -42,6 +42,9 @@ public:
     }
     explicit biguint(const char* str);
 
+    biguint& operator+=(const biguint& rhs) {
+        return add(*this, *this, rhs);
+    }
     biguint& operator>>=(uint32_t shift);
     biguint& operator<<=(uint32_t shift);
     static biguint& add(biguint& res, const biguint& lhs, const biguint& rhs);

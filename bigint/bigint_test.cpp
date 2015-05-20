@@ -353,10 +353,10 @@ void rsa_test()
     const impl e = 17;
     //assert(gcd(phi_n, e) == 1);
     // 5. Determine d as d == e^−1 (mod phi(n)); i.e., d is the multiplicative inverse of e (modulo phi(n)).
-    assert(modular_inverse(42, 2017)==1969);
+    FUNTLS_ASSERT_EQUAL(modular_inverse(impl(42), impl(2017)),impl(1969));
     const impl d = modular_inverse(e, phi_n);
     std::cout << "d = " << d << std::endl;
-    assert(impl((e*d) % phi_n) == 1);
+    FUNTLS_ASSERT_EQUAL(impl((e*d) % phi_n), 1);
 
     std::cout << "Public key: (" << n << ", " << e << ")\n";
     std::cout << "Private key: " << d << std::endl;
@@ -364,12 +364,16 @@ void rsa_test()
     const impl m = 65;
     const impl c = powm(m, e, n);
     std::cout << m << " encrypted: " << c << std::endl;
-    std::cout << "and decrypted: " << powm(c, d, n) << std::endl;
+    const impl dm = powm(c, d, n);
+    std::cout << "and decrypted: " << dm << std::endl;
+    FUNTLS_ASSERT_EQUAL(m, dm);
 
     const impl h = 123; // hash of message we wish to sign
     const impl s = powm(h, d, n);
     std::cout << h << " signed: " << s << std::endl;
-    std::cout << "orignal hash back: " << powm(s, e, n) << std::endl;
+    const impl dh = powm(s, e, n);
+    std::cout << "orignal hash back: " << dh << std::endl;
+    FUNTLS_ASSERT_EQUAL(h, dh);
 }
 
 template<typename impl>
@@ -384,7 +388,7 @@ void test_impl()
     test_sub<impl>();
     test_divmod<impl>();
     test_powm<impl>();
-//    rsa_test<impl>();
+    rsa_test<impl>();
 }
 
 template<>

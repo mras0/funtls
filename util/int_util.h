@@ -19,19 +19,25 @@ int_type pmod(const a_expr& a, const int_type& p) {
 template<typename a_expr, typename int_type>
 int_type modular_inverse(const a_expr& a, const int_type& n)
 {
+    assert(n!=0);
     int_type r = n, newr = pmod(a, n);
     int_type t = 0, newt = 1;
     while (newr != 0) {
         int_type quotient = r / newr;
         int_type saved = newt;
-        newt = t - quotient * saved;
+        newt = pmod(quotient * saved, n);
+        if (t < newt) t += n;
+        assert(t>=newt);
+        newt = t - newt;
         t = saved;
         saved = newr;
-        newr = r - quotient * saved;
+        newr = quotient * saved;
+        assert(r>=newr);
+        newr = r - newr;
         r = saved;
     }
     assert(r <= 1);
-    if (t < 0) t += n;
+    assert(t >= 0);
     assert(pmod(a*t, n) == 1);
     return t;
 }
