@@ -73,12 +73,13 @@ std::vector<uint8_t> be_uint_to_bytes(IntType i, size_t byte_count)
 
 
 template<typename int_type>
-size_t ilog256(const int_type& n)
+size_t ilog256(int_type n)
 {
     assert(n >= 0);
-    size_t size        = 1;
-    while (n > (int_type(1)<<(8*size))) {
+    size_t size = 1;
+    while (n > 255) {
         ++size;
+        n >>= 8;
     }
     return size;
 }

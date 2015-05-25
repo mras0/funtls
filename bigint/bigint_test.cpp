@@ -166,8 +166,26 @@ void test_mul()
         { "1", "6", "6" },
         { "D", "1", "D" },
         { "2", "3", "6" },
+        { "FF", "FF", "FE01" },
         { "312", "10001", "3120312" },
         { "324141", "881D", "1AB85BEC5D" },
+        { "10000", "10000", "100000000" },
+        { "10101", "AB", "ABABAB" },
+        { "20202", "24", "484848" },
+        { "1234", "ABCD", "C374FA4" },
+
+        { "8FFF", "1FFF", "11FF5001" },
+        { "FFFF", "1F00", "1EFFE100" },
+        { "F000", "1FFF", "1DFF1000" },
+        { "FF00", "1FFF", "1FDF0100" },
+
+        { "FFF0", "1FFF", "1FFD0010" },
+        { "FFFF", "1FFF", "1FFEE001" },
+
+        { "ABAB", "1000010000", "ABAB0ABAB0000" },
+        { "11111111", "11111111", "123456787654321" },
+        { "15C3E8EC", "15C3E8EC", "1D9BA2363749990" },
+        { "FFFFFFFFFF", "FFFFFFFFFF", "FFFFFFFFFE0000000001" },
     };
     for (const auto& t : test_cases) {
         const auto a = from_hex<impl>(t.a);
@@ -192,6 +210,20 @@ void test_powm()
         { "100", "3", "134afde", "B9" },
         { "CA1", "41", "11", "AE6" },
         { "100", "1", "F0004348348242", "1" },
+        { "1003", "992", "871", "B79" },
+        { "100000000", "2", "8", "100" },
+        { "100000000", "2", "1F", "80000000" },
+        { "100000001", "2", "20", "100000000" },
+        { "100000001", "2", "21", "FFFFFFFF" },
+        { "100000001", "2", "22", "FFFFFFFD" },
+        { "3A8F05C5", "1", "10001", "1" },
+        { "3A8F05C5", "2", "1D", "20000000" },
+        { "3A8F05C5", "2", "1E", "570FA3B" },
+        { "3A8F05C5", "2", "3D", "EAE0463" },
+        { "3A8F05C5", "2", "3E", "1D5C08C6" },
+        { "3A8F05C5", "2", "10001", "29296A08" },
+        { "3A8F05C5", "10", "10001", "34DC6E30" },
+        { "3A8F05C5", "6B08BE5", "10001", "39A42AA1" },
     };
     for (const auto& t : test_cases) {
         const auto a = from_hex<impl>(t.a);
@@ -329,11 +361,12 @@ void test_divmod()
         { "100", "101", "100" },
         { "B6D1", "C30", "1" },
         { "123172393182310DEAC", "100", "AC" },
+        { "1D9BA2363749990", "3A8F05C5", "52178E" },
     };
     for (const auto& t : mod_test_cases) {
         const auto a = from_hex<impl>(t.a);
         const auto b = from_hex<impl>(t.b);
-        FUNTLS_ASSERT_EQUAL(t.m, to_hex<impl>(a%b));
+        FUNTLS_ASSERT_EQUAL(t.m, to_hex<impl>(a % b));
     }
     static const struct {
         const char* a;
@@ -367,39 +400,48 @@ void rsa_test()
     // 1. Choose two distinct prime numbers p and q.
     const impl p = 61;
     const impl q = 53;
-    std::cout << "p = " << p << std::endl;
-    std::cout << "q = " << q << std::endl;
+    //std::cout << "p = " << p << std::endl;
+    //std::cout << "q = " << q << std::endl;
     // 2. Compute n = pq.
     const impl n = p * q;
-    std::cout << "n = " << n << std::endl;
+    //std::cout << "n = " << n << std::endl;
     // 3. Compute phi(n) = phi(p)phi(q) =  (p − 1)(q − 1) = n - (p + q - 1)
     const impl phi_n = n - (p + q - 1);
-    std::cout << "phi(n) = " << phi_n << std::endl;
+    //std::cout << "phi(n) = " << phi_n << std::endl;
     // 4. Choose an integer e such that 1 < e < phi(n) and gcd(e, phi(n)) = 1; i.e., e and phi(n) are coprime.
     const impl e = 17;
     //assert(gcd(phi_n, e) == 1);
     // 5. Determine d as d == e^−1 (mod phi(n)); i.e., d is the multiplicative inverse of e (modulo phi(n)).
     FUNTLS_ASSERT_EQUAL(modular_inverse(impl(42), impl(2017)),impl(1969));
     const impl d = modular_inverse(e, phi_n);
-    std::cout << "d = " << d << std::endl;
+    //std::cout << "d = " << d << std::endl;
     FUNTLS_ASSERT_EQUAL(impl((e*d) % phi_n), 1);
 
-    std::cout << "Public key: (" << n << ", " << e << ")\n";
-    std::cout << "Private key: " << d << std::endl;
+    //std::cout << "Public key: (" << n << ", " << e << ")\n";
+    //std::cout << "Private key: " << d << std::endl;
 
     const impl m = 65;
     const impl c = powm(m, e, n);
-    std::cout << m << " encrypted: " << c << std::endl;
+    //std::cout << m << " encrypted: " << c << std::endl;
     const impl dm = powm(c, d, n);
-    std::cout << "and decrypted: " << dm << std::endl;
+    //std::cout << "and decrypted: " << dm << std::endl;
     FUNTLS_ASSERT_EQUAL(m, dm);
 
     const impl h = 123; // hash of message we wish to sign
     const impl s = powm(h, d, n);
-    std::cout << h << " signed: " << s << std::endl;
+    //std::cout << h << " signed: " << s << std::endl;
     const impl dh = powm(s, e, n);
-    std::cout << "orignal hash back: " << dh << std::endl;
+    //std::cout << "orignal hash back: " << dh << std::endl;
     FUNTLS_ASSERT_EQUAL(h, dh);
+
+    {
+        auto sig_int = impl("1292096585430913175519254898032395243462811323906515226554109972004180658954859379941696658621471242846515079179717576618845623427098912978283799951696320091470122356297901501325256605959695524225415513932171913482053094408005941656185209127872354901965306664437702709542046633385218633626696287279304285124912556256930575413122875114673482785274590556733203148774836729083330959590105395524827262154584116592716387459783088847245994061585204886768758012681844214432141042086602590179087711616687868428020288032797041180520168574827807538102230289873329301503180995385059291223074441034065185713657450277277761969287");
+        auto pk_exp  = impl("65537");
+        auto pk_mod  = impl("24954997646621834761449361884286414165480008273223744310080315375803319523260216855934100447201664306431721005429546282762704393140191840338713076689984056264190995701894141368229539117693257565423336415750689721978540066555915380965973261977497616774408471314998180653685000389604770546408396387001860894640592821199977972059596526292354557985299637881425226355986468353901257309811384609470173861328663540424702321793095880089688714459044144974116455371251817951571066409202081916069323963479466362034024225801206214311616562135066160059514001555341780438164781033434293730782091550172964525859915795650182985987109");
+        auto decoded = impl("986236757547332986472011617696226561292849812918563355472727826767720188564083584387121625107510786855734801053524719833194566624465665316622563244215340671405971599343902468620306327831715457360719532421388780770165778156818229863337344187575566725786793391480600129482653072861971002459947277805295727097226389568776499707662505334062639449916265137796823793276300221537201727072401742985542559596685092673521228140822200236743113743661549252453726123450722876929538747702356573783116197523966334991563351853851212597377279504828784773461324331554913538750469049379906172091422629105701079342533743285829650120");
+
+        FUNTLS_ASSERT_EQUAL(decoded, powm(sig_int, pk_exp, pk_mod));
+    }
 }
 
 template<typename impl>
@@ -441,8 +483,8 @@ void test_impl()
     test_sub<impl>();
     test_divmod<impl>();
     test_powm<impl>();
-    rsa_test<impl>();
     test_dec_io<impl>();
+    rsa_test<impl>();
 }
 
 template<>

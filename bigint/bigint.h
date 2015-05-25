@@ -141,10 +141,21 @@ private:
 };
 
 namespace detail {
+class small_lit : public expr {
+public:
+    small_lit(uintmax_t x) : x_(x) {}
+    void eval(biguint& res) const {
+        res = x_;
+    }
+private:
+    uintmax_t x_;
+};
+
 class lit : public expr {
 public:
     lit(const biguint& x) : x_(x) {}
     void eval(biguint& res) const {
+        assert(&res != &x_);
         res = x_;
     }
 private:
@@ -163,9 +174,15 @@ typename std::enable_if<is_expr_t<Expr>::value, const Expr&>::type wrap(const Ex
 }
 
 template<typename Expr>
-typename std::enable_if<!is_expr_t<Expr>::value, lit>::type wrap(const Expr& e)
+typename std::enable_if<!is_expr_t<Expr>::value && !std::is_integral<Expr>::value, lit>::type wrap(const Expr& e)
 {
     return lit(e);
+}
+
+template<typename Expr>
+typename std::enable_if<!is_expr_t<Expr>::value && std::is_integral<Expr>::value, small_lit>::type wrap(const Expr& e)
+{
+    return small_lit(e);
 }
 } // namespace detail
 
