@@ -134,8 +134,8 @@ biguint& biguint::sub(biguint& res, const biguint& lhs, const biguint& rhs)
         FUNTLS_CHECK_BINARY(i, <, lhs.size_, "Negative number produced");
         d += lhs.v_[i];
         if (i < rhs.size_) d -= rhs.v_[i];
+        assert(d >= -511 && d <= 255);
         res.v_[i] = static_cast<uint8_t>(d);
-        assert(d > -256);
         d >>= 8;
     }
     assert(d==0);
