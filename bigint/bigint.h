@@ -58,6 +58,10 @@ public:
     }
     biguint& operator>>=(uint32_t shift);
     biguint& operator<<=(uint32_t shift);
+    biguint operator<<(uint32_t shift) const {
+        biguint res(*this);
+        return res<<=shift;
+    }
     static biguint& add(biguint& res, const biguint& lhs, const biguint& rhs);
     static biguint& sub(biguint& res, const biguint& lhs, const biguint& rhs);
     static biguint& mul(biguint& res, const biguint& lhs, const biguint& rhs);

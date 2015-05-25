@@ -12,7 +12,7 @@ set(use_tsan   FALSE CACHE BOOL "Use thread sanitizier")
 set(use_ubsan  TRUE  CACHE BOOL "Use undefined behavior sanitizier")
 set(use_bigint FALSE CACHE BOOL "Use funtls bigint implmentation")
 
-set(common_flags "-Wall -Wextra -pthread -g3")
+set(common_flags "-Wall -Wextra -pthread -g -fno-omit-frame-pointer")
 if (use_asan)
     message("Using address sanitizer")
     set(common_flags "${common_flags} -fsanitize=address")

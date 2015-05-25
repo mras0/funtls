@@ -296,6 +296,7 @@ void test_bitops()
         impl res = a;
         res <<= t.shift;
         FUNTLS_ASSERT_EQUAL(t.expected, to_hex(res));
+        FUNTLS_ASSERT_EQUAL(t.expected, to_hex<impl>(a << t.shift));
     }
 
 #define CHECK_MASK(src, mask, expected) do { \
