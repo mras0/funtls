@@ -8,8 +8,6 @@
 #include <util/test.h>
 #include <asn1/asn1.h>
 
-#include <boost/multiprecision/cpp_int.hpp>
-
 funtls::asn1::der_encoded_value value_from_bytes(const std::vector<uint8_t>& data)
 {
     assert(data.size());
@@ -39,6 +37,8 @@ T from_bytes(const std::vector<uint8_t>& d)
 std::ostream& operator<<(std::ostream& os, const std::vector<uint8_t>& v) {
     return os << funtls::util::base16_encode(v);
 }
+
+#include <boost/multiprecision/cpp_int.hpp>
 
 int main()
 {

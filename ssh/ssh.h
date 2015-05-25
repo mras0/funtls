@@ -123,7 +123,7 @@ std::ostream& operator<<(std::ostream& os, const name_list& nl);
 template<typename IntType>
 IntType string_to_int(const std::vector<uint8_t>& s) {
     if (s.empty()) {
-        return IntType(0);
+        return 0;
     }
     IntType res = static_cast<int8_t>(s[0]);
     for (size_t i = 1, len = s.size(); i < len; ++i) {

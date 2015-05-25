@@ -6,8 +6,13 @@
 #include <util/int_util.h>
 #include <hash/hash.h>
 
+#ifdef USE_FUNTLS_BIGINT
+#include <bigint/bigint.h>
+using int_type = funtls::bigint::biguint;
+#else
 #include <boost/multiprecision/cpp_int.hpp>
 using int_type = boost::multiprecision::cpp_int;
+#endif
 
 using namespace funtls;
 

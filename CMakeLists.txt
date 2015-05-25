@@ -7,12 +7,12 @@ enable_testing()
 # http://stackoverflow.com/questions/16158091/cmake-setting-an-environmental-variable-for-ctest-or-otherwise-getting-failed
 add_custom_target(check COMMAND ${CMAKE_CTEST_COMMAND} --force-new-ctest-process --output-on-failure)
 
+set(use_asan   TRUE  CACHE BOOL "Use address sanitizier")
+set(use_tsan   FALSE CACHE BOOL "Use thread sanitizier")
+set(use_ubsan  TRUE  CACHE BOOL "Use undefined behavior sanitizier")
+set(use_bigint FALSE CACHE BOOL "Use funtls bigint implmentation")
+
 set(common_flags "-Wall -Wextra -pthread -g3")
-
-set(use_asan  TRUE  CACHE BOOL "Use address sanitizier")
-set(use_tsan  FALSE CACHE BOOL "Use thread sanitizier")
-set(use_ubsan TRUE  CACHE BOOL "Use undefined behavior sanitizier")
-
 if (use_asan)
     message("Using address sanitizer")
     set(common_flags "${common_flags} -fsanitize=address")
@@ -24,6 +24,11 @@ endif()
 if (use_ubsan)
     message("Using undefined behavior sanitizer")
     set(common_flags "${common_flags} -fsanitize=undefined")
+endif()
+if (use_bigint)
+    message("Using funtls bigint - EXPERIMENTAL")
+    set(common_flags "${common_flags} -DUSE_FUNTLS_BIGINT")
+    set(bigint_LIBRARIES bigint)
 endif()
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c99 ${common_flags}")

@@ -3,6 +3,7 @@ ListenAddress           127.0.0.1
 HostKey                 @funtls_SOURCE_DIR@/ec-key.pem
 HostKey                 @funtls_SOURCE_DIR@/rsa-key.pem
 UsePrivilegeSeparation  no
+# Only load from 'tmp' so there's an extra step before allowing login as the current user
 AuthorizedKeysFile      @CMAKE_CURRENT_BINARY_DIR@/tmp/authorized_keys
 
 #   $OpenBSD: sshd_config,v 1.94 2015/02/02 01:57:44 deraadt Exp $

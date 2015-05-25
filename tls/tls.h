@@ -628,7 +628,9 @@ inline void from_bytes(server_dh_params& item, util::buffer_view& buffer) {
 }
 
 inline void from_bytes(server_hello_done&, util::buffer_view& buffer) {
-    assert(buffer.remaining() == 0);
+    if (buffer.remaining() != 0) {
+        throw std::runtime_error("Non empty server hello. Size: " + std::to_string(buffer.remaining()));
+    }
 }
 
 inline void from_bytes(server_key_exchange_dhe& item, util::buffer_view& buffer) {

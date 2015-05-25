@@ -8,8 +8,13 @@
 #include <hash/hash.h>
 #include <aes/aes.h>
 
+#ifdef USE_FUNTLS_BIGINT
+#include <bigint/bigint.h>
+using int_type = funtls::bigint::biguint;
+#else
 #include <boost/multiprecision/cpp_int.hpp>
 using int_type = boost::multiprecision::cpp_int;
+#endif
 
 using namespace funtls;
 
@@ -359,9 +364,12 @@ void test_client(const char* host, const char* port, const char* user_name, cons
         // http://tools.ietf.org/html/rfc4253#section-8
         //  1. C generates a random number x (1 < x < q) and computes e = g^x mod p.  C sends e to S.
         const int_type& p = modp2048_p;
+        std::cout << "x " << std::flush;
         int_type x = rand_positive_int_less(p);
-        int_type e = boost::multiprecision::powm(int_type(modp2048_g), x, p);
-        std::cout << "e=" << e << std::endl;
+        std::cout << x << std::endl;
+        std::cout << "e " << std::flush;
+        int_type e = powm(int_type(modp2048_g), x, p);
+        std::cout << e << std::endl;
         auto e_bytes = be_uint_to_bytes(e, ilog256(modp2048_p));
         if (e_bytes[0]&0x80) e_bytes.insert(e_bytes.begin(), 0);
         buffer_builder b;
