@@ -99,7 +99,11 @@ private:
             size_--;
         }
     }
+#ifdef NDEBUG
+    void check_repr() const {}
+#else
     void check_repr() const;
+#endif
 };
 
 inline bool operator!=(const biguint& lhs, const biguint& rhs) {

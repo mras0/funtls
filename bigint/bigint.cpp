@@ -7,6 +7,7 @@
 
 namespace funtls { namespace bigint {
 
+#ifndef NDEBUG
 void biguint::check_repr() const
 {
     FUNTLS_CHECK_BINARY(size_, <=, max_bytes, "Invalid representation: " + util::base16_encode(v_, size_));
@@ -14,6 +15,7 @@ void biguint::check_repr() const
         FUNTLS_CHECK_BINARY((unsigned)v_[size_-1], !=, 0, "Invalid representation: " + util::base16_encode(v_, size_));
     }
 }
+#endif
 
 biguint::biguint(const char* s)
     : size_(0)
@@ -191,11 +193,6 @@ biguint& biguint::div(biguint& res, const biguint& lhs, const biguint& rhs)
         return res = lhs;
     }
 
-    if (&res == &lhs || &res == &rhs) {
-        biguint tmp;
-        return res = biguint::div(tmp, lhs, rhs);
-    }
-
     biguint rem;
     divmod(res, rem, lhs, rhs);
     return res;
@@ -212,11 +209,6 @@ biguint& biguint::mod(biguint& res, const biguint& lhs, const biguint& rhs)
     // res = 1 -> ret = 0
     if (rhs.size_==1 && rhs.v_[0] == 1) return res = 0;
 
-    if (&res == &lhs || &res == &rhs) {
-        biguint tmp;
-        return res = biguint::mod(tmp, lhs, rhs);
-    }
-
     biguint quot;
     divmod(quot, res, lhs, rhs);
     return res;
@@ -224,6 +216,13 @@ biguint& biguint::mod(biguint& res, const biguint& lhs, const biguint& rhs)
 
 void biguint::divmod(biguint& quot, biguint& rem, const biguint& lhs, const biguint& rhs)
 {
+    if (&quot == &lhs || &quot == &rhs || &rem == &lhs || &rem == &rhs) {
+        biguint q, r;
+        divmod(q, r, lhs, rhs);
+        quot = q;
+        rem = r;
+        return;
+    }
     //std::cout << std::hex << std::uppercase << lhs << " div " << rhs << std::endl;
     quot.size_ = lhs.size_;
     rem.size_ = 0;

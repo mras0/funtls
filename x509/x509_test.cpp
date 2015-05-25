@@ -217,6 +217,7 @@ void test_pkey()
 
     auto pkey = x509::rsa_private_key_from_pki(pki);
 
+#if 0
 #define P(f) std::cout << #f << " " << std::hex << pkey.f.as<int_type>() << std::endl
     P(version);
     P(modulus);
@@ -228,6 +229,7 @@ void test_pkey()
     P(exponent2);
     P(coefficient);
 #undef P
+#endif
     FUNTLS_ASSERT_EQUAL(0,            pkey.version.as<int>());
     FUNTLS_ASSERT_EQUAL(test_pkey0_n, util::base16_encode(pkey.modulus.as_vector()));
     FUNTLS_ASSERT_EQUAL(test_pkey0_e, util::base16_encode(pkey.public_exponent.as_vector()));
