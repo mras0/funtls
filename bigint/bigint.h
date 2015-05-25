@@ -42,6 +42,17 @@ public:
     }
     explicit biguint(const char* str);
 
+    template<typename T, typename = typename std::enable_if<std::is_integral<T>::value>::type>
+    explicit operator T() const {
+        T res = 0;
+        auto size = size_;
+        if (size > sizeof(T)) size = sizeof(T);
+        for (size_t i = 0; i < size; ++i) {
+            res |= T(v_[i]) << (8*i);
+        }
+        return res;
+    }
+
     biguint& operator+=(const biguint& rhs) {
         return add(*this, *this, rhs);
     }
@@ -53,11 +64,17 @@ public:
     static biguint& div(biguint& res, const biguint& lhs, const biguint& rhs);
     static biguint& mod(biguint& res, const biguint& lhs, const biguint& rhs);
 
+    static void divmod(biguint& quot, biguint& rem, const biguint& lhs, const biguint& rhs);
     static biguint& pow(biguint& res, const biguint& lhs, const biguint& rhs, const biguint& mod);
 
     limb_type operator&(limb_type mask) const {
         if (!size_) return 0;
         return v_[0] & mask;
+    }
+    biguint& operator|=(limb_type bits) {
+        if (!size_) v_[size_++] = 0;
+        v_[0] |= bits;
+        return *this;
     }
 
     static biguint from_be_bytes(const uint8_t* bytes, size_t size);
@@ -81,7 +98,6 @@ private:
         }
     }
     void check_repr() const;
-    static void divmod(biguint& quot, biguint& rem, const biguint& lhs, const biguint& rhs);
 };
 
 inline bool operator!=(const biguint& lhs, const biguint& rhs) {

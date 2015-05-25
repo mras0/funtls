@@ -25,14 +25,28 @@ biguint::biguint(const char* s)
     assert(slen);
     FUNTLS_CHECK_BINARY(slen, >, 0, "Empty string not allowed");
 
-    FUNTLS_CHECK_BINARY((unsigned)s[0],==,'0',"Only hex supported");
-    FUNTLS_CHECK_BINARY((unsigned)s[1],==,'x',"Only hex supported");
+    if (s[0] == '0') {
+        if (s[1] == 0) {
+            // "0"
+        } else {
+            // "0???" we only support hex here for now at least
+            FUNTLS_CHECK_BINARY((unsigned)s[1],==,'x',"Only hex supported");
+            FUNTLS_CHECK_BINARY(slen, >, 2, "Invalid hex string");
+            std::string str(s+2, slen-2);
+            if (str.size()%2) str.insert(str.begin(),'0');
+            auto bytes = util::base16_decode(str);
+            *this = from_be_bytes(bytes.data(), bytes.size());
+        }
+    } else {
+        // decimal number
+        for (; *s; s++) {
+            if (*s < '0' || *s > '9') {
+                FUNTLS_CHECK_FAILURE("\"" + std::string(s) + "\" is not a valid decimal number");
+            }
+            *this = *this * 10 + (*s - '0');
+        }
+    }
 
-    FUNTLS_CHECK_BINARY(slen, >, 2, "Invalid hex string");
-    std::string str(s+2, slen-2);
-    if (str.size()%2) str.insert(str.begin(),'0');
-    auto bytes = util::base16_decode(str);
-    *this = from_be_bytes(bytes.data(), bytes.size());
     check_repr();
 }
 
@@ -323,22 +337,33 @@ biguint& biguint::pow(biguint& res, const biguint& lhs, const biguint& rhs, cons
 std::ostream& operator<<(std::ostream& os, const biguint& ui)
 {
     ui.check_repr();
-    size_t i = ui.size_;
-    if (!i) return os << "0";
-    const auto base = os.flags() & std::ios::basefield;
-    if (base != std::ios::hex) {
-        // Ignore user whishes
-        os << "0x" << std::hex;
+    const auto base     = os.flags() & std::ios::basefield;
+    const auto showbase = os.flags() & std::ios::showbase;
+    if (base == std::ios::hex) {
+        if (showbase) os << "0x";
+        size_t i = ui.size_;
+        if (!i) return os << "0";
+        while (i--) {
+            const auto x = ui.v_[i];
+            const auto f = x>>4;
+            const auto l = x&0xf;
+            // first nibble might have to be skipped
+            if (i + 1 != ui.size_ || f) os << (unsigned) f;
+            os << (unsigned) l;
+        }
+    } else if (base == std::ios::dec) {
+        biguint rem;
+        auto n = ui;
+        std::string s;
+        do {
+            biguint::divmod(n, rem, n, 10);
+            assert(rem < 10);
+            s += '0' + static_cast<uint8_t>(rem);
+        } while (n != 0);
+        for (auto it = s.crbegin(), end = s.crend(); it != end; ++it) {
+            os << *it;
+        }
     }
-    while (i--) {
-        const auto x = ui.v_[i];
-        const auto f = x>>4;
-        const auto l = x&0xf;
-        // first nibble might have to be skipped
-        if (i + 1 != ui.size_ || f) os << (unsigned) f;
-        os << (unsigned) l;
-    }
-    os.setf(base, std::ios::basefield);
     return os;
 }
 

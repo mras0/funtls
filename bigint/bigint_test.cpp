@@ -53,12 +53,20 @@ const struct {
 };
 
 template<typename impl>
-std::string to_s(const impl& i) {
+std::string to_hex(const impl& i) {
     std::ostringstream oss;
     // Don't really care about uppercase
     oss << std::hex << std::uppercase << i;
     return oss.str();
 }
+
+template<typename impl>
+std::string to_dec(const impl& i) {
+    std::ostringstream oss;
+    oss << i;
+    return oss.str();
+}
+
 
 template<typename impl>
 impl from_be_bytes(const std::vector<uint8_t>&);
@@ -67,10 +75,10 @@ template<typename impl>
 void test_hex_out()
 {
     for (const auto& t : u64_test_cases) {
-        FUNTLS_ASSERT_EQUAL(t.expected, to_s(impl(t.val)));
+        FUNTLS_ASSERT_EQUAL(t.expected, to_hex(impl(t.val)));
     }
     for (const auto& t : be_bytes_test_cases) {
-        FUNTLS_ASSERT_EQUAL(t.expected, to_s(from_be_bytes<impl>(t.bytes)));
+        FUNTLS_ASSERT_EQUAL(t.expected, to_hex(from_be_bytes<impl>(t.bytes)));
     }
 }
 
@@ -79,11 +87,15 @@ void test_hex_in()
 {
     for (const auto& t : u64_test_cases) {
         impl x((std::string("0x")+t.expected).c_str());
-        FUNTLS_ASSERT_EQUAL(t.expected, to_s(x));
+        FUNTLS_ASSERT_EQUAL(t.expected, to_hex(x));
+        FUNTLS_ASSERT_EQUAL(static_cast<uint8_t>(t.val), static_cast<uint8_t>(x));
+        FUNTLS_ASSERT_EQUAL(static_cast<uint16_t>(t.val), static_cast<uint16_t>(x));
+        FUNTLS_ASSERT_EQUAL(static_cast<uint32_t>(t.val), static_cast<uint32_t>(x));
+        FUNTLS_ASSERT_EQUAL(t.val, static_cast<uint64_t>(x));
     }
     for (const auto& t : be_bytes_test_cases) {
         impl x((std::string("0x")+t.expected).c_str());
-        FUNTLS_ASSERT_EQUAL(t.expected, to_s(x));
+        FUNTLS_ASSERT_EQUAL(t.expected, to_hex(x));
     }
 }
 
@@ -101,12 +113,12 @@ void test_rel_ops()
     }
     for (size_t i = 0; i < xs.size(); ++i) {
         for (size_t j = 0; j < xs.size(); ++j) {
-            FUNTLS_CHECK_BINARY(xs[i]==xs[j], ==, i==j, to_s(xs[i]) + " != " + to_s(xs[j]));
-            FUNTLS_CHECK_BINARY(xs[i]!=xs[j], !=, i==j, to_s(xs[i]) + " != " + to_s(xs[j]));
-            FUNTLS_CHECK_BINARY(xs[i]<xs[j],  ==, i<j,  to_s(xs[i]) + " >= " + to_s(xs[j]));
-            FUNTLS_CHECK_BINARY(xs[i]>xs[j],  ==, i>j,  to_s(xs[i]) + " <= " + to_s(xs[j]));
-            FUNTLS_CHECK_BINARY(xs[i]<=xs[j], ==, i<=j, to_s(xs[i]) + " > "  + to_s(xs[j]));
-            FUNTLS_CHECK_BINARY(xs[i]>=xs[j], ==, i>=j, to_s(xs[i]) + " < "  + to_s(xs[j]));
+            FUNTLS_CHECK_BINARY(xs[i]==xs[j], ==, i==j, to_hex(xs[i]) + " != " + to_hex(xs[j]));
+            FUNTLS_CHECK_BINARY(xs[i]!=xs[j], !=, i==j, to_hex(xs[i]) + " != " + to_hex(xs[j]));
+            FUNTLS_CHECK_BINARY(xs[i]<xs[j],  ==, i<j,  to_hex(xs[i]) + " >= " + to_hex(xs[j]));
+            FUNTLS_CHECK_BINARY(xs[i]>xs[j],  ==, i>j,  to_hex(xs[i]) + " <= " + to_hex(xs[j]));
+            FUNTLS_CHECK_BINARY(xs[i]<=xs[j], ==, i<=j, to_hex(xs[i]) + " > "  + to_hex(xs[j]));
+            FUNTLS_CHECK_BINARY(xs[i]>=xs[j], ==, i>=j, to_hex(xs[i]) + " < "  + to_hex(xs[j]));
         }
     }
 }
@@ -130,7 +142,7 @@ void test_add()
     for (const auto& t : test_cases) {
         const auto a = from_hex<impl>(t.a);
         const auto b = from_hex<impl>(t.b);
-        auto rs = to_s<impl>(a+b);
+        auto rs = to_hex<impl>(a+b);
         if (rs.length() > max_int_s.length()) {
             rs.erase(rs.begin(), rs.begin() + (rs.length()-max_int_s.length()));
             while (rs.size() > 1 && rs.front() == '0') rs.erase(rs.begin());
@@ -160,7 +172,7 @@ void test_mul()
     for (const auto& t : test_cases) {
         const auto a = from_hex<impl>(t.a);
         const auto b = from_hex<impl>(t.b);
-        FUNTLS_ASSERT_EQUAL(t.p, to_s<impl>(a*b));
+        FUNTLS_ASSERT_EQUAL(t.p, to_hex<impl>(a*b));
     }
 }
 
@@ -186,7 +198,7 @@ void test_powm()
         const auto b = from_hex<impl>(t.b);
         const auto m = from_hex<impl>(t.m);
         const impl res = powm(a, b, m);
-        FUNTLS_ASSERT_EQUAL(t.expected, to_s(res));
+        FUNTLS_ASSERT_EQUAL(t.expected, to_hex(res));
     }
 }
 
@@ -222,7 +234,7 @@ void test_bitops()
         const auto a = from_hex<impl>(t.a);
         impl res = a;
         res >>= t.shift;
-        FUNTLS_ASSERT_EQUAL(t.expected, to_s(res));
+        FUNTLS_ASSERT_EQUAL(t.expected, to_hex(res));
     }
     static const struct {
         const std::string a;
@@ -251,18 +263,32 @@ void test_bitops()
         const auto a = from_hex<impl>(t.a);
         impl res = a;
         res <<= t.shift;
-        FUNTLS_ASSERT_EQUAL(t.expected, to_s(res));
+        FUNTLS_ASSERT_EQUAL(t.expected, to_hex(res));
     }
 
 #define CHECK_MASK(src, mask, expected) do { \
     impl res = from_hex<impl>(src) & mask;  \
-    FUNTLS_ASSERT_EQUAL(expected, to_s(res));\
+    FUNTLS_ASSERT_EQUAL(expected, to_hex(res));\
 } while(0)
 
     CHECK_MASK("ABCD", 0xFF, "CD");
     CHECK_MASK("FFFFFF", 0x01, "1");
     CHECK_MASK("FFFFFF", 0x03, "3");
     CHECK_MASK("FFFFFF", 0x88, "88");
+
+    {
+        impl x = impl("0x1234");
+        x |= 0xF;
+        FUNTLS_ASSERT_EQUAL(impl("0x123F"), x);
+    }
+    {
+        impl x = impl("0x0");
+        x |= 0xBC;
+        FUNTLS_ASSERT_EQUAL(impl("0xBC"), x);
+        x <<= 8;
+        x |= 0xAD;
+        FUNTLS_ASSERT_EQUAL(impl("0xBCAD"), x);
+    }
 }
 
 template<typename impl>
@@ -282,7 +308,7 @@ void test_sub()
     for (const auto& t : test_cases) {
         const auto a = from_hex<impl>(t.a);
         const auto b = from_hex<impl>(t.b);
-        FUNTLS_ASSERT_EQUAL(t.d, to_s<impl>(a-b));
+        FUNTLS_ASSERT_EQUAL(t.d, to_hex<impl>(a-b));
     }
 }
 
@@ -307,7 +333,7 @@ void test_divmod()
     for (const auto& t : mod_test_cases) {
         const auto a = from_hex<impl>(t.a);
         const auto b = from_hex<impl>(t.b);
-        FUNTLS_ASSERT_EQUAL(t.m, to_s<impl>(a%b));
+        FUNTLS_ASSERT_EQUAL(t.m, to_hex<impl>(a%b));
     }
     static const struct {
         const char* a;
@@ -324,7 +350,7 @@ void test_divmod()
     for (const auto& t : div_test_cases) {
         const auto a = from_hex<impl>(t.a);
         const auto b = from_hex<impl>(t.b);
-        FUNTLS_ASSERT_EQUAL(t.q, to_s<impl>(a/b));
+        FUNTLS_ASSERT_EQUAL(t.q, to_hex<impl>(a/b));
     }
     const auto a = from_hex<impl>("C844A98E3372D67F562BD881DA8EA66CA71DF16DEAB1541CE7D68F2243A37665C3F07D3DD6E651CCD17A822DB5794C54EF31305699A6C77C043AC87CAFC022A30A2A717A4AA6B026B0C1C818CFC16ADBAAE33C47B0803152F7E424B784DF28616D828561A41BDD66BD220CB46CD288CE65CCAF9682B20C625A84EF28C63E38E9630DAA872270FA1580CB170BFC492B806C017661DAB0E0C90A12F68A98A9827182913FF626EFDDFBF8AE8F1D40DA8D13A90138686884BAD19DB776BB4812F7E3B288B47114E486FA2DE43011E1D5D7CA8DAF474CB210CE962AAFEE552F192CA032BA2B51CFE183226EB21CED3B4B3C09362B61F152D7C7E651E12651E915FC9F67F39338D6D21F55FB4E79F0B2BE4D4900D442D567BACF7B6DEFCD5818B050A40DB6EAB9AD76A7F349196DCC5D15CC3369E1181E03D3B24DA9CF120AA7403F400E7E4ECA532EAC2449EA7FECC41979D035A8E4ACCEA38E1B9A33D733BEA2F430362BD36F68440CCC4DC3A7F07B7A7C8FCDD02231F69CE3574568F303D6EB2916874D09F2D69E15E633C80B8FF4E9BAA56ED3ACE0F65AFB4360C372A6FD0D5629FDB6E3D832AD3D33D610B243EA22FE66F21941071A83B252201705EBC8E8F2A5CC01112AC8E4342850A637BB03E511B206599B9D4E8E1EBCEB1E820D569E31C50D9FCCB16C41315F652615A02603C69FE9BA03E78C64FECC034AA783ADEA213B");
     const auto d = from_hex<impl>("DDF13806DF4018EEA435061A6F70A6B44183D0D27874BA4E9452A0D749D9B9839E68B71FF5EA308A53A5B067D9BCBA8CABFCE273EBAA6C08E25517CFFFB93939ABF568B3DB0ABC90D59E3BF399C5BA0647E8FCFC54C7B1ACD9176E823CCF69B401AC5A305D36273B8E000E146B4D0F4CE88150719AD06661EA69355F0EAD21261BC3C92C7A64D2A7E648226828367DC90E69CB3A930D29DFE7B37DD454F57B811E8D057F9D4C51FDC07A8638CCDC0A0F2377EEB86AF6D5AFC84655092D84F3AFDF5854B6F2951623A970238A65C632BF3A62F0D11DFEAD887F1969A6700A2ACE5976C4828FEFF1BDFC569118A33C1AA324C25D07020AD6E26EB05FA9759129B1C41A2062742A3F8A8200872320F65C4C789B70DAC4F6EC9616182962BD295A79F6D15CC956F4895D6848828C0A1181E289493F4C7BEDEE9AC744C9BE3B0399365DA3400B713DB294D2783DFA3316B11BF01B965BC4DD26E8495E05C3DF756BB4E00D1B146640551C0AD22E7A707602D6C745F759B9C0B504BBBE8EFA47F1C55C9182D04A126A7C0270CBF6A62F8EA92A97A28C9C37CE1BFF4F87B325AAB97254371842523A60AE373ACEE6CE09046D0D3D0FCBF1B535F77D5E4C7E4009DFCDBD480A0C602D512050242EC965F93BEBB6E27740F54200221088719A19DD38BC24A16268F0F4177C88BFE3479EA4089E0F6B31E3148E4A3EF19B79858E9B0E8D");
@@ -377,6 +403,33 @@ void rsa_test()
 }
 
 template<typename impl>
+void test_dec_io()
+{
+    const struct {
+        const char* hex;
+        const char* dec;
+    } test_cases[] = {
+        {"0x0"                 , "0"                    },
+        {"0x2A"                , "42"                   },
+        {"0x100"               , "256"                  },
+        {"0x29A"               , "666"                  },
+        {"0x539"               , "1337"                 },
+        {"0x7FFF"              , "32767"                },
+        {"0x10230421723043"    , "4542100275343427"     },
+        {"0x123456789ABCDEF"   , "81985529216486895"    },
+        {"0xAA00BB00CC00DD"    , "47851549213065437"    },
+        {"0xA0AB00BC00C0DD00"  , "11577348074552483072" },
+        {"0xAA00BB00CC00DD00"  , "12249996598544751872" },
+        {"0xFFFFFFFFFFFFFFFF"  , "18446744073709551615" },
+        {"0x10000000000000000" , "18446744073709551616" },
+    };
+    for (const auto& t : test_cases) {
+        FUNTLS_ASSERT_EQUAL_MESSAGE(t.hex, impl(t.hex), impl(t.dec));
+        FUNTLS_ASSERT_EQUAL(t.dec, to_dec(impl(t.hex)));
+    }
+}
+
+template<typename impl>
 void test_impl()
 {
     test_hex_out<impl>();
@@ -389,6 +442,7 @@ void test_impl()
     test_divmod<impl>();
     test_powm<impl>();
     rsa_test<impl>();
+    test_dec_io<impl>();
 }
 
 template<>
