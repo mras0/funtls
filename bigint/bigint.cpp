@@ -147,6 +147,13 @@ biguint& biguint::sub(biguint& res, const biguint& lhs, const biguint& rhs)
     return res;
 }
 
+template<typename T>
+bool addc(T& a, T b) {
+    const T old = a;
+    a += b;
+    return a < old;
+}
+
 biguint& biguint::mul(biguint& res, const biguint& lhs, const biguint& rhs)
 {
     lhs.check_repr();
@@ -164,18 +171,21 @@ biguint& biguint::mul(biguint& res, const biguint& lhs, const biguint& rhs)
     res.size_ = 2 * std::max(lhs.size_, rhs.size_);
     FUNTLS_CHECK_BINARY(res.size_, <, biguint::max_bytes, "Shoud probably clamp instead");
 
-    int n = res.size_;
-    biguint x = 0;
-    for (int i = 0; i < n; ++i) {
-        for (int j = std::max(0, static_cast<int>(i)+1-static_cast<int>(n)); j <= std::min(i, n-1); j++) {
+    memset(&res.v_[0], 0, res.size_);
+    for (int i = 0, n = res.size_; i < n; ++i) {
+        for (int j = std::max(0, i+1-n); j <= std::min(i, n-1); j++) {
             auto k = i - j;
             if (j >= lhs.size_ || k >= rhs.size_) continue;
-            x += static_cast<uint16_t>(lhs.v_[j]) * rhs.v_[k];
+            uint16_t prod = static_cast<uint16_t>(lhs.v_[j]) * rhs.v_[k];
+            uint8_t carry = addc(res.v_[i], static_cast<uint8_t>(prod));
+            prod >>= 8;
+            assert(prod < 0xff);
+            carry += prod;
+            for (auto q = i+1; carry && q < n; ++q) {
+                carry = addc(res.v_[q], carry);
+            }
         }
-        res.v_[i] = static_cast<uint8_t>(x);
-        x >>= 8;
     }
-    assert(!x);
     res.trim();
     res.check_repr();
     return res;
