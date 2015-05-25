@@ -72,8 +72,10 @@ public:
         return v_[0] & mask;
     }
     biguint& operator|=(limb_type bits) {
-        if (!size_) v_[size_++] = 0;
-        v_[0] |= bits;
+        if (bits) {
+            if (!size_) v_[size_++] = 0;
+            v_[0] |= bits;
+        }
         return *this;
     }
 

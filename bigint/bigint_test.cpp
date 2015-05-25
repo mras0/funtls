@@ -308,18 +308,22 @@ void test_bitops()
     CHECK_MASK("FFFFFF", 0x03, "3");
     CHECK_MASK("FFFFFF", 0x88, "88");
 
-    {
-        impl x = impl("0x1234");
-        x |= 0xF;
-        FUNTLS_ASSERT_EQUAL(impl("0x123F"), x);
-    }
-    {
-        impl x = impl("0x0");
-        x |= 0xBC;
-        FUNTLS_ASSERT_EQUAL(impl("0xBC"), x);
-        x <<= 8;
-        x |= 0xAD;
-        FUNTLS_ASSERT_EQUAL(impl("0xBCAD"), x);
+    static const struct {
+        const char* a;
+        uint8_t b;
+        const char* expected;
+    } or_test_cases[] = {
+        { "0", 0, "0" },
+        { "0", 0xBC, "BC" },
+        { "12345678", 0, "12345678" },
+        { "1234", 0xF, "123F" },
+        { "BC00", 0xAD, "BCAD" },
+    };
+
+    for (const auto& t : or_test_cases) {
+        auto a = from_hex<impl>(t.a);
+        a |= t.b;
+        FUNTLS_ASSERT_EQUAL(t.expected, to_hex(a));
     }
 }
 
