@@ -51,10 +51,11 @@ biguint::biguint(const char* s)
 
 biguint biguint::from_be_bytes(const uint8_t* bytes, size_t size)
 {
-    FUNTLS_CHECK_BINARY(size, <=, max_size, "Out of representable range");
+    FUNTLS_CHECK_BINARY(size, <=, sizeof(v_), "Out of representable range");
     biguint x;
-    x.size_ = size;
-    std::reverse_copy(bytes, bytes+size, x.v_);
+    x.size_ = (size+sizeof(limb_type)-1)/sizeof(limb_type);
+    if (x.size_) x.v_[x.size_-1] = 0; // Final limb might be partial
+    std::reverse_copy(bytes, bytes+size, reinterpret_cast<uint8_t*>(x.v_));
     x.trim();
     x.check_repr();
     return x;
@@ -110,7 +111,7 @@ biguint& biguint::add(biguint& res, const biguint& lhs, const biguint& rhs)
     for (size_type i = 0; i < res.size_; ++i) {
         if (i < ls) sum += lhs.v_[i];
         if (i < rs) sum += rhs.v_[i];
-        assert(sum < 512);
+        assert(sum < (dlimb_type(2)<<limb_bits));
         res.v_[i] = static_cast<limb_type>(sum);
         sum >>= limb_bits;
     }
@@ -136,7 +137,7 @@ biguint& biguint::sub(biguint& res, const biguint& lhs, const biguint& rhs)
         FUNTLS_CHECK_BINARY(i, <, lhs.size_, "Negative number produced");
         d += lhs.v_[i];
         if (i < rhs.size_) d -= rhs.v_[i];
-        assert(d >= -511 && d <= 255);
+        assert(d >= -((limb_type(2)<<limb_bits)-1) && d <= (limb_type(1)<<limb_bits));
         res.v_[i] = static_cast<limb_type>(d);
         d >>= limb_bits;
     }
@@ -171,7 +172,7 @@ biguint& biguint::mul(biguint& res, const biguint& lhs, const biguint& rhs)
     res.size_ = 2 * std::max(lhs.size_, rhs.size_);
     FUNTLS_CHECK_BINARY(res.size_, <=, biguint::max_size, "Shoud probably clamp instead");
 
-    memset(&res.v_[0], 0, res.size_);
+    memset(&res.v_[0], 0, sizeof(limb_type)*res.size_);
     for (int i = 0, n = res.size_; i < n; ++i) {
         const int jmin = std::max(0, i - rhs.size_ + 1);
         const int jmax = std::min(i + 1, static_cast<int>(lhs.size_));
@@ -180,8 +181,8 @@ biguint& biguint::mul(biguint& res, const biguint& lhs, const biguint& rhs)
             assert(k >= 0 && k < rhs.size_);
             dlimb_type prod = static_cast<dlimb_type>(lhs.v_[j]) * rhs.v_[k];
             limb_type carry = addc(res.v_[i], static_cast<limb_type>(prod));
-            prod >>= 8;
-            assert(prod < 0xff);
+            prod >>= limb_bits;
+            assert(prod < (dlimb_type(1)<<limb_bits));
             carry += prod;
             for (auto q = i+1; carry && q < n; ++q) {
                 carry = addc(res.v_[q], carry);
@@ -235,31 +236,23 @@ void biguint::divmod(biguint& quot, biguint& rem, const biguint& lhs, const bigu
         rem = r;
         return;
     }
-    //std::cout << std::hex << std::uppercase << lhs << " div " << rhs << std::endl;
     quot.size_ = lhs.size_;
     rem.size_ = 0;
     for (size_type i = lhs.size_; i--;) {
-        rem <<= 8;
+        rem <<= limb_bits;
         rem.v_[0] = lhs.v_[i];
         if (!rem.size_ && rem.v_[0]) rem.size_=1;
         quot.v_[i] = 0;
-        //std::cout << " i " << i;
-        //std::cout << " lhs[i] " << (unsigned)lhs.v_[i];
-        //std::cout << " rem " << rem;
         while (rem >= rhs) {
             biguint::sub(rem, rem, rhs);
-            //std::cout << " => " << rem;
             quot.v_[i]++;
             assert(quot.v_[i]);
         }
-        //std::cout << " qout[i] " << (unsigned)quot.v_[i];
-        //std::cout << std::endl;
     }
     quot.trim();
 
     rem.check_repr();
     quot.check_repr();
-    //std::cout << " quot = " << quot << " rem = " << rem << std::endl;
 }
 
 biguint& biguint::operator>>=(uint32_t shift)
@@ -352,14 +345,19 @@ std::ostream& operator<<(std::ostream& os, const biguint& ui)
         if (showbase) os << "0x";
         size_t i = ui.size_;
         if (!i) return os << "0";
+        std::string s;
+        const char* const hexchars = os.flags() & std::ios::uppercase ? "0123456789ABCDEF" : "0123456789abcdef";
         while (i--) {
             const auto x = ui.v_[i];
-            const auto f = x>>4;
-            const auto l = x&0xf;
-            // first nibble might have to be skipped
-            if (i + 1 != ui.size_ || f) os << (unsigned) f;
-            os << (unsigned) l;
+            for (int j = biguint::limb_bits - 4; j >= 0; j -= 4) {
+                s += hexchars[(x>>j)&0xf];
+            }
         }
+        while (s.front() == '0') {
+            s.erase(s.begin());
+            assert(!s.empty());
+        }
+        os << s;
     } else if (base == std::ios::dec) {
         biguint rem;
         auto n = ui;

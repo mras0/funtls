@@ -88,7 +88,7 @@ void test_hex_in()
     for (const auto& t : u64_test_cases) {
         impl x((std::string("0x")+t.expected).c_str());
         FUNTLS_ASSERT_EQUAL(t.expected, to_hex(x));
-        FUNTLS_ASSERT_EQUAL(static_cast<uint8_t>(t.val), static_cast<uint8_t>(x));
+        FUNTLS_ASSERT_EQUAL((int)static_cast<uint8_t>(t.val), (int)static_cast<uint8_t>(x));
         FUNTLS_ASSERT_EQUAL(static_cast<uint16_t>(t.val), static_cast<uint16_t>(x));
         FUNTLS_ASSERT_EQUAL(static_cast<uint32_t>(t.val), static_cast<uint32_t>(x));
         FUNTLS_ASSERT_EQUAL(t.val, static_cast<uint64_t>(x));
@@ -417,6 +417,7 @@ void test_divmod()
         { "100", "100", "0" },
         { "100", "101", "100" },
         { "B6D1", "C30", "1" },
+        { "123456789ABCDEF", "100", "EF" },
         { "123172393182310DEAC", "100", "AC" },
         { "1D9BA2363749990", "3A8F05C5", "52178E" },
     };

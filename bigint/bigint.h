@@ -20,8 +20,13 @@ using is_expr_t = std::is_base_of<expr, Expr>;
 class biguint {
 public:
     typedef uint16_t size_type;
+#if 0
+    typedef uint16_t limb_type;
+    typedef uint32_t dlimb_type;
+#else
     typedef uint8_t  limb_type;
     typedef uint16_t dlimb_type;
+#endif
 
     static constexpr size_type limb_bits = sizeof(limb_type) * 8;
     static constexpr size_type max_bits  = 4096;
@@ -47,8 +52,8 @@ public:
     template<typename T, typename = typename std::enable_if<std::is_integral<T>::value>::type>
     explicit operator T() const {
         T res = 0;
-        auto size = size_;
-        if (size > sizeof(T)) size = sizeof(T);
+        auto size = (sizeof(T)+sizeof(limb_type)-1) / sizeof(limb_type);
+        if (size > size_) size = size_;
         for (size_t i = 0; i < size; ++i) {
             res |= T(v_[i]) << (limb_bits*i);
         }
