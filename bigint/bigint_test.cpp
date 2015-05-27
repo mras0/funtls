@@ -13,8 +13,8 @@
 
 using namespace funtls;
 
-const auto max_int_s = std::string(bigint::biguint::max_bytes*2, 'F');
-const auto max_int_b = std::vector<uint8_t>(bigint::biguint::max_bytes, 0xff);
+const auto max_int_s = std::string(bigint::biguint::max_bits/4, 'F');
+const auto max_int_b = std::vector<uint8_t>(bigint::biguint::max_bits/8, 0xff);
 
 const struct {
     const char* expected;

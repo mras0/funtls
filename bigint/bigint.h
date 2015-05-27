@@ -21,8 +21,10 @@ class biguint {
 public:
     typedef uint16_t size_type;
     typedef uint8_t  limb_type;
-    static constexpr size_type max_bytes = 4096;
-    static constexpr size_t max_bits  = 8 * max_bytes;
+    typedef uint16_t dlimb_type;
+
+    static constexpr size_type limb_bits = sizeof(limb_type) * 8;
+    static constexpr size_type max_bits  = 4096;
 
     biguint() : size_(0) {
         check_repr();
@@ -35,8 +37,8 @@ public:
     biguint(uintmax_t x) : size_(0) {
         static_assert(sizeof(x) < sizeof(v_), "");
         while (x) {
-            v_[size_++] = static_cast<uint8_t>(x);
-            x >>= 8;
+            v_[size_++] = static_cast<limb_type>(x);
+            x >>= limb_bits;
         }
         check_repr();
     }
@@ -48,7 +50,7 @@ public:
         auto size = size_;
         if (size > sizeof(T)) size = sizeof(T);
         for (size_t i = 0; i < size; ++i) {
-            res |= T(v_[i]) << (8*i);
+            res |= T(v_[i]) << (limb_bits*i);
         }
         return res;
     }
@@ -89,14 +91,10 @@ public:
     friend bool operator<(const biguint& lhs, const biguint& rhs);
     friend std::ostream& operator<<(std::ostream& os, const biguint& ui);
 
-    // "secret" accessors. TODO: remove
-    size_type _size() const { return size_; }
-    uint8_t* _v() { return v_; }
-    const uint8_t* _v() const { return v_; }
-
 private:
+    static constexpr size_type max_size = max_bits / limb_bits;
+    limb_type v_[max_size];
     size_type size_;
-    uint8_t  v_[max_bytes];
 
     void trim() {
         while (size_ && !v_[size_-1]) {

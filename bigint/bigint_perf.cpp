@@ -1,6 +1,7 @@
 #include <iostream>
 #include <chrono>
 #include <string>
+#include <vector>
 #include <util/test.h>
 #include <util/int_util.h>
 
@@ -21,66 +22,164 @@ double time_it(const F& f)
     return (end_time - start_time) / 1e9;
 }
 
-uint32_t rand_state = 0x123456;
+template<typename Derived, typename I>
+struct bin_op_test_base {
+    static std::vector<double> time()
+    {
+        const int times = 10;
+        std::vector<double> results;
+        for (int i = 0; i < times;) {
+            const I a = rand_int();
+            const I b = rand_int();
+            if (!Derived::accept(a, b)) continue;
+            ++i;
+            I r;
+            const double trial = time_it([&] { Derived::calc(r, a, b); });
+            results.push_back(trial);
+            Derived::check(r, a, b);
+        }
+
+        return results;
+    }
+
+    static bool accept(const I&, const I&) {
+        return true;
+    }
+
+    static I rand_int(size_t num_bytes=1024/8)
+    {
+        std::vector<uint8_t> bytes(num_bytes);
+        static uint32_t rand_state = 0x123456;
+        for (auto& b : bytes) {
+            rand_state = rand_state * 22695477 + 1;
+            b = rand_state & 0xff;
+        }
+        return funtls::be_uint_from_bytes<I>(bytes);
+    }
+};
 
 template<typename I>
-I rand_int(size_t num_bytes=1024/8)
-{
-    std::vector<uint8_t> bytes(num_bytes);
-    for (auto& b : bytes) {
-        rand_state = rand_state * 22695477 + 1;
-        b = rand_state & 0xff;
+struct add_test : bin_op_test_base<add_test<I>, I> {
+    static void calc(I& r, const I& a, const I& b) {
+        r = a + b;
     }
-    return funtls::be_uint_from_bytes<I>(bytes);
-}
-
-template<typename I> bool always_accept(const I&, const I&){ return true; }
-
-template<typename I, typename Calc, typename Check, typename Accept>
-void time_bin_op(const std::string& name, Calc calc, Check check, Accept accept)
-{
-    int times = 10;
-    double time_sum = 0;
-    for (int i = 0; i < times;) {
-        const I a = rand_int<I>();
-        const I b = rand_int<I>();
-        if (!accept(a, b)) continue;
-        ++i;
-        I r;
-        time_sum += time_it([&] { calc(r, a, b); });
-        check(r, a, b);
+    static void check(const I& r, const I& a, const I& b) {
+        FUNTLS_CHECK_BINARY(I(r - a), ==, b, "");
     }
-    const auto avg = time_sum / times;
-    std::cout << name << " avg " << avg*1e6 << " ms" << std::endl;
-}
-
-template<typename I> void test_add(I& r, const I& a, const I& b) { r = a + b; }
-template<typename I> void check_add(const I& r, const I& a, const I& b) { FUNTLS_CHECK_BINARY(I(r - a), ==, b, ""); }
-template<typename I> void test_sub(I& r, const I& a, const I& b) { r = a - b; }
-template<typename I> void check_sub(const I& r, const I& a, const I& b) { FUNTLS_CHECK_BINARY(I(r + b), ==, a, ""); }
-template<typename I> void test_mul(I& r, const I& a, const I& b) { r = a * b; }
-template<typename I> void check_mul(const I& r, const I& a, const I& b) { FUNTLS_CHECK_BINARY(I(r - a * b), ==, 0, ""); }
-template<typename I> void test_div(I& r, const I& a, const I& b) { r = a / b; }
-template<typename I> void check_div(const I& r, const I& a, const I& b) { FUNTLS_CHECK_BINARY(I(r * b + a % b), ==, a, ""); }
-template<typename I> void test_mod(I& r, const I& a, const I& b) { r = a % b; }
-template<typename I> void check_mod(const I& r, const I& a, const I& b) { FUNTLS_CHECK_BINARY(I(b*(a/b)+r), ==, a, ""); }
+};
 
 template<typename I>
-void test(const std::string& name)
+struct sub_test : bin_op_test_base<sub_test<I>, I> {
+    static bool accept(const I& a, const I& b) {
+        return a >= b;
+    }
+    static void calc(I& r, const I& a, const I& b) {
+        r = a - b;
+    }
+    static void check(const I& r, const I& a, const I& b) {
+        FUNTLS_CHECK_BINARY(I(r + b), ==, a, "");
+    }
+};
+
+template<typename I>
+struct mul_test : bin_op_test_base<mul_test<I>, I> {
+    static void calc(I& r, const I& a, const I& b) {
+        r = a * b;
+    }
+    static void check(const I& r, const I& a, const I& b) {
+        FUNTLS_CHECK_BINARY(I(r - a * b), ==, 0, "");
+    }
+};
+
+template<typename I>
+struct div_test : bin_op_test_base<div_test<I>, I> {
+    static bool accept(const I&, const I& b) {
+        return b != 0;
+    }
+    static void calc(I& r, const I& a, const I& b) {
+        r = a / b;
+    }
+    static void check(const I& r, const I& a, const I& b) {
+        FUNTLS_CHECK_BINARY(I(r * b + a % b), ==, a, "");
+    }
+};
+
+template<typename I>
+struct mod_test : bin_op_test_base<mod_test<I>, I> {
+    static bool accept(const I&, const I& b) {
+        return b != 0;
+    }
+    static void calc(I& r, const I& a, const I& b) {
+        r = a % b;
+    }
+    static void check(const I& r, const I& a, const I& b) {
+        FUNTLS_CHECK_BINARY(I(b*(a/b)+r), ==, a, "");
+    }
+};
+
+using results_t = std::vector<std::pair<std::string, std::vector<double>>>;
+
+template<typename I>
+void test(const std::string& name, results_t& res)
 {
-    time_bin_op<I>(name + " add", &test_add<I>, &check_add<I>, &always_accept<I>);
-    time_bin_op<I>(name + " sub", &test_sub<I>, &check_sub<I>, [](const I& a, const I& b){return a >= b;});
-    time_bin_op<I>(name + " mul", &test_mul<I>, &check_mul<I>, &always_accept<I>);
-    time_bin_op<I>(name + " div", &test_div<I>, &check_div<I>, [](const I&, const I& b){return b != 0;});
-    time_bin_op<I>(name + " mod", &test_mod<I>, &check_mod<I>, [](const I&, const I& b){return b != 0;});
+    res.emplace_back("add " + name, add_test<I>::time());
+    res.emplace_back("sub " + name, sub_test<I>::time());
+    res.emplace_back("mul " + name, mul_test<I>::time());
+    res.emplace_back("div " + name, div_test<I>::time());
+    res.emplace_back("mod " + name, mod_test<I>::time());
+}
+
+void report(const results_t& results)
+{
+    constexpr int namew = 20;
+    constexpr int resw  = 8;
+    std::cout << std::left << std::setw(namew) << "Name";
+    static const char* titles[] = {
+        "Min",
+        "25th",
+        "Med",
+        "75th",
+        "Max",
+        "Mean",
+        "Sigma",
+    };
+    std::cout << std::right;
+    for (auto t : titles) {
+        std::cout << " " << std::setw(resw) << t;
+    }
+    std::cout << std::left;
+    std::cout << std::endl;
+    std::cout << std::string(namew + sizeof(titles)/sizeof(*titles) * (resw+1), '-') << std::endl;
+    for (const auto& res : results) {
+        auto ts = res.second;
+        std::sort(ts.begin(), ts.end());
+        for (auto& t : ts) t *= 1e9;
+        const double total = std::accumulate(ts.begin(), ts.end(), 0.0);
+        const double mean = total / ts.size();
+        const double sum_deviation2 = std::accumulate(ts.begin(), ts.end(), 0.0,
+                [=](double s, double b) { return s + (b-mean)*(b-mean); });
+        const double stdandard_deviation = sqrt(sum_deviation2 / ts.size());
+        std::cout << std::setw(namew) << res.first;
+        std::cout << std::right;
+        std::cout << " " << std::setw(resw) << (int64_t)ts[0];
+        std::cout << " " << std::setw(resw) << (int64_t)ts[ts.size()/4];
+        std::cout << " " << std::setw(resw) << (int64_t)ts[ts.size()/2];
+        std::cout << " " << std::setw(resw) << (int64_t)ts[ts.size()*3/4];
+        std::cout << " " << std::setw(resw) << (int64_t)ts[ts.size()-1];
+        std::cout << " " << std::setw(resw) << mean;
+        std::cout << " " << std::setw(resw) << stdandard_deviation;
+        std::cout << std::left;
+        std::cout << std::endl;
+    }
 }
 
 #include <bigint/bigint.h>
 #include <boost/multiprecision/cpp_int.hpp>
 int main()
 {
-#define T(c) test<c>(#c);
-    T(boost::multiprecision::cpp_int);
-    T(funtls::bigint::biguint);
-#undef T
+    results_t results;
+    test<boost::multiprecision::cpp_int>("boost", results);
+    test<funtls::bigint::biguint>("funtls", results);
+    std::sort(results.begin(), results.end());
+    report(results);
 }

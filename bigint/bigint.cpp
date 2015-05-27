@@ -10,7 +10,7 @@ namespace funtls { namespace bigint {
 #ifndef NDEBUG
 void biguint::check_repr() const
 {
-    FUNTLS_CHECK_BINARY(size_, <=, max_bytes, "Invalid representation: " + util::base16_encode(v_, size_));
+    FUNTLS_CHECK_BINARY(size_, <=, max_size, "Invalid representation: " + util::base16_encode(v_, size_));
     if (size_) {
         FUNTLS_CHECK_BINARY((unsigned)v_[size_-1], !=, 0, "Invalid representation: " + util::base16_encode(v_, size_));
     }
@@ -51,7 +51,7 @@ biguint::biguint(const char* s)
 
 biguint biguint::from_be_bytes(const uint8_t* bytes, size_t size)
 {
-    FUNTLS_CHECK_BINARY(size, <=, max_bytes, "Out of representable range");
+    FUNTLS_CHECK_BINARY(size, <=, max_size, "Out of representable range");
     biguint x;
     x.size_ = size;
     std::reverse_copy(bytes, bytes+size, x.v_);
@@ -105,14 +105,14 @@ biguint& biguint::add(biguint& res, const biguint& lhs, const biguint& rhs)
     const auto rs = rhs.size_;
 
     res.size_ = 1 + std::max(ls, rs);
-    if (res.size_ > max_bytes) res.size_--;
-    uint16_t sum = 0;
+    if (res.size_ > max_size) res.size_--;
+    dlimb_type sum = 0;
     for (size_type i = 0; i < res.size_; ++i) {
         if (i < ls) sum += lhs.v_[i];
         if (i < rs) sum += rhs.v_[i];
         assert(sum < 512);
-        res.v_[i] = static_cast<uint8_t>(sum);
-        sum >>= 8;
+        res.v_[i] = static_cast<limb_type>(sum);
+        sum >>= limb_bits;
     }
     res.trim();
     res.check_repr();
@@ -131,14 +131,14 @@ biguint& biguint::sub(biguint& res, const biguint& lhs, const biguint& rhs)
 
     if (&res != &lhs) res = lhs;
 
-    int16_t d = 0;
+    std::make_signed<dlimb_type>::type d = 0;
     for (unsigned i = 0; i<rhs.size_ || d; ++i) {
         FUNTLS_CHECK_BINARY(i, <, lhs.size_, "Negative number produced");
         d += lhs.v_[i];
         if (i < rhs.size_) d -= rhs.v_[i];
         assert(d >= -511 && d <= 255);
-        res.v_[i] = static_cast<uint8_t>(d);
-        d >>= 8;
+        res.v_[i] = static_cast<limb_type>(d);
+        d >>= limb_bits;
     }
     assert(d==0);
 
@@ -169,15 +169,17 @@ biguint& biguint::mul(biguint& res, const biguint& lhs, const biguint& rhs)
     if (!rhs.size_) return res = rhs;
 
     res.size_ = 2 * std::max(lhs.size_, rhs.size_);
-    FUNTLS_CHECK_BINARY(res.size_, <, biguint::max_bytes, "Shoud probably clamp instead");
+    FUNTLS_CHECK_BINARY(res.size_, <=, biguint::max_size, "Shoud probably clamp instead");
 
     memset(&res.v_[0], 0, res.size_);
     for (int i = 0, n = res.size_; i < n; ++i) {
-        for (int j = std::max(0, i+1-n); j <= std::min(i, n-1); j++) {
+        const int jmin = std::max(0, i - rhs.size_ + 1);
+        const int jmax = std::min(i + 1, static_cast<int>(lhs.size_));
+        for (int j = jmin; j < jmax; j++) {
             auto k = i - j;
-            if (j >= lhs.size_ || k >= rhs.size_) continue;
-            uint16_t prod = static_cast<uint16_t>(lhs.v_[j]) * rhs.v_[k];
-            uint8_t carry = addc(res.v_[i], static_cast<uint8_t>(prod));
+            assert(k >= 0 && k < rhs.size_);
+            dlimb_type prod = static_cast<dlimb_type>(lhs.v_[j]) * rhs.v_[k];
+            limb_type carry = addc(res.v_[i], static_cast<limb_type>(prod));
             prod >>= 8;
             assert(prod < 0xff);
             carry += prod;
@@ -263,22 +265,22 @@ void biguint::divmod(biguint& quot, biguint& rem, const biguint& lhs, const bigu
 biguint& biguint::operator>>=(uint32_t shift)
 {
     check_repr();
-    const auto shift_bytes = shift >> 3;
-    FUNTLS_CHECK_BINARY(shift_bytes, <=, max_bytes, "Invalid shift amount");
+    const auto shift_limbs = shift / limb_bits;
+    FUNTLS_CHECK_BINARY(shift_limbs, <=, max_size, "Invalid shift amount");
 
-    if (size_ <= shift_bytes) {
+    if (size_ <= shift_limbs) {
         size_ = 0;
     } else {
-        const auto shift_bits  = shift & 7;
-        size_ -= shift_bytes;
+        const auto shift_bits  = shift % limb_bits;
+        size_ -= shift_limbs;
         assert(size_ != 0);
-        memmove(v_, v_+shift_bytes, size_);
+        memmove(v_, v_+shift_limbs, size_*sizeof(limb_type));
         if (shift_bits) {
             const auto mask = (1 << shift_bits) - 1;
             limb_type carry = 0;
             for (auto i = size_; i--; ) {
                 const auto x = v_[i];
-                v_[i] = (carry << (8-shift_bits)) | (x >> shift_bits);
+                v_[i] = (carry << (limb_bits-shift_bits)) | (x >> shift_bits);
                 carry = x & mask;
             }
         }
@@ -294,22 +296,22 @@ biguint& biguint::operator<<=(uint32_t shift)
 
     if (!size_) return *this;
 
-    const auto shift_bytes = shift >> 3;
-    size_ += shift_bytes;
-    FUNTLS_CHECK_BINARY(size_, <=, max_bytes, "Invalid shift amount " + std::to_string(shift));
+    const auto shift_limbs = shift / limb_bits;
+    size_ += shift_limbs;
+    FUNTLS_CHECK_BINARY(size_, <=, max_size, "Invalid shift amount " + std::to_string(shift));
 
-    memmove(v_+shift_bytes, v_, size_-shift_bytes);
-    memset(v_, 0, shift_bytes);
-    const auto shift_bits  = shift & 7;
+    memmove(v_+shift_limbs, v_, sizeof(limb_type)*(size_-shift_limbs));
+    memset(v_, 0, sizeof(limb_type)*shift_limbs);
+    const auto shift_bits  = shift % limb_bits;
     if (shift_bits) {
         limb_type carry = 0;
-        for (auto i = shift_bytes; i < size_; ++i) {
+        for (auto i = shift_limbs; i < size_; ++i) {
             const auto x = v_[i];
             v_[i] = carry | (x << shift_bits);
-            carry = x >> (8-shift_bits);
+            carry = x >> (limb_bits-shift_bits);
         }
         if (carry != 0) {
-            FUNTLS_CHECK_BINARY(size_+1, <=, max_bytes, "Invalid shift amount " + std::to_string(shift));
+            FUNTLS_CHECK_BINARY(size_+1, <=, max_size, "Invalid shift amount " + std::to_string(shift));
             v_[size_++] = carry;
         }
     }
@@ -329,7 +331,7 @@ biguint& biguint::pow(biguint& res, const biguint& lhs, const biguint& rhs, cons
     biguint::mod(base, lhs, n);
 
     biguint exponent=rhs;
-    while (exponent._size()) {
+    while (exponent.size_) {
         if (exponent & 1) {
             biguint::mul(res, res, base);
             biguint::mod(res, res, n);
