@@ -74,15 +74,13 @@ int biguint::compare(const biguint& lhs, const biguint& rhs)
         if (!lhs.size_) return 0;
         // Check most siginificant digits for mismatch
         for (biguint::size_type i = lhs.size_-1; i; i--) {
-            if (lhs.v_[i] > rhs.v_[i]) {
-                return 1;
-            } else if (lhs.v_[i] < rhs.v_[i]) {
-                return -1;
-            }
+            if (lhs.v_[i] < rhs.v_[i]) return -1;
+            if (lhs.v_[i] > rhs.v_[i]) return 1;
         }
         // lhs and rhs are equal up to the least siginificant digit
-        const auto diff = lhs.v_[0] - rhs.v_[0];
-        return diff < 0 ? -1 : diff > 0 ? 1 : 0;
+        if (lhs.v_[0] < rhs.v_[0]) return -1;
+        if (lhs.v_[0] > rhs.v_[0]) return 1;
+        return 0;
     }
 }
 
@@ -130,7 +128,6 @@ biguint& biguint::sub(biguint& res, const biguint& lhs, const biguint& rhs)
         FUNTLS_CHECK_BINARY(i, <, lhs.size_, "Negative number produced");
         d += lhs.v_[i];
         if (i < rhs.size_) d -= rhs.v_[i];
-        assert(d >= -((limb_type(2)<<limb_bits)-1) && d <= (limb_type(1)<<limb_bits));
         res.v_[i] = static_cast<limb_type>(d);
         d >>= limb_bits;
     }
@@ -283,14 +280,17 @@ void biguint::divmod(biguint& quot, biguint& rem, const biguint& lhs, const bigu
     quot.size_ = lhs.size_;
     rem.size_ = 0;
     for (size_type i = lhs.size_; i--;) {
-        rem <<= limb_bits;
-        rem.v_[0] = lhs.v_[i];
-        if (!rem.size_ && rem.v_[0]) rem.size_=1;
         quot.v_[i] = 0;
-        while (rem >= rhs) {
-            biguint::sub(rem, rem, rhs);
-            quot.v_[i]++;
-            assert(quot.v_[i]);
+        for (auto bit = limb_bits; bit--;) {
+            rem <<= 1;
+            if ((lhs.v_[i] >> bit) & 1) {
+                if (!rem.size_) { rem.size_ = 1; rem.v_[0] = 0; }
+                rem.v_[0] |= 1;
+            }
+            if (rem >= rhs) {
+                quot.v_[i] |= 1 << bit;
+                biguint::sub(rem, rem, rhs);
+            }
         }
     }
     quot.trim();

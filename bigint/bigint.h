@@ -20,7 +20,7 @@ using is_expr_t = std::is_base_of<expr, Expr>;
 class biguint {
 public:
     typedef uint16_t size_type;
-#if 0
+#if 1
     typedef uint32_t limb_type;
     typedef uint64_t dlimb_type;
 #else
