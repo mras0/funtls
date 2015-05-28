@@ -90,8 +90,8 @@ void base64_test()
 
     using namespace funtls::util;
     for (const auto& test_case : base64_test_cases) {
-        FUNTLS_ASSERT_EQUAL_MESSAGE(test_case.base64, test_case.plain, vec2str(base64_decode(test_case.base64)));
-        FUNTLS_ASSERT_EQUAL_MESSAGE(test_case.plain,  test_case.base64, base64_encode(str2vec(test_case.plain)));
+        FUNTLS_ASSERT_EQUAL_MESSAGE(test_case.plain, vec2str(base64_decode(test_case.base64)), test_case.base64);
+        FUNTLS_ASSERT_EQUAL_MESSAGE(test_case.base64, base64_encode(str2vec(test_case.plain)), test_case.plain);
         // TODO:test non-vector/non-string versions
     }
     // TODO: Test throws

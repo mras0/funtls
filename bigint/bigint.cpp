@@ -61,35 +61,28 @@ biguint biguint::from_be_bytes(const uint8_t* bytes, size_t size)
     return x;
 }
 
-bool operator==(const biguint& lhs, const biguint& rhs)
-{
-    lhs.check_repr();
-    rhs.check_repr();
-    if (lhs.size_ != rhs.size_) return false;
-    return std::equal(lhs.v_, lhs.v_+lhs.size_, rhs.v_);
-}
-
-bool operator<(const biguint& lhs, const biguint& rhs)
+int biguint::compare(const biguint& lhs, const biguint& rhs)
 {
     lhs.check_repr();
     rhs.check_repr();
     if (lhs.size_ < rhs.size_) {
-        return true;
+        return -1;
     } else if (lhs.size_ > rhs.size_) {
-        return false;
+        return 1;
     } else {
         assert(lhs.size_ == rhs.size_);
-        if (!lhs.size_) return false;
+        if (!lhs.size_) return 0;
         // Check most siginificant digits for mismatch
         for (biguint::size_type i = lhs.size_-1; i; i--) {
             if (lhs.v_[i] > rhs.v_[i]) {
-                return false;
+                return 1;
             } else if (lhs.v_[i] < rhs.v_[i]) {
-                return true;
+                return -1;
             }
         }
         // lhs and rhs are equal up to the least siginificant digit
-        return lhs.v_[0] < rhs.v_[0];
+        const auto diff = lhs.v_[0] - rhs.v_[0];
+        return diff < 0 ? -1 : diff > 0 ? 1 : 0;
     }
 }
 
@@ -196,16 +189,6 @@ biguint& biguint::mul(biguint& res, const biguint& lhs, const biguint& rhs)
 
 biguint& biguint::div(biguint& res, const biguint& lhs, const biguint& rhs)
 {
-    lhs.check_repr();
-    rhs.check_repr();
-
-    // Handle special cases
-    FUNTLS_CHECK_BINARY(rhs.size_, !=, 0, "Division by zero");
-    if (!lhs.size_ || (rhs.size_==1 && rhs.v_[0] == 1)) {
-        // lhs==0 || rhs==1
-        return res = lhs;
-    }
-
     biguint rem;
     divmod(res, rem, lhs, rhs);
     return res;
@@ -213,15 +196,6 @@ biguint& biguint::div(biguint& res, const biguint& lhs, const biguint& rhs)
 
 biguint& biguint::mod(biguint& res, const biguint& lhs, const biguint& rhs)
 {
-    lhs.check_repr();
-    rhs.check_repr();
-
-    // Handle special cases
-    FUNTLS_CHECK_BINARY(rhs.size_, !=, 0, "Division by zero");
-    if (!lhs.size_) return res = lhs;
-    // res = 1 -> ret = 0
-    if (rhs.size_==1 && rhs.v_[0] == 1) return res = 0;
-
     biguint quot;
     divmod(quot, res, lhs, rhs);
     return res;
@@ -229,6 +203,73 @@ biguint& biguint::mod(biguint& res, const biguint& lhs, const biguint& rhs)
 
 void biguint::divmod(biguint& quot, biguint& rem, const biguint& lhs, const biguint& rhs)
 {
+    assert(&quot != &rem);
+    lhs.check_repr();
+    rhs.check_repr();
+
+    //
+    // Handle zeros
+    //
+    FUNTLS_CHECK_BINARY(rhs.size_, !=, 0, "Division by zero");
+    if (!lhs.size_) {
+        // 0/X: quot = rem = 0
+        quot.size_ = rem.size_ = 0;
+        return;
+    }
+
+    // Now: lhs != 0 && rhs != 0 (also implies that the sizes are greater than 0)
+    const auto ls = lhs.size_;
+    const auto rs = rhs.size_;
+    assert(ls > 0 && rs > 0);
+
+    //
+    // The cases where lhs <= rhs are trivially handled.
+    //
+    const auto compare_result = biguint::compare(lhs, rhs);
+    if (compare_result < 0) {         // lhs < rhs
+        rem = lhs;
+        quot.size_ = 0;
+        return;
+    } else if (compare_result == 0) { // lhs == rhs
+        quot = 1;
+        rem.size_ = 0;
+        return;
+    }
+
+    //
+    // Handle directly calculable cases
+    //
+    if (ls == 1) {
+        const auto l = lhs.v_[0];
+        if (rs == 1) {
+            const auto r = rhs.v_[0];
+            quot = l / r;
+            rem  = l % r;
+            return;
+        } else if (rs == 2) {
+            const auto r = (dlimb_type(rhs.v_[1])<<limb_bits) | rhs.v_[0];
+            quot = l / r;
+            rem  = l % r;
+            return;
+        }
+    } else if (ls == 2) {
+        const auto l = (dlimb_type(lhs.v_[1])<<limb_bits) | lhs.v_[0];
+        if (rs == 1) {
+            const auto r = rhs.v_[0];
+            quot = l / r;
+            rem  = l % r;
+            return;
+        } else if (rs == 2) {
+            const auto r = (dlimb_type(rhs.v_[1])<<limb_bits) | rhs.v_[0];
+            quot = l / r;
+            rem  = l % r;
+            return;
+        }
+    }
+
+    //
+    // We're now in a confirmed hard case. Make sure we're not aliasing
+    //
     if (&quot == &lhs || &quot == &rhs || &rem == &lhs || &rem == &rhs) {
         biguint q, r;
         divmod(q, r, lhs, rhs);
@@ -236,6 +277,9 @@ void biguint::divmod(biguint& quot, biguint& rem, const biguint& lhs, const bigu
         rem = r;
         return;
     }
+
+    assert(lhs > rhs);
+
     quot.size_ = lhs.size_;
     rem.size_ = 0;
     for (size_type i = lhs.size_; i--;) {

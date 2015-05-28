@@ -51,7 +51,7 @@ void assert_failed(const char* func, const char* file, int line, const std::stri
     FUNTLS_CHECK_BINARY_(expected, bin_op, actual, message, funtls::test::assert_failed)
 
 #define FUNTLS_ASSERT_EQUAL(expected, actual) FUNTLS_ASSERT_BINARY_MESSAGE(expected, ==, actual, "")
-#define FUNTLS_ASSERT_EQUAL_MESSAGE(message, expected, actual) FUNTLS_ASSERT_BINARY_MESSAGE(expected, ==, actual, message)
+#define FUNTLS_ASSERT_EQUAL_MESSAGE(expected, actual, message) FUNTLS_ASSERT_BINARY_MESSAGE(expected, ==, actual, message)
 
 #define FUNTLS_ASSERT_NOT_EQUAL(expected, actual) FUNTLS_ASSERT_BINARY_MESSAGE(expected, !=, actual, "")
 #define FUNTLS_ASSERT_NOT_EQUAL_MESSAGE(message, expected, actual) FUNTLS_ASSERT_BINARY_MESSAGE(expected, !=, actual, message)

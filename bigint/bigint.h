@@ -21,8 +21,8 @@ class biguint {
 public:
     typedef uint16_t size_type;
 #if 0
-    typedef uint16_t limb_type;
-    typedef uint32_t dlimb_type;
+    typedef uint32_t limb_type;
+    typedef uint64_t dlimb_type;
 #else
     typedef uint8_t  limb_type;
     typedef uint16_t dlimb_type;
@@ -92,8 +92,7 @@ public:
 
     static biguint from_be_bytes(const uint8_t* bytes, size_t size);
 
-    friend bool operator==(const biguint& lhs, const biguint& rhs);
-    friend bool operator<(const biguint& lhs, const biguint& rhs);
+    static int compare(const biguint& lhs, const biguint& rhs);
     friend std::ostream& operator<<(std::ostream& os, const biguint& ui);
 
 private:
@@ -113,20 +112,23 @@ private:
 #endif
 };
 
+inline bool operator==(const biguint& lhs, const biguint& rhs) {
+    return biguint::compare(lhs, rhs) == 0;
+}
 inline bool operator!=(const biguint& lhs, const biguint& rhs) {
-    return !(lhs == rhs);
+    return biguint::compare(lhs, rhs) != 0;
 }
-
+inline bool operator<(const biguint& lhs, const biguint& rhs) {
+    return biguint::compare(lhs, rhs) < 0;
+}
 inline bool operator>(const biguint& lhs, const biguint& rhs) {
-    return rhs < lhs;
+    return biguint::compare(lhs, rhs) > 0;
 }
-
 inline bool operator>=(const biguint& lhs, const biguint& rhs) {
-    return !(lhs < rhs);
+    return biguint::compare(lhs, rhs) >= 0;
 }
-
 inline bool operator<=(const biguint& lhs, const biguint& rhs) {
-    return !(lhs > rhs);
+    return biguint::compare(lhs, rhs) <= 0;
 }
 
 
