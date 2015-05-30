@@ -7,6 +7,8 @@
 
 namespace funtls { namespace bigint {
 
+constexpr biguint::size_type biguint::max_size;
+
 #ifndef NDEBUG
 void biguint::check_repr() const
 {
@@ -117,16 +119,22 @@ biguint& biguint::sub(biguint& res, const biguint& lhs, const biguint& rhs)
         FUNTLS_CHECK_FAILURE("Negative number would be produced");
     }
 
-    if (&res != &lhs) res = lhs;
-
     detail::dlimb_type<limb_type>::stype d = 0;
-    for (unsigned i = 0; i < rhs.size_ || d; ++i) {
+    size_type i = 0;
+    for (; i < rhs.size_; ++i) {
         d += lhs.v_[i];
-        if (i < rhs.size_) d -= rhs.v_[i];
+        d -= rhs.v_[i];
         res.v_[i] = static_cast<limb_type>(d);
         d >>= limb_bits;
     }
-    assert(d==0);
+    for (; i < lhs.size_; ++i) {
+        assert(i < lhs.size_);
+        d += lhs.v_[i];
+        res.v_[i] = static_cast<limb_type>(d);
+        d >>= limb_bits;
+    }
+    res.size_ = lhs.size_;
+    assert(!d);
 
     res.trim();
     res.check_repr();
@@ -160,8 +168,7 @@ biguint& biguint::mul(biguint& res, const biguint& lhs, const biguint& rhs)
         return res = biguint::mul(tmp, lhs, rhs);
     }
 
-    res.size_ = 2 * std::max(lhs.size_, rhs.size_);
-    FUNTLS_CHECK_BINARY(res.size_, <=, biguint::max_size, "Shoud probably clamp instead");
+    res.size_ = std::min(biguint::max_size, static_cast<size_type>(lhs.size_ + rhs.size_));
 
     memset(&res.v_[0], 0, sizeof(limb_type)*res.size_);
 
@@ -170,6 +177,7 @@ biguint& biguint::mul(biguint& res, const biguint& lhs, const biguint& rhs)
         const int jmax = std::min(rs, static_cast<size_type>(n - i));
         dlimb_type carry = 0;
         for (size_type j = 0; j < jmax; ++j) {
+            assert(i + j < res.size_);
             carry += static_cast<dlimb_type>(lhs.v_[i]) * rhs.v_[j];
             carry += res.v_[i + j];
             res.v_[i + j] = static_cast<limb_type>(carry);
@@ -177,8 +185,6 @@ biguint& biguint::mul(biguint& res, const biguint& lhs, const biguint& rhs)
         }
         if (i + rs < n) {
             res.v_[i + rs] = static_cast<limb_type>(carry);
-        } else {
-            assert(!carry);
         }
     }
     res.trim();
@@ -291,7 +297,7 @@ void biguint::divmod(biguint& quot, biguint& rem, const biguint& lhs, const bigu
     }
 
     assert(lhs > rhs);
-    assert(rhs.size_ > 1);
+    assert(rs > 1);
 
     quot.size_ = lhs.size_;
     rem.size_ = 0;
@@ -334,7 +340,7 @@ biguint& biguint::operator>>=(uint32_t shift)
         assert(size_ != 0);
         memmove(v_, v_+shift_limbs, size_*sizeof(limb_type));
         if (shift_bits) {
-            const auto mask = (1 << shift_bits) - 1;
+            const auto mask = (limb_type(1) << shift_bits) - 1;
             limb_type carry = 0;
             for (auto i = size_; i--; ) {
                 const auto x = v_[i];

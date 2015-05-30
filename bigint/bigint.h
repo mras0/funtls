@@ -95,10 +95,6 @@ public:
     }
     biguint& operator>>=(uint32_t shift);
     biguint& operator<<=(uint32_t shift);
-    biguint operator<<(uint32_t shift) const {
-        biguint res(*this);
-        return res<<=shift;
-    }
     static biguint& add(biguint& res, const biguint& lhs, const biguint& rhs);
     static biguint& sub(biguint& res, const biguint& lhs, const biguint& rhs);
     static biguint& mul(biguint& res, const biguint& lhs, const biguint& rhs);
@@ -161,6 +157,15 @@ inline bool operator<=(const biguint& lhs, const biguint& rhs) {
     return biguint::compare(lhs, rhs) <= 0;
 }
 
+inline biguint operator>>(const biguint& lhs, uint32_t rhs) {
+    biguint res(lhs);
+    return res >>= rhs;
+}
+
+inline biguint operator<<(const biguint& lhs, uint32_t rhs) {
+    biguint res(lhs);
+    return res <<= rhs;
+}
 
 enum class bin_expr_tag { add, sub, mul, div, mod };
 

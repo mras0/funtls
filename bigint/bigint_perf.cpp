@@ -26,18 +26,29 @@ double time_it(const F& f)
 }
 
 template<typename I>
-static I rand_int(size_t max_bits = ::test_max_bits-1)
+I rand_int(size_t max_bits = ::test_max_bits)
 {
-    std::vector<uint8_t> bytes(max_bits/8);
+    std::vector<uint8_t> bytes((max_bits+7)/8);
+    assert(!bytes.empty());
+
     static uint32_t rand_state = 0x123456;
-    for (auto& b : bytes) {
+    auto R = [&]() {
         rand_state = rand_state * 1664525 + 1013904223;
-        b = rand_state & 0xff;
+        return static_cast<uint8_t>(uint64_t(rand_state)*255/(UINT64_C(1)<<32));
+    };
+
+    for (auto& b : bytes) {
+        b = R();
+    }
+    if (max_bits % 8) {
+        const auto first_max = (1<<max_bits%8)-1;
+        std::cout << "first_max = " << first_max << std::endl;
+        while (bytes[0] > first_max) bytes[0] = R();
     }
     return funtls::be_uint_from_bytes<I>(bytes);
 }
 template<typename I>
-static I rand_int_non_zero(size_t max_bits = ::test_max_bits)
+I rand_int_non_zero(size_t max_bits = ::test_max_bits)
 {
     I x;
     do {
@@ -62,10 +73,6 @@ struct bin_op_test_base {
         return results;
     }
 
-    static std::pair<I, I> rand_test_case() {
-        return std::make_pair(rand_int<I>(), rand_int<I>());
-    }
-
     static size_t max_bits() {
         return ::test_max_bits;
     }
@@ -73,6 +80,17 @@ struct bin_op_test_base {
 
 template<typename I>
 struct add_test : bin_op_test_base<add_test<I>, I> {
+    static std::pair<I, I> rand_test_case() {
+        const I a = rand_int<I>();
+        I b, s;
+        int i = 0;
+        do {
+            b = rand_int<I>();
+            s = a + b;
+            FUNTLS_CHECK_BINARY(i++, <, 1000, "Sanity check failed.");
+        } while (s < a || s < b); // Don't check results that have overflown
+        return std::make_pair(a, b);
+    }
     static void calc(I& r, const I& a, const I& b) {
         r = a + b;
     }
@@ -117,7 +135,7 @@ struct mul_test : bin_op_test_base<mul_test<I>, I> {
 template<typename I>
 struct div_test : bin_op_test_base<div_test<I>, I> {
     static std::pair<I, I> rand_test_case() {
-        return std::make_pair(rand_int<I>(), rand_int_non_zero<I>());
+        return std::make_pair(rand_int<I>(test_max_bits), rand_int_non_zero<I>(test_max_bits/2));
     }
     static void calc(I& r, const I& a, const I& b) {
         r = a / b;

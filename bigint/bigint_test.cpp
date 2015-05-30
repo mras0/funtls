@@ -168,6 +168,10 @@ void test_mul()
         { "D", "1", "D" },
         { "2", "3", "6" },
         { "FF", "FF", "FE01" },
+        { "1", "100", "100" },
+        { "100", "1", "100" },
+        { "F", "FFF", "EFF1" },
+        { "FFF", "F", "EFF1" },
         { "312", "10001", "3120312" },
         { "324141", "881D", "1AB85BEC5D" },
         { "10000", "10000", "100000000" },
@@ -268,6 +272,7 @@ void test_bitops()
         impl res = a;
         res >>= t.shift;
         FUNTLS_ASSERT_EQUAL(t.expected, to_hex(res));
+        FUNTLS_ASSERT_EQUAL(t.expected, to_hex(a >> t.shift));
     }
     static const struct {
         const std::string a;
