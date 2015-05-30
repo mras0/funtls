@@ -19,13 +19,13 @@ void assert_failed(const char* func, const char* file, int line, const std::stri
     do {                                                                \
         try {                                                           \
             expr;                                                       \
-            std::ostringstream oss;                                     \
-            oss << "Expected " << #expr                                 \
+            std::ostringstream _funtls_oss;                             \
+            _funtls_oss << "Expected " << #expr                         \
                 << " to throw exception of type "                       \
                 << #exception_type                                      \
                 << "\n" << message;                                     \
             funtls::test::assert_failed(__PRETTY_FUNCTION__, __FILE__,  \
-                    __LINE__, oss.str());                               \
+                    __LINE__, _funtls_oss.str());                       \
         } catch (const exception_type &) {}                             \
     } while(0)
 
@@ -37,13 +37,14 @@ void assert_failed(const char* func, const char* file, int line, const std::stri
         const auto _a_val = (expected);                                 \
         const auto _b_val = (actual);                                   \
         if (!(_a_val bin_op _b_val)) {                                  \
-            std::ostringstream oss;                                     \
-            oss << "Expected:\n" << #expected << " "                    \
+            std::ostringstream _funtls_oss;                             \
+            _funtls_oss << "Expected:\n" << #expected << " "            \
                 << #bin_op << " " << #actual << "\n"                    \
                 << "Failure:\n"                                         \
                 << "\"" << _a_val << "\" " << #bin_op << " \""          \
                 << _b_val << "\"\n" << message;                         \
-            fail(__PRETTY_FUNCTION__, __FILE__, __LINE__, oss.str());   \
+            fail(__PRETTY_FUNCTION__, __FILE__, __LINE__,               \
+                    _funtls_oss.str());                                 \
         }                                                               \
     } while (0)
 

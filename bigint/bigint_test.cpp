@@ -41,12 +41,13 @@ const struct {
 } be_bytes_test_cases[] = {
     { "0", {0x00} },
     { "2A", {0x2A} },
-    { "FE", {0XFE} },
-    { "C30", {0X0C,0X30} },
-    { "8611", {0X86,0X11} },
-    { "FEDE", {0XFE,0XDE} },
-    { "FEDEAB", {0XFE,0XDE,0XAB} },
-    { "FEDEABE8", {0XFE,0XDE,0XAB,0XE8} },
+    { "FE", {0xFE} },
+    { "100", {0x01,0x00} },
+    { "C30", {0x0C,0x30} },
+    { "8611", {0x86,0x11} },
+    { "FEDE", {0xFE,0xDE} },
+    { "FEDEAB", {0xFE,0xDE,0xAB} },
+    { "FEDEABE8", {0xFE,0xDE,0xAB,0xE8} },
     { "123456789ABCDEF0", {0x12,0x34,0x56,0x78,0x9A,0xBC,0xDE,0xF0}},
     { "123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0", {0x12,0x34,0x56,0x78,0x9A,0xBC,0xDE,0xF0,0x12,0x34,0x56,0x78,0x9A,0xBC,0xDE,0xF0,0x12,0x34,0x56,0x78,0x9A,0xBC,0xDE,0xF0}},
     { max_int_s, max_int_b },
@@ -190,7 +191,7 @@ void test_mul()
     for (const auto& t : test_cases) {
         const auto a = from_hex<impl>(t.a);
         const auto b = from_hex<impl>(t.b);
-        FUNTLS_ASSERT_EQUAL(t.p, to_hex<impl>(a*b));
+        FUNTLS_ASSERT_EQUAL_MESSAGE(t.p, to_hex<impl>(a * b), std::string("a = ") + t.a + " b = " + t.b);
     }
 }
 
@@ -414,6 +415,10 @@ void test_divmod()
         { "42", "1", "0" },
         { "6", "2", "0" },
         { "5", "2", "1" },
+        { "F", "10", "F" },
+        { "FF", "10", "F" },
+        { "FFF", "10", "F" },
+        { "FFFF", "10", "F" },
         { "100", "100", "0" },
         { "100", "101", "100" },
         { "B6D1", "C30", "1" },
@@ -436,7 +441,12 @@ void test_divmod()
         { "6", "2", "3" },
         { "7", "2", "3" },
         { "80", "20", "4" },
+        { "F", "10", "0" },
+        { "FF", "10", "F" },
+        { "FFF", "10", "FF" },
+        { "FFFF", "10", "FFF" },
         { "341807FDAC81", "100", "341807FDAC" },
+        { "FFFFFFFFFFFF", "10", "FFFFFFFFFFF" },
     };
     for (const auto& t : div_test_cases) {
         const auto a = from_hex<impl>(t.a);

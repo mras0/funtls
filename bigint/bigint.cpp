@@ -12,7 +12,7 @@ void biguint::check_repr() const
 {
     FUNTLS_CHECK_BINARY(size_, <=, max_size, "Invalid representation: " + util::base16_encode(v_, size_));
     if (size_) {
-        FUNTLS_CHECK_BINARY((unsigned)v_[size_-1], !=, 0, "Invalid representation: " + util::base16_encode(v_, size_));
+        FUNTLS_CHECK_BINARY(v_[size_-1], !=, 0, "Invalid representation: " + util::base16_encode(v_, size_));
     }
 }
 #endif
@@ -71,15 +71,10 @@ int biguint::compare(const biguint& lhs, const biguint& rhs)
         return 1;
     } else {
         assert(lhs.size_ == rhs.size_);
-        if (!lhs.size_) return 0;
-        // Check most siginificant digits for mismatch
-        for (biguint::size_type i = lhs.size_-1; i; i--) {
+        for (biguint::size_type i = lhs.size_; i--;) {
             if (lhs.v_[i] < rhs.v_[i]) return -1;
             if (lhs.v_[i] > rhs.v_[i]) return 1;
         }
-        // lhs and rhs are equal up to the least siginificant digit
-        if (lhs.v_[0] < rhs.v_[0]) return -1;
-        if (lhs.v_[0] > rhs.v_[0]) return 1;
         return 0;
     }
 }
@@ -118,14 +113,14 @@ biguint& biguint::sub(biguint& res, const biguint& lhs, const biguint& rhs)
 
     // Handle 0
     if (!rhs.size_) return res = lhs;
-    FUNTLS_CHECK_BINARY(lhs.size_, !=, 0, "0-X not allowed");
-    FUNTLS_CHECK_BINARY(lhs.size_, >=, rhs.size_, "Would produce negative number");
+    if (lhs.size_ == 0 || (lhs.size_ < rhs.size_) || (lhs.size_ == rhs.size_ && lhs.v_[lhs.size_-1] < rhs.v_[rhs.size_-1])) {
+        FUNTLS_CHECK_FAILURE("Negative number would be produced");
+    }
 
     if (&res != &lhs) res = lhs;
 
-    std::make_signed<dlimb_type>::type d = 0;
-    for (unsigned i = 0; i<rhs.size_ || d; ++i) {
-        FUNTLS_CHECK_BINARY(i, <, lhs.size_, "Negative number produced");
+    detail::dlimb_type<limb_type>::stype d = 0;
+    for (unsigned i = 0; i < rhs.size_ || d; ++i) {
         d += lhs.v_[i];
         if (i < rhs.size_) d -= rhs.v_[i];
         res.v_[i] = static_cast<limb_type>(d);
@@ -138,45 +133,52 @@ biguint& biguint::sub(biguint& res, const biguint& lhs, const biguint& rhs)
     return res;
 }
 
-template<typename T>
-bool addc(T& a, T b) {
-    const T old = a;
-    a += b;
-    return a < old;
-}
-
 biguint& biguint::mul(biguint& res, const biguint& lhs, const biguint& rhs)
 {
     lhs.check_repr();
     rhs.check_repr();
+
+    //
+    // Handle 0
+    //
+    if (!lhs.size_) return res = lhs;
+    if (!rhs.size_) return res = rhs;
+
+    const auto ls = lhs.size_;
+    const auto rs = rhs.size_;
+
+    //
+    // Handle trivial case
+    // TODO: Handle ls == 1 || rs == 1
+    //
+    if (ls == 1 && rs == 1) {
+        return res = static_cast<dlimb_type>(lhs.v_[0]) * rhs.v_[0];
+    }
 
     if (&res == &lhs || &res == &rhs) {
         biguint tmp;
         return res = biguint::mul(tmp, lhs, rhs);
     }
 
-    // Handle 0
-    if (!lhs.size_) return res = lhs;
-    if (!rhs.size_) return res = rhs;
-
     res.size_ = 2 * std::max(lhs.size_, rhs.size_);
     FUNTLS_CHECK_BINARY(res.size_, <=, biguint::max_size, "Shoud probably clamp instead");
 
     memset(&res.v_[0], 0, sizeof(limb_type)*res.size_);
-    for (int i = 0, n = res.size_; i < n; ++i) {
-        const int jmin = std::max(0, i - rhs.size_ + 1);
-        const int jmax = std::min(i + 1, static_cast<int>(lhs.size_));
-        for (int j = jmin; j < jmax; j++) {
-            auto k = i - j;
-            assert(k >= 0 && k < rhs.size_);
-            dlimb_type prod = static_cast<dlimb_type>(lhs.v_[j]) * rhs.v_[k];
-            limb_type carry = addc(res.v_[i], static_cast<limb_type>(prod));
-            prod >>= limb_bits;
-            assert(prod < (dlimb_type(1)<<limb_bits));
-            carry += prod;
-            for (auto q = i+1; carry && q < n; ++q) {
-                carry = addc(res.v_[q], carry);
-            }
+
+    const auto n  = res.size_;
+    for (size_type i = 0; i < ls; ++i) {
+        const int jmax = std::min(rs, static_cast<size_type>(n - i));
+        dlimb_type carry = 0;
+        for (size_type j = 0; j < jmax; ++j) {
+            carry += static_cast<dlimb_type>(lhs.v_[i]) * rhs.v_[j];
+            carry += res.v_[i + j];
+            res.v_[i + j] = static_cast<limb_type>(carry);
+            carry >>= limb_bits;
+        }
+        if (i + rs < n) {
+            res.v_[i + rs] = static_cast<limb_type>(carry);
+        } else {
+            assert(!carry);
         }
     }
     res.trim();
@@ -204,19 +206,19 @@ void biguint::divmod(biguint& quot, biguint& rem, const biguint& lhs, const bigu
     lhs.check_repr();
     rhs.check_repr();
 
+    const auto ls = lhs.size_;
+    const auto rs = rhs.size_;
     //
     // Handle zeros
     //
-    FUNTLS_CHECK_BINARY(rhs.size_, !=, 0, "Division by zero");
-    if (!lhs.size_) {
+    FUNTLS_CHECK_BINARY(rs, !=, 0, "Division by zero");
+    if (!ls) {
         // 0/X: quot = rem = 0
         quot.size_ = rem.size_ = 0;
         return;
     }
 
     // Now: lhs != 0 && rhs != 0 (also implies that the sizes are greater than 0)
-    const auto ls = lhs.size_;
-    const auto rs = rhs.size_;
     assert(ls > 0 && rs > 0);
 
     //
@@ -237,18 +239,12 @@ void biguint::divmod(biguint& quot, biguint& rem, const biguint& lhs, const bigu
     // Handle directly calculable cases
     //
     if (ls == 1) {
+        assert(rs == 1);
         const auto l = lhs.v_[0];
-        if (rs == 1) {
-            const auto r = rhs.v_[0];
-            quot = l / r;
-            rem  = l % r;
-            return;
-        } else if (rs == 2) {
-            const auto r = (dlimb_type(rhs.v_[1])<<limb_bits) | rhs.v_[0];
-            quot = l / r;
-            rem  = l % r;
-            return;
-        }
+        const auto r = rhs.v_[0];
+        quot = l / r;
+        rem  = l % r;
+        return;
     } else if (ls == 2) {
         const auto l = (dlimb_type(lhs.v_[1])<<limb_bits) | lhs.v_[0];
         if (rs == 1) {
@@ -262,6 +258,25 @@ void biguint::divmod(biguint& quot, biguint& rem, const biguint& lhs, const bigu
             rem  = l % r;
             return;
         }
+    } else if (rs == 1) {
+        quot.size_ = lhs.size_;
+        dlimb_type r = 0;
+        for (size_type i = lhs.size_; i--;) {
+            assert((r>>limb_bits) == 0);
+            r <<= limb_bits;
+            r |= lhs.v_[i];
+            if (r >= rhs.v_[0]) {
+                quot.v_[i] = r / rhs.v_[0];
+                r -= static_cast<dlimb_type>(quot.v_[i]) * rhs.v_[0];
+            } else {
+                quot.v_[i] = 0;
+            }
+        }
+        rem = r;
+        quot.trim();
+        quot.check_repr();
+        rem.check_repr();
+        return;
     }
 
     //
@@ -276,6 +291,7 @@ void biguint::divmod(biguint& quot, biguint& rem, const biguint& lhs, const bigu
     }
 
     assert(lhs > rhs);
+    assert(rhs.size_ > 1);
 
     quot.size_ = lhs.size_;
     rem.size_ = 0;
@@ -288,15 +304,20 @@ void biguint::divmod(biguint& quot, biguint& rem, const biguint& lhs, const bigu
                 rem.v_[0] |= 1;
             }
             if (rem >= rhs) {
-                quot.v_[i] |= 1 << bit;
+                quot.v_[i] |= limb_type(1) << bit;
                 biguint::sub(rem, rem, rhs);
             }
         }
     }
+
     quot.trim();
 
     rem.check_repr();
     quot.check_repr();
+
+    assert(rem <= lhs);
+    assert(rem < rhs);
+    assert(quot <= lhs);
 }
 
 biguint& biguint::operator>>=(uint32_t shift)
@@ -410,6 +431,7 @@ std::ostream& operator<<(std::ostream& os, const biguint& ui)
             biguint::divmod(n, rem, n, 10);
             assert(rem < 10);
             s += '0' + static_cast<uint8_t>(rem);
+            assert(!ui || n < ui);
         } while (n != 0);
         for (auto it = s.crbegin(), end = s.crend(); it != end; ++it) {
             os << *it;

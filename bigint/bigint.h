@@ -14,22 +14,52 @@ namespace detail {
 struct expr {};
 template<typename Expr>
 using is_expr_t = std::is_base_of<expr, Expr>;
+
+template<typename IntType>
+struct dlimb_type;
+
+template<> struct dlimb_type<uint8_t>  {
+    typedef uint16_t type;
+    typedef int16_t  stype;
+};
+template<> struct dlimb_type<uint16_t> {
+    typedef uint32_t type;
+    typedef int32_t  stype;
+};
+template<> struct dlimb_type<uint32_t> {
+    typedef uint64_t type;
+    typedef int64_t  stype;
+};
+
+#ifdef __SIZEOF_INT128__
+template<> struct dlimb_type<uint64_t> {
+    typedef unsigned __int128 type;
+    typedef signed __int128   stype;
+};
+typedef unsigned __int128 maxuint_t;
+#else
+typedef uintmax_t maxuint_t;
+#endif
+
+template<typename IntType>
+using dlimb_type_t = typename dlimb_type<IntType>::type;
+
 } // namespace detail
 
 
 class biguint {
 public:
-    typedef uint16_t size_type;
 #if 1
-    typedef uint32_t limb_type;
-    typedef uint64_t dlimb_type;
+    using limb_type = uint64_t;
 #else
-    typedef uint8_t  limb_type;
-    typedef uint16_t dlimb_type;
+    using limb_type = uint8_t;
 #endif
+    using dlimb_type = detail::dlimb_type_t<limb_type>;
+    using size_type = uint16_t;
 
     static constexpr size_type limb_bits = sizeof(limb_type) * 8;
     static constexpr size_type max_bits  = 4096;
+    static_assert(max_bits >= limb_bits * 4, "Untested");
 
     biguint() : size_(0) {
         check_repr();
@@ -39,7 +69,7 @@ public:
         expr.eval(*this);
         check_repr();
     }
-    biguint(uintmax_t x) : size_(0) {
+    biguint(detail::maxuint_t x) : size_(0) {
         static_assert(sizeof(x) < sizeof(v_), "");
         while (x) {
             v_[size_++] = static_cast<limb_type>(x);
@@ -97,8 +127,8 @@ public:
 
 private:
     static constexpr size_type max_size = max_bits / limb_bits;
-    limb_type v_[max_size];
     size_type size_;
+    limb_type v_[max_size];
 
     void trim() {
         while (size_ && !v_[size_-1]) {
@@ -158,12 +188,12 @@ private:
 namespace detail {
 class small_lit : public expr {
 public:
-    small_lit(uintmax_t x) : x_(x) {}
+    small_lit(maxuint_t x) : x_(x) {}
     void eval(biguint& res) const {
         res = x_;
     }
 private:
-    uintmax_t x_;
+    maxuint_t x_;
 };
 
 class lit : public expr {

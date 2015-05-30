@@ -5,6 +5,9 @@
 #include <util/test.h>
 #include <util/int_util.h>
 
+constexpr size_t test_max_bits = 4096;
+constexpr int    test_times    = 20;
+
 template<typename Clock>
 uint64_t clock_ns()
 {
@@ -22,39 +25,49 @@ double time_it(const F& f)
     return (end_time - start_time) / 1e9;
 }
 
+template<typename I>
+static I rand_int(size_t max_bits = ::test_max_bits-1)
+{
+    std::vector<uint8_t> bytes(max_bits/8);
+    static uint32_t rand_state = 0x123456;
+    for (auto& b : bytes) {
+        rand_state = rand_state * 1664525 + 1013904223;
+        b = rand_state & 0xff;
+    }
+    return funtls::be_uint_from_bytes<I>(bytes);
+}
+template<typename I>
+static I rand_int_non_zero(size_t max_bits = ::test_max_bits)
+{
+    I x;
+    do {
+        x = rand_int<I>(max_bits);
+    } while (!x);
+    return x;
+}
+
 template<typename Derived, typename I>
 struct bin_op_test_base {
     static std::vector<double> time()
     {
-        const int times = 10;
         std::vector<double> results;
-        for (int i = 0; i < times;) {
-            const I a = rand_int();
-            const I b = rand_int();
-            if (!Derived::accept(a, b)) continue;
-            ++i;
+        for (int i = 0; i < test_times; ++i) {
+            const auto t = Derived::rand_test_case();
             I r;
-            const double trial = time_it([&] { Derived::calc(r, a, b); });
+            const double trial = time_it([&] { Derived::calc(r, t.first, t.second); });
             results.push_back(trial);
-            Derived::check(r, a, b);
+            Derived::check(r, t.first, t.second);
         }
 
         return results;
     }
 
-    static bool accept(const I&, const I&) {
-        return true;
+    static std::pair<I, I> rand_test_case() {
+        return std::make_pair(rand_int<I>(), rand_int<I>());
     }
 
-    static I rand_int(size_t num_bytes=1024/8)
-    {
-        std::vector<uint8_t> bytes(num_bytes);
-        static uint32_t rand_state = 0x123456;
-        for (auto& b : bytes) {
-            rand_state = rand_state * 22695477 + 1;
-            b = rand_state & 0xff;
-        }
-        return funtls::be_uint_from_bytes<I>(bytes);
+    static size_t max_bits() {
+        return ::test_max_bits;
     }
 };
 
@@ -70,8 +83,13 @@ struct add_test : bin_op_test_base<add_test<I>, I> {
 
 template<typename I>
 struct sub_test : bin_op_test_base<sub_test<I>, I> {
-    static bool accept(const I& a, const I& b) {
-        return a >= b;
+    static std::pair<I, I> rand_test_case() {
+        const I a = rand_int<I>();
+        I b;
+        do {
+            b = rand_int<I>();
+        } while (a < b);
+        return std::make_pair(a, b);
     }
     static void calc(I& r, const I& a, const I& b) {
         r = a - b;
@@ -83,6 +101,11 @@ struct sub_test : bin_op_test_base<sub_test<I>, I> {
 
 template<typename I>
 struct mul_test : bin_op_test_base<mul_test<I>, I> {
+    static std::pair<I, I> rand_test_case() {
+        const I a = rand_int<I>(::test_max_bits/2);
+        const I b = rand_int<I>(::test_max_bits/2);
+        return std::make_pair(a, b);
+    }
     static void calc(I& r, const I& a, const I& b) {
         r = a * b;
     }
@@ -93,8 +116,8 @@ struct mul_test : bin_op_test_base<mul_test<I>, I> {
 
 template<typename I>
 struct div_test : bin_op_test_base<div_test<I>, I> {
-    static bool accept(const I&, const I& b) {
-        return b != 0;
+    static std::pair<I, I> rand_test_case() {
+        return std::make_pair(rand_int<I>(), rand_int_non_zero<I>());
     }
     static void calc(I& r, const I& a, const I& b) {
         r = a / b;
@@ -106,8 +129,8 @@ struct div_test : bin_op_test_base<div_test<I>, I> {
 
 template<typename I>
 struct mod_test : bin_op_test_base<mod_test<I>, I> {
-    static bool accept(const I&, const I& b) {
-        return b != 0;
+    static std::pair<I, I> rand_test_case() {
+        return div_test<I>::rand_test_case();
     }
     static void calc(I& r, const I& a, const I& b) {
         r = a % b;
