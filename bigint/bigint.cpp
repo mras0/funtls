@@ -301,6 +301,7 @@ void biguint::divmod(biguint& quot, biguint& rem, const biguint& lhs, const bigu
 
     quot.size_ = lhs.size_;
     rem.size_ = 0;
+#if 0
     for (size_type i = lhs.size_; i--;) {
         quot.v_[i] = 0;
         for (auto bit = limb_bits; bit--;) {
@@ -315,6 +316,69 @@ void biguint::divmod(biguint& quot, biguint& rem, const biguint& lhs, const bigu
             }
         }
     }
+#else
+    //std::cout << std::hex << "lhs " << lhs << " rhs " << rhs << std::endl;
+    for (size_type i = lhs.size_; i--;) {
+        rem <<= limb_bits;
+        rem |= lhs.v_[i];
+        quot.v_[i] = 0;
+
+        if (rem < rhs) {
+            continue;
+        }
+
+        dlimb_type rem_msl = rem.v_[rem.size_-1];
+        const limb_type rhs_msl = rhs.v_[rhs.size_-1];
+        if (rem.size_ != rhs.size_) {
+            assert(rem.size_ >= 2);
+            assert(rem.size_ == rhs.size_+1);
+            rem_msl <<= limb_bits;
+            rem_msl |= rem.v_[rem.size_-2];
+        }
+        assert(rem_msl >= rhs_msl);
+        assert(rem >= rhs);
+
+        //int padj = 0, madj = 0;
+
+        //std::cout << std::hex;
+
+        static constexpr limb_type limb_max = ~limb_type(0);
+
+        //std::cout << " rem " << rem;
+        //std::cout << " rem_msl " << (uint64_t)rem_msl;
+        //std::cout << " rhs_msl " << (uint64_t)rhs_msl;
+        auto guess = rem_msl / rhs_msl;
+        //std::cout << " guess " << (uint64_t)guess;
+        if (guess > limb_max) guess = limb_max;
+
+        quot.v_[i] = guess;
+        assert(quot.v_[i]);
+        biguint tmp = quot.v_[i] * rhs;
+        //std::cout << " quot[i] " << (uint64_t)quot.v_[i];
+        //std::cout << " tmp " << tmp;
+        while (tmp > rem) {
+            //std::cout << "\n tmp-rem " << biguint(tmp-rem);
+            //++madj;
+            quot.v_[i]--;
+            tmp = tmp - rhs;
+        }
+        assert(tmp <= rem);
+        rem = rem - tmp;
+        while (rem >= rhs) {
+            //std::cout << "\n rem-rhs " << biguint(rem-rhs);
+            //++padj;
+            quot.v_[i]++;
+            rem = rem - rhs;
+        }
+        //std::cout << std::endl;
+        assert(rem < rhs);
+        //if (madj+padj) {
+        //    std::cout << std::dec << "madj = " << madj << " padj = " << padj << std::endl;
+        //    std::cout << "Final quot:"  << std::hex << (uint64_t)quot.v_[i] << std::endl;
+        //    if((madj&&padj) || madj+padj>4)abort();
+        //}
+    }
+#endif
 
     quot.trim();
 
