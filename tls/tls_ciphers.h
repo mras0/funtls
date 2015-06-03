@@ -113,6 +113,9 @@ enum class cipher_suite : uint16_t {
     ecdhe_rsa_with_aes_256_gcm_sha384    = 0xC030,
     ecdh_rsa_with_aes_128_gcm_sha256     = 0xC031,
     ecdh_rsa_with_aes_256_gcm_sha384     = 0xC032,
+
+    // Experimental:
+    ecdhe_rsa_with_chacha20_poly1305_sha256 = 0xCC13,
 };
 
 enum class key_exchange_algorithm {
@@ -148,7 +151,8 @@ enum class bulk_cipher_algorithm {
     rc4,
     _3des,
     aes_cbc,
-    aes_gcm
+    aes_gcm,
+    chacha20,
 };
 
 enum class cipher_type {
@@ -172,6 +176,8 @@ enum class mac_algorithm {
 
 template<cipher_suite suite>
 struct cipher_suite_traits;
+
+namespace detail {
 
 struct null_bulk_algo_traits {
     static constexpr auto bulk_cipher_algorithm  = tls::bulk_cipher_algorithm::null;
@@ -222,6 +228,15 @@ struct aes_gcm_traits {
     static constexpr uint8_t record_iv_length    = 8;
 };
 
+struct chacha20_poly1305_traits {
+    static constexpr auto bulk_cipher_algorithm  = tls::bulk_cipher_algorithm::chacha20;
+    static constexpr auto cipher_type            = tls::cipher_type::aead;
+    static constexpr uint8_t key_length          = 256/8;
+    static constexpr uint8_t block_length        = 64;
+    static constexpr uint8_t fixed_iv_length     = 4;
+    static constexpr uint8_t record_iv_length    = 0;
+};
+
 struct null_mac_algo_triats {
     static constexpr auto mac_algorithm          = tls::mac_algorithm::null;
     static constexpr uint8_t mac_length          = 0;
@@ -243,14 +258,21 @@ struct hmac_sha_algo_traits {
     static constexpr auto prf_algorithm          = tls::prf_algorithm::sha256;
 };
 
+template<uint8_t mcl = 256/8>
 struct hmac_sha256_algo_traits {
     static constexpr auto mac_algorithm          = tls::mac_algorithm::hmac_sha256;
     static constexpr uint8_t mac_length          = 256/8;
-    static constexpr uint8_t mac_key_length      = 256/8;
+    static constexpr uint8_t mac_key_length      = mcl;
     static constexpr auto prf_algorithm          = tls::prf_algorithm::sha256;
 };
 
-namespace detail {
+template<uint8_t mcl = 384/8>
+struct hmac_sha384_algo_traits {
+    static constexpr auto mac_algorithm          = tls::mac_algorithm::hmac_sha384;
+    static constexpr uint8_t mac_length          = 384/8;
+    static constexpr uint8_t mac_key_length      = mcl;
+    static constexpr auto prf_algorithm          = tls::prf_algorithm::sha384;
+};
 
 template<cipher_suite suite, key_exchange_algorithm key_exchange_algo, typename bulk_cipher_algo_traits, typename mac_algo_traits>
 struct cipher_suite_traits_base {
@@ -276,8 +298,8 @@ struct cipher_suite_traits<cipher_suite::n>      \
     : public detail::cipher_suite_traits_base<   \
         cipher_suite::n,                         \
         key_exchange_algorithm::kex,             \
-        bulk,                                    \
-        mac> {}
+        detail::bulk,                            \
+        detail::mac> {}
 
 CS_TRAITS_SPEC(null_with_null_null, null, null_bulk_algo_traits, null_mac_algo_triats);
 CS_TRAITS_SPEC(rsa_with_rc4_128_md5, rsa, rc4_traits, hmac_md5_algo_traits);
@@ -285,35 +307,20 @@ CS_TRAITS_SPEC(rsa_with_rc4_128_sha, rsa, rc4_traits, hmac_sha_algo_traits);
 CS_TRAITS_SPEC(rsa_with_3des_ede_cbc_sha, rsa, _3des_traits, hmac_sha_algo_traits);
 CS_TRAITS_SPEC(rsa_with_aes_128_cbc_sha, rsa, aes_cbc_traits<128>, hmac_sha_algo_traits);
 CS_TRAITS_SPEC(rsa_with_aes_256_cbc_sha, rsa, aes_cbc_traits<256>, hmac_sha_algo_traits);
-CS_TRAITS_SPEC(rsa_with_aes_128_cbc_sha256, rsa, aes_cbc_traits<128>, hmac_sha256_algo_traits);
-CS_TRAITS_SPEC(rsa_with_aes_256_cbc_sha256, rsa, aes_cbc_traits<256>, hmac_sha256_algo_traits);
+CS_TRAITS_SPEC(rsa_with_aes_128_cbc_sha256, rsa, aes_cbc_traits<128>, hmac_sha256_algo_traits<>);
+CS_TRAITS_SPEC(rsa_with_aes_256_cbc_sha256, rsa, aes_cbc_traits<256>, hmac_sha256_algo_traits<>);
 CS_TRAITS_SPEC(dhe_rsa_with_3des_ede_cbc_sha, dhe_rsa, _3des_traits, hmac_sha_algo_traits);
 CS_TRAITS_SPEC(dhe_rsa_with_aes_128_cbc_sha, dhe_rsa, aes_cbc_traits<128>, hmac_sha_algo_traits);
 CS_TRAITS_SPEC(dhe_rsa_with_aes_256_cbc_sha, dhe_rsa, aes_cbc_traits<256>, hmac_sha_algo_traits);
-CS_TRAITS_SPEC(dhe_rsa_with_aes_128_cbc_sha256, dhe_rsa, aes_cbc_traits<128>, hmac_sha256_algo_traits);
-CS_TRAITS_SPEC(dhe_rsa_with_aes_256_cbc_sha256, dhe_rsa, aes_cbc_traits<256>, hmac_sha256_algo_traits);
-
-// GCM algorithms don't use 
-struct hmac_gcm_sha256_algo_traits {
-    static constexpr auto mac_algorithm          = tls::mac_algorithm::hmac_sha256;
-    static constexpr uint8_t mac_length          = 256/8;
-    static constexpr uint8_t mac_key_length      = 0;
-    static constexpr auto prf_algorithm          = tls::prf_algorithm::sha256;
-};
-struct hmac_gcm_sha384_algo_traits {
-    static constexpr auto mac_algorithm          = tls::mac_algorithm::hmac_sha384;
-    static constexpr uint8_t mac_length          = 384/8;
-    static constexpr uint8_t mac_key_length      = 0;
-    static constexpr auto prf_algorithm          = tls::prf_algorithm::sha384;
-};
-
-CS_TRAITS_SPEC(rsa_with_aes_128_gcm_sha256, rsa, aes_gcm_traits<128>, hmac_gcm_sha256_algo_traits);
-CS_TRAITS_SPEC(rsa_with_aes_256_gcm_sha384, rsa, aes_gcm_traits<256>, hmac_gcm_sha384_algo_traits);
-CS_TRAITS_SPEC(ecdhe_ecdsa_with_aes_128_gcm_sha256, ecdhe_ecdsa, aes_gcm_traits<128>, hmac_gcm_sha256_algo_traits);
-CS_TRAITS_SPEC(ecdhe_ecdsa_with_aes_256_gcm_sha384, ecdhe_ecdsa, aes_gcm_traits<256>, hmac_gcm_sha384_algo_traits);
-CS_TRAITS_SPEC(ecdhe_rsa_with_aes_128_gcm_sha256, ecdhe_rsa, aes_gcm_traits<128>, hmac_gcm_sha256_algo_traits);
-CS_TRAITS_SPEC(ecdhe_rsa_with_aes_256_gcm_sha384, ecdhe_rsa, aes_gcm_traits<256>, hmac_gcm_sha384_algo_traits);
-
+CS_TRAITS_SPEC(dhe_rsa_with_aes_128_cbc_sha256, dhe_rsa, aes_cbc_traits<128>, hmac_sha256_algo_traits<>);
+CS_TRAITS_SPEC(dhe_rsa_with_aes_256_cbc_sha256, dhe_rsa, aes_cbc_traits<256>, hmac_sha256_algo_traits<>);
+CS_TRAITS_SPEC(rsa_with_aes_128_gcm_sha256, rsa, aes_gcm_traits<128>, hmac_sha256_algo_traits<0>);
+CS_TRAITS_SPEC(rsa_with_aes_256_gcm_sha384, rsa, aes_gcm_traits<256>, hmac_sha384_algo_traits<0>);
+CS_TRAITS_SPEC(ecdhe_ecdsa_with_aes_128_gcm_sha256, ecdhe_ecdsa, aes_gcm_traits<128>, hmac_sha256_algo_traits<0>);
+CS_TRAITS_SPEC(ecdhe_ecdsa_with_aes_256_gcm_sha384, ecdhe_ecdsa, aes_gcm_traits<256>, hmac_sha384_algo_traits<0>);
+CS_TRAITS_SPEC(ecdhe_rsa_with_aes_128_gcm_sha256, ecdhe_rsa, aes_gcm_traits<128>, hmac_sha256_algo_traits<0>);
+CS_TRAITS_SPEC(ecdhe_rsa_with_aes_256_gcm_sha384, ecdhe_rsa, aes_gcm_traits<256>, hmac_sha384_algo_traits<0>);
+CS_TRAITS_SPEC(ecdhe_rsa_with_chacha20_poly1305_sha256, ecdhe_rsa, chacha20_poly1305_traits, hmac_sha256_algo_traits<0>);
 #undef CS_TRAITS_SPEC
 
 struct cipher_suite_parameters {

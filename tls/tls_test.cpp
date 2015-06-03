@@ -11,7 +11,6 @@ void test_cipher_traits()
     {
         const auto suite = tls::cipher_suite::null_with_null_null;
         const auto csp   = tls::parameters_from_suite(suite);
-        std::cout << csp << std::endl;
 
         FUNTLS_ASSERT_EQUAL(suite,                              csp.cipher_suite);
         FUNTLS_ASSERT_EQUAL(tls::key_exchange_algorithm::null,  csp.key_exchange_algorithm);
@@ -29,7 +28,6 @@ void test_cipher_traits()
     {
         const auto suite = tls::cipher_suite::rsa_with_rc4_128_sha;
         const auto csp   = tls::parameters_from_suite(suite);
-        std::cout << csp << std::endl;
 
         FUNTLS_ASSERT_EQUAL(suite,                              csp.cipher_suite);
         FUNTLS_ASSERT_EQUAL(tls::key_exchange_algorithm::rsa,   csp.key_exchange_algorithm);
@@ -47,7 +45,6 @@ void test_cipher_traits()
     {
         const auto suite = tls::cipher_suite::rsa_with_aes_128_cbc_sha;
         const auto csp   = tls::parameters_from_suite(suite);
-        std::cout << csp << std::endl;
 
         FUNTLS_ASSERT_EQUAL(suite,                               csp.cipher_suite);
         FUNTLS_ASSERT_EQUAL(tls::key_exchange_algorithm::rsa,    csp.key_exchange_algorithm);
@@ -65,7 +62,6 @@ void test_cipher_traits()
     {
         const auto suite = tls::cipher_suite::rsa_with_aes_256_cbc_sha256;
         const auto csp   = tls::parameters_from_suite(suite);
-        std::cout << csp << std::endl;
 
         FUNTLS_ASSERT_EQUAL(suite,                               csp.cipher_suite);
         FUNTLS_ASSERT_EQUAL(tls::key_exchange_algorithm::rsa,    csp.key_exchange_algorithm);
@@ -83,7 +79,6 @@ void test_cipher_traits()
     {
         const auto suite = tls::cipher_suite::rsa_with_aes_128_gcm_sha256;
         const auto csp   = tls::parameters_from_suite(suite);
-        std::cout << csp << std::endl;
 
         FUNTLS_ASSERT_EQUAL(suite,                               csp.cipher_suite);
         FUNTLS_ASSERT_EQUAL(tls::key_exchange_algorithm::rsa,    csp.key_exchange_algorithm);
@@ -101,7 +96,6 @@ void test_cipher_traits()
     {
         const auto suite = tls::cipher_suite::ecdhe_ecdsa_with_aes_128_gcm_sha256;
         const auto csp   = tls::parameters_from_suite(suite);
-        std::cout << csp << std::endl;
 
         FUNTLS_ASSERT_EQUAL(suite,                                    csp.cipher_suite);
         FUNTLS_ASSERT_EQUAL(tls::key_exchange_algorithm::ecdhe_ecdsa, csp.key_exchange_algorithm);
@@ -119,7 +113,6 @@ void test_cipher_traits()
     {
         const auto suite = tls::cipher_suite::ecdhe_rsa_with_aes_128_gcm_sha256;
         const auto csp   = tls::parameters_from_suite(suite);
-        std::cout << csp << std::endl;
 
         FUNTLS_ASSERT_EQUAL(suite,                                    csp.cipher_suite);
         FUNTLS_ASSERT_EQUAL(tls::key_exchange_algorithm::ecdhe_rsa,   csp.key_exchange_algorithm);
@@ -137,7 +130,6 @@ void test_cipher_traits()
     {
         const auto suite = tls::cipher_suite::ecdhe_ecdsa_with_aes_256_gcm_sha384;
         const auto csp   = tls::parameters_from_suite(suite);
-        std::cout << csp << std::endl;
 
         FUNTLS_ASSERT_EQUAL(suite,                                    csp.cipher_suite);
         FUNTLS_ASSERT_EQUAL(tls::key_exchange_algorithm::ecdhe_ecdsa, csp.key_exchange_algorithm);
@@ -152,6 +144,24 @@ void test_cipher_traits()
         FUNTLS_ASSERT_EQUAL(384/8,                                    csp.mac_length);
         FUNTLS_ASSERT_EQUAL(0,                                        csp.mac_key_length);
     }
+    {
+        const auto suite = tls::cipher_suite::ecdhe_rsa_with_chacha20_poly1305_sha256;
+        const auto csp   = tls::parameters_from_suite(suite);
+        std::cout << csp << std::endl;
+
+        FUNTLS_ASSERT_EQUAL(suite,                                    csp.cipher_suite);
+        FUNTLS_ASSERT_EQUAL(tls::key_exchange_algorithm::ecdhe_rsa,   csp.key_exchange_algorithm);
+        FUNTLS_ASSERT_EQUAL(tls::prf_algorithm::sha256,               csp.prf_algorithm);
+        FUNTLS_ASSERT_EQUAL(tls::bulk_cipher_algorithm::chacha20,     csp.bulk_cipher_algorithm);
+        FUNTLS_ASSERT_EQUAL(tls::cipher_type::aead,                   csp.cipher_type);
+        FUNTLS_ASSERT_EQUAL(256/8,                                    csp.key_length);
+        FUNTLS_ASSERT_EQUAL(512/8,                                    csp.block_length);
+        FUNTLS_ASSERT_EQUAL(4,                                        csp.fixed_iv_length);
+        FUNTLS_ASSERT_EQUAL(0,                                        csp.record_iv_length);
+        FUNTLS_ASSERT_EQUAL(tls::mac_algorithm::hmac_sha256,          csp.mac_algorithm);
+        FUNTLS_ASSERT_EQUAL(256/8,                                    csp.mac_length);
+        FUNTLS_ASSERT_EQUAL(0,                                        csp.mac_key_length);
+    }
 }
 
 void test_cipher_parsing()
@@ -163,24 +173,25 @@ void test_cipher_parsing()
     FUNTLS_ASSERT_EQUAL(true, bool(iss >> cs));\
     FUNTLS_ASSERT_EQUAL(cipher_suite::expected, cs);\
 } while (0)
-    TEST_IN(rsa_with_rc4_128_md5,                "rsa_with_rc4_128_md5");
-    TEST_IN(rsa_with_rc4_128_sha,                "rsa_with_rc4_128_sha");
-    TEST_IN(rsa_with_3des_ede_cbc_sha,           "rsa_with_3des_ede_cbc_sha");
-    TEST_IN(rsa_with_aes_128_cbc_sha,            "rsa_with_aes_128_cbc_sha");
-    TEST_IN(rsa_with_aes_128_cbc_sha256,         "rsa_with_aes_128_cbc_sha256");
-    TEST_IN(rsa_with_aes_256_cbc_sha,            "rsa_with_aes_256_cbc_sha");
-    TEST_IN(rsa_with_aes_256_cbc_sha256,         "rsa_with_aes_256_cbc_sha256");
-    TEST_IN(dhe_rsa_with_3des_ede_cbc_sha,       "dhe_rsa_with_3des_ede_cbc_sha");
-    TEST_IN(dhe_rsa_with_3des_ede_cbc_sha,       "dhe_rsa_with_3des_ede_cbc_sha");
-    TEST_IN(dhe_rsa_with_aes_256_cbc_sha256,     "dhe_rsa_with_aes_256_cbc_sha256");
-    TEST_IN(dhe_rsa_with_aes_128_cbc_sha,        "TLS_DHE_RSA_WITH_AES_128_CBC_SHA");
-    TEST_IN(dhe_rsa_with_aes_256_cbc_sha,        "DHE-RSA-AES256-sha");
-    TEST_IN(rsa_with_aes_256_cbc_sha256,         "aes256-SHA256");
-    TEST_IN(rsa_with_aes_128_gcm_sha256,         "AES128-GCM-SHA256");
-    TEST_IN(ecdhe_ecdsa_with_aes_128_gcm_sha256, "ECDHE-ECDSA-AES128-GCM-SHA256");
-    TEST_IN(ecdhe_ecdsa_with_aes_128_gcm_sha256, "ecdhe_ecdsa_with_aes_128_gcm_sha256");
-    TEST_IN(ecdhe_rsa_with_aes_128_gcm_sha256,   "ecdhe_rsa_with_aes_128_gcm_sha256");
-    TEST_IN(ecdhe_rsa_with_aes_256_gcm_sha384,   "ecdhe_rsa_with_aes_256_gcm_sha384");
+    TEST_IN(rsa_with_rc4_128_md5,                    "rsa_with_rc4_128_md5");
+    TEST_IN(rsa_with_rc4_128_sha,                    "rsa_with_rc4_128_sha");
+    TEST_IN(rsa_with_3des_ede_cbc_sha,               "rsa_with_3des_ede_cbc_sha");
+    TEST_IN(rsa_with_aes_128_cbc_sha,                "rsa_with_aes_128_cbc_sha");
+    TEST_IN(rsa_with_aes_128_cbc_sha256,             "rsa_with_aes_128_cbc_sha256");
+    TEST_IN(rsa_with_aes_256_cbc_sha,                "rsa_with_aes_256_cbc_sha");
+    TEST_IN(rsa_with_aes_256_cbc_sha256,             "rsa_with_aes_256_cbc_sha256");
+    TEST_IN(dhe_rsa_with_3des_ede_cbc_sha,           "dhe_rsa_with_3des_ede_cbc_sha");
+    TEST_IN(dhe_rsa_with_3des_ede_cbc_sha,           "dhe_rsa_with_3des_ede_cbc_sha");
+    TEST_IN(dhe_rsa_with_aes_256_cbc_sha256,         "dhe_rsa_with_aes_256_cbc_sha256");
+    TEST_IN(dhe_rsa_with_aes_128_cbc_sha,            "TLS_DHE_RSA_WITH_AES_128_CBC_SHA");
+    TEST_IN(dhe_rsa_with_aes_256_cbc_sha,            "DHE-RSA-AES256-sha");
+    TEST_IN(rsa_with_aes_256_cbc_sha256,             "aes256-SHA256");
+    TEST_IN(rsa_with_aes_128_gcm_sha256,             "AES128-GCM-SHA256");
+    TEST_IN(ecdhe_ecdsa_with_aes_128_gcm_sha256,     "ECDHE-ECDSA-AES128-GCM-SHA256");
+    TEST_IN(ecdhe_ecdsa_with_aes_128_gcm_sha256,     "ecdhe_ecdsa_with_aes_128_gcm_sha256");
+    TEST_IN(ecdhe_rsa_with_aes_128_gcm_sha256,       "ecdhe_rsa_with_aes_128_gcm_sha256");
+    TEST_IN(ecdhe_rsa_with_aes_256_gcm_sha384,       "ecdhe_rsa_with_aes_256_gcm_sha384");
+    TEST_IN(ecdhe_rsa_with_chacha20_poly1305_sha256, "ecdhe_rsa_with_chacha20_poly1305_sha256");
 #undef TEST_IN
 }
 

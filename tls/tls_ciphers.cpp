@@ -6,6 +6,8 @@
 #include <rc4/rc4.h>
 #include <3des/3des.h>
 #include <aes/aes.h>
+#include <chacha/chacha.h>
+#include <poly1305/poly1305.h>
 #include <ostream>
 #include <cassert>
 
@@ -248,6 +250,76 @@ std::vector<uint8_t> aes_gcm_cipher::do_process(const std::vector<uint8_t>& data
     }
 }
 
+class chacha20_cipher : public tls::cipher {
+public:
+    explicit chacha20_cipher(const tls::cipher_parameters& parameters) : cipher(parameters) {
+    }
+private:
+    virtual std::vector<uint8_t> do_process(const std::vector<uint8_t>& data, const std::vector<uint8_t>& verbuffer) override;
+};
+
+void append_le_u64(std::vector<uint8_t>& b, uint64_t x) {
+    for (size_t i = 0; i < sizeof(x); ++i) {
+        b.push_back(static_cast<uint8_t>(x));
+        x >>= 8;
+    }
+}
+
+std::vector<uint8_t> do_poly1305(const std::vector<uint8_t>& key, const std::vector<uint8_t>& aad, const std::vector<uint8_t>& cipher_text)
+{
+    std::vector<uint8_t> buf = aad;
+    append_le_u64(buf, aad.size());
+    tls::append_to_buffer(buf, cipher_text);
+    append_le_u64(buf, cipher_text.size());
+    std::cout << "poly1305 buffer: " << util::base16_encode(buf) << std::endl;
+    return poly1305::poly1305(key, buf);
+}
+
+std::vector<uint8_t> chacha20_cipher::do_process(const std::vector<uint8_t>& data, const std::vector<uint8_t>& verbuffer) {
+    static constexpr unsigned tag_length = 16;
+
+    std::vector<uint8_t> nonce(4);//= parameters().fixed_iv();
+    nonce.insert(nonce.end(), &verbuffer[0], &verbuffer[8]);
+    assert(nonce.size() == chacha::nonce_length_bytes);
+    const auto& key = parameters().enc_key();
+    assert(key.size() == chacha::key_length_bytes);
+    const auto one_time_key = chacha::poly1305_key_gen(key, nonce);
+    std::cout << "nonce " << util::base16_encode(nonce) << std::endl;
+    std::cout << "key   " << util::base16_encode(key) << std::endl;
+    std::cout << "otk   " << util::base16_encode(one_time_key) << std::endl;
+
+    if (parameters().operation() == tls::cipher_parameters::decrypt) {
+        FUNTLS_CHECK_BINARY(data.size(), >=, tag_length, "Not enough data");
+        const std::vector<uint8_t> cipher_text(data.begin(), data.end() - tag_length);
+        const std::vector<uint8_t> message_tag(data.end() - tag_length, data.end());
+        auto vbuf = verbuffer;
+        assert(vbuf.size()==13);
+        vbuf[11] = static_cast<uint16_t>(cipher_text.size()>>8);
+        vbuf[12] = static_cast<uint16_t>(cipher_text.size());
+        std::cout << "ctext " << util::base16_encode(cipher_text) << std::endl;
+        std::cout << "aad   " << util::base16_encode(vbuf) << std::endl;
+        std::cout << "mtag  " << util::base16_encode(message_tag) << std::endl;
+        auto tag = do_poly1305(one_time_key, vbuf, cipher_text);
+        std::cout << "ctag  " << util::base16_encode(tag) << std::endl;
+        if (tag != message_tag) {
+            std::ostringstream msg;
+            msg << "Tag check failed. Expected " << util::base16_encode(tag) << " got '" << util::base16_encode(message_tag);
+            FUNTLS_CHECK_FAILURE(msg.str());
+        }
+        return chacha::chacha20(key, nonce, cipher_text);
+    } else {
+        assert(parameters().operation() == tls::cipher_parameters::encrypt);
+        auto res = chacha::chacha20(key, nonce, data);
+        std::cout << "res   " << util::base16_encode(res) << std::endl;
+        std::cout << "aad   " << util::base16_encode(verbuffer) << std::endl;
+        auto tag = do_poly1305(one_time_key, verbuffer, res);
+        assert(tag.size() == tag_length);
+        std::cout << "tag   " << util::base16_encode(tag) << std::endl;
+        tls::append_to_buffer(res, tag);
+        return res;
+    }
+}
+
 std::string cipher_suite_hex(tls::cipher_suite suite)
 {
     const uint8_t b[2] = { static_cast<uint8_t>(static_cast<uint16_t>(suite) >> 8), static_cast<uint8_t>(static_cast<uint16_t>(suite)) };
@@ -349,11 +421,12 @@ std::ostream& operator<<(std::ostream& os, prf_algorithm e)
 std::ostream& operator<<(std::ostream& os, bulk_cipher_algorithm e)
 {
     switch (e) {
-    case bulk_cipher_algorithm::null:    return os << "NULL";
-    case bulk_cipher_algorithm::rc4:     return os << "RC4";
-    case bulk_cipher_algorithm::_3des:   return os << "3DES";
-    case bulk_cipher_algorithm::aes_cbc: return os << "AES-CBC";
-    case bulk_cipher_algorithm::aes_gcm: return os << "AES-GCM";
+    case bulk_cipher_algorithm::null:     return os << "NULL";
+    case bulk_cipher_algorithm::rc4:      return os << "RC4";
+    case bulk_cipher_algorithm::_3des:    return os << "3DES";
+    case bulk_cipher_algorithm::aes_cbc:  return os << "AES-CBC";
+    case bulk_cipher_algorithm::aes_gcm:  return os << "AES-GCM";
+    case bulk_cipher_algorithm::chacha20: return os << "CHACHA20";
     }
     assert(false);
     return os << "Unknown TLS bulk cipher algorithm " << static_cast<unsigned>(e);
@@ -403,7 +476,8 @@ std::ostream& operator<<(std::ostream& os, mac_algorithm e)
         f(ecdhe_ecdsa_with_aes_128_gcm_sha256);\
         f(ecdhe_ecdsa_with_aes_256_gcm_sha384);\
         f(ecdhe_rsa_with_aes_128_gcm_sha256);\
-        f(ecdhe_rsa_with_aes_256_gcm_sha384);
+        f(ecdhe_rsa_with_aes_256_gcm_sha384);\
+        f(ecdhe_rsa_with_chacha20_poly1305_sha256);
 
 cipher_suite_parameters parameters_from_suite(cipher_suite suite)
 {
@@ -430,6 +504,8 @@ std::ostream& operator<<(std::ostream& os, cipher_suite suite)
         os << "AES_" << 8*csp.key_length << "_CBC";
     } else if (csp.bulk_cipher_algorithm == bulk_cipher_algorithm::aes_gcm) {
         os << "AES_" << 8*csp.key_length << "_GCM";
+    } else if (csp.bulk_cipher_algorithm == bulk_cipher_algorithm::chacha20) {
+        os << "CHACHA20_POLY1305";
     } else {
         assert(csp.bulk_cipher_algorithm == bulk_cipher_algorithm::null);
     }
@@ -491,6 +567,9 @@ std::istream& operator>>(std::istream& is, cipher_suite& suite)
         bits = 256;
     } else if (try_consume(text, "aes_256_cbc_") || try_consume(text, "aes256_")) {
         cipher_algo = bulk_cipher_algorithm::aes_cbc;
+        bits = 256;
+    } else if (try_consume(text, "chacha20_poly1305_")) {
+        cipher_algo = bulk_cipher_algorithm::chacha20;
         bits = 256;
     } else {
         FUNTLS_CHECK_FAILURE("Could not parse block cipher algorithm from " + saved_text);
@@ -573,6 +652,8 @@ std::unique_ptr<cipher> make_cipher(const cipher_parameters& parameters)
         return std::unique_ptr<cipher>{new aes_cbc_cipher(parameters)};
     } else if (bca == tls::bulk_cipher_algorithm::aes_gcm) {
         return std::unique_ptr<cipher>{new aes_gcm_cipher(parameters)};
+    } else if (bca == tls::bulk_cipher_algorithm::chacha20) {
+        return std::unique_ptr<cipher>{new chacha20_cipher(parameters)};
     } else {
         std::ostringstream oss;
         oss << "Unsupported bulk_cipher_algorithm '" << bca << "'";
