@@ -104,15 +104,22 @@ public:
     static void divmod(biguint& quot, biguint& rem, const biguint& lhs, const biguint& rhs);
     static biguint& pow(biguint& res, const biguint& lhs, const biguint& rhs, const biguint& mod);
 
+    biguint operator&(const biguint& mask) const {
+        biguint res(*this);
+        res &= mask;
+        return res;
+    }
     limb_type operator&(limb_type mask) const {
         if (!size_) return 0;
         return v_[0] & mask;
     }
+    biguint& operator&=(const biguint& rhs);
     biguint& operator|=(limb_type bits) {
         if (bits) {
             if (!size_) v_[size_++] = 0;
             v_[0] |= bits;
         }
+        check_repr();
         return *this;
     }
 
@@ -136,6 +143,8 @@ private:
 #else
     void check_repr() const;
 #endif
+
+    static limb_type div_guess(const biguint& rem, const biguint& rhs);
 };
 
 inline bool operator==(const biguint& lhs, const biguint& rhs) {

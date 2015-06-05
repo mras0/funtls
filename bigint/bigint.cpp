@@ -5,6 +5,30 @@
 #include <algorithm>
 #include <string.h>
 
+//#define DIVIDE_DEBUG
+
+#ifdef DIVIDE_DEBUG
+#include <iostream>
+#include <iomanip>
+struct wrapped {
+    wrapped(funtls::bigint::biguint::dlimb_type i) : i(i){}
+    funtls::bigint::biguint::dlimb_type i;
+    friend std::ostream& operator<<(std::ostream& os, wrapped w) {
+        assert(std::ios::hex == (os.flags() & std::ios::basefield));
+        uint64_t hi = static_cast<funtls::bigint::biguint::limb_type>(w.i>>funtls::bigint::biguint::limb_bits);
+        uint64_t lo = static_cast<funtls::bigint::biguint::limb_type>(w.i);
+        if (!hi) {
+            return os << lo;
+        }
+        os << hi;
+        const auto fill = os.fill();
+        os << std::setfill('0') << std::setw(funtls::bigint::biguint::limb_bits/4) << lo;
+        os << std::setfill(fill);
+        return os;
+    }
+};
+#endif
+
 namespace funtls { namespace bigint {
 
 constexpr biguint::size_type biguint::max_size;
@@ -206,6 +230,45 @@ biguint& biguint::mod(biguint& res, const biguint& lhs, const biguint& rhs)
     return res;
 }
 
+biguint::limb_type biguint::div_guess(const biguint& rem, const biguint& rhs)
+{
+    assert(rem >= rhs);
+    dlimb_type rem_msl = dlimb_type(rem.v_[rem.size_-1]) << limb_bits;
+    if (rem.size_ > 1) {
+        rem_msl |= rem.v_[rem.size_-2];
+    }
+    dlimb_type rhs_msl = dlimb_type(rhs.v_[rhs.size_-1]);
+    if (rem.size_ == rhs.size_) {
+        rhs_msl <<= limb_bits;
+        if (rhs.size_ > 1) {
+            rhs_msl |= rhs.v_[rhs.size_-2];
+        }
+    }
+
+#ifdef DIVIDE_DEBUG
+    //std::cout << " rem " << rem;
+    //std::cout << " rem_msl " << wrapped(rem_msl);
+    //std::cout << " rhs_msl " << wrapped(rhs_msl);
+    //std::cout << std::flush;
+#endif
+    assert(rem_msl >= rhs_msl);
+    dlimb_type guess = rem_msl / rhs_msl;
+#ifdef DIVIDE_DEBUG
+    //std::cout << " guess " << wrapped(guess);
+#endif
+
+    static constexpr limb_type limb_max = ~limb_type(0);
+    if (guess > limb_max) {
+        guess = limb_max;
+#ifdef DIVIDE_DEBUG
+        //std::cout << " guess " << wrapped(guess);
+        //std::cout << std::flush;
+#endif
+    }
+
+    return static_cast<limb_type>(guess);
+}
+
 void biguint::divmod(biguint& quot, biguint& rem, const biguint& lhs, const biguint& rhs)
 {
     assert(&quot != &rem);
@@ -317,7 +380,10 @@ void biguint::divmod(biguint& quot, biguint& rem, const biguint& lhs, const bigu
         }
     }
 #else
-    //std::cout << std::hex << "lhs " << lhs << " rhs " << rhs << std::endl;
+
+#ifdef DIVIDE_DEBUG
+    std::cout << std::hex << std::uppercase << "lhs " << lhs << " rhs " << rhs << std::endl;
+#endif
     for (size_type i = lhs.size_; i--;) {
         rem <<= limb_bits;
         rem |= lhs.v_[i];
@@ -327,56 +393,60 @@ void biguint::divmod(biguint& quot, biguint& rem, const biguint& lhs, const bigu
             continue;
         }
 
-        dlimb_type rem_msl = rem.v_[rem.size_-1];
-        const limb_type rhs_msl = rhs.v_[rhs.size_-1];
-        if (rem.size_ != rhs.size_) {
-            assert(rem.size_ >= 2);
-            assert(rem.size_ == rhs.size_+1);
-            rem_msl <<= limb_bits;
-            rem_msl |= rem.v_[rem.size_-2];
-        }
-        assert(rem_msl >= rhs_msl);
-        assert(rem >= rhs);
-
-        //int padj = 0, madj = 0;
-
-        //std::cout << std::hex;
-
-        static constexpr limb_type limb_max = ~limb_type(0);
-
-        //std::cout << " rem " << rem;
-        //std::cout << " rem_msl " << (uint64_t)rem_msl;
-        //std::cout << " rhs_msl " << (uint64_t)rhs_msl;
-        auto guess = rem_msl / rhs_msl;
-        //std::cout << " guess " << (uint64_t)guess;
-        if (guess > limb_max) guess = limb_max;
-
-        quot.v_[i] = guess;
+        quot.v_[i] = div_guess(rem, rhs);
         assert(quot.v_[i]);
         biguint tmp = quot.v_[i] * rhs;
-        //std::cout << " quot[i] " << (uint64_t)quot.v_[i];
-        //std::cout << " tmp " << tmp;
+#ifdef DIVIDE_DEBUG
+        std::cout << " quot[i] " << wrapped(quot.v_[i]);
+        std::cout << " tmp " << tmp;
+        unsigned padj = 0, madj = 0;
+#endif
         while (tmp > rem) {
-            //std::cout << "\n tmp-rem " << biguint(tmp-rem);
-            //++madj;
-            quot.v_[i]--;
-            tmp = tmp - rhs;
+            biguint error = tmp - rem;
+#ifdef DIVIDE_DEBUG
+            std::cout << "\n  error " << error << std::flush;
+#endif
+            if (error < rhs) {
+                quot.v_[i]--;
+                tmp = tmp - rhs;
+                break;
+            }
+            const limb_type guess2 = div_guess(error, rhs);
+            const biguint tmp2 = guess2 * rhs;
+#ifdef DIVIDE_DEBUG
+            std::cout << " guess2 " << wrapped(guess2) << " tmp2 " << tmp2 << std::flush;
+            ++madj;
+#endif
+            quot.v_[i] -= guess2;
+            tmp = tmp - tmp2;
         }
         assert(tmp <= rem);
         rem = rem - tmp;
         while (rem >= rhs) {
-            //std::cout << "\n rem-rhs " << biguint(rem-rhs);
-            //++padj;
-            quot.v_[i]++;
-            rem = rem - rhs;
+#ifdef DIVIDE_DEBUG
+            std::cout << "\n  error -" << biguint(rem-rhs);
+            ++padj;
+#endif
+            limb_type guess2 = div_guess(rem-rhs, rhs);
+            biguint tmp2 = guess2*rhs;
+#ifdef DIVIDE_DEBUG
+            std::cout << " guess2 " << wrapped(guess2) << " tmp2 " << tmp2 << std::flush;
+#endif
+            quot.v_[i] += guess2;
+            rem = rem - tmp2;
         }
-        //std::cout << std::endl;
+#ifdef DIVIDE_DEBUG
+        std::cout << std::endl;
+#endif
         assert(rem < rhs);
-        //if (madj+padj) {
-        //    std::cout << std::dec << "madj = " << madj << " padj = " << padj << std::endl;
-        //    std::cout << "Final quot:"  << std::hex << (uint64_t)quot.v_[i] << std::endl;
-        //    if((madj&&padj) || madj+padj>4)abort();
-        //}
+        assert(quot.v_[i]);
+#ifdef DIVIDE_DEBUG
+        if (madj+padj) {
+            std::cout << "madj = " << madj << " padj = " << padj << std::endl;
+            std::cout << "Final quot: "  << wrapped(quot.v_[i]) << std::endl;
+            if((madj&&padj) || madj+padj>2)abort();
+        }
+#endif
     }
 #endif
 
@@ -510,4 +580,15 @@ std::ostream& operator<<(std::ostream& os, const biguint& ui)
     return os;
 }
 
+biguint& biguint::operator&=(const biguint& rhs) {
+    if (size_ > rhs.size_) size_ = rhs.size_;
+    if (size_) {
+        for (auto i = size_; i--;) {
+            v_[i] &= rhs.v_[i];
+        }
+        trim();
+    }
+    check_repr();
+    return *this;
+}
 } } // namespace funtls::bigint

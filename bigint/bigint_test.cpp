@@ -305,16 +305,54 @@ void test_bitops()
         FUNTLS_ASSERT_EQUAL(t.expected, to_hex<impl>(a << t.shift));
     }
 
-#define CHECK_MASK(src, mask, expected) do { \
-    impl res = from_hex<impl>(src) & mask;  \
-    FUNTLS_ASSERT_EQUAL(expected, to_hex(res));\
-} while(0)
-
-    CHECK_MASK("ABCD", 0xFF, "CD");
-    CHECK_MASK("FFFFFF", 0x01, "1");
-    CHECK_MASK("FFFFFF", 0x03, "3");
-    CHECK_MASK("FFFFFF", 0x88, "88");
-
+    static const struct {
+        std::string a;
+        uint8_t b;
+        std::string expected;
+    } and_u8_test_cases[] = {
+        {"0", 0, "0"},
+        {"FFFFF", 0, "0"},
+        {"ABCD", 0xFF, "CD"},
+        {"FFFFFF", 0x01, "1"},
+        {"FFFFFF", 0x03, "3"},
+        {"FFFFFF", 0x88, "88"},
+        {max_int_s, 0x0, "0"},
+        {max_int_s, 0xA8, "A8"},
+        {max_int_s, 0xE8, "E8" },
+    };
+    for (const auto& t : and_u8_test_cases) {
+        auto a = from_hex<impl>(t.a);
+        auto b = t.b;
+        FUNTLS_ASSERT_EQUAL(t.expected, to_hex<impl>(a & b));
+        a &= b;
+        FUNTLS_ASSERT_EQUAL(t.expected, to_hex(a));
+    }
+    static const struct {
+        std::string a;
+        std::string b;
+        std::string expected;
+    } and_test_cases[] = {
+        {"0", "0", "0"},
+        {"FFFFF", "0", "0"},
+        {"0", "FFFFF", "0"},
+        {"ABCD", "FF", "CD"},
+        {"FFFFFF", "01", "1"},
+        {"FFFFFF", "03", "3"},
+        {"FFFFFF", "88", "88"},
+        {max_int_s, "0", "0"},
+        {max_int_s, "A8", "A8"},
+        {"0", max_int_s, "0"},
+        {"21", max_int_s, "21"},
+        {max_int_s, "E8", "E8" },
+        {max_int_s, max_int_s, max_int_s},
+    };
+    for (const auto& t : and_test_cases) {
+        auto a = from_hex<impl>(t.a);
+        auto b = from_hex<impl>(t.b);
+        FUNTLS_ASSERT_EQUAL_MESSAGE(t.expected, to_hex<impl>(a & b), "a " + t.a + " b " + t.b);
+        a &= b;
+        FUNTLS_ASSERT_EQUAL(t.expected, to_hex(a));
+    }
     static const struct {
         const char* a;
         uint8_t b;
@@ -429,7 +467,10 @@ void test_divmod()
         { "B6D1", "C30", "1" },
         { "123456789ABCDEF", "100", "EF" },
         { "123172393182310DEAC", "100", "AC" },
+        { "39AABC8699", "3A8F05C5", "5F2D8AD" },
         { "1D9BA2363749990", "3A8F05C5", "52178E" },
+        { "383FE991CA66800489155DCD69E8426C427", "3FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFB", "3FE991CA66800489155DCD69E8426C887" },
+        { "B83FE991CA66800489155DCD69E8426BA2779453994AC90ED284034DA565ECF", "3FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFB", "2C88C77849D64AE9147DDEB88E69C83FC" },
     };
     for (const auto& t : mod_test_cases) {
         const auto a = from_hex<impl>(t.a);
