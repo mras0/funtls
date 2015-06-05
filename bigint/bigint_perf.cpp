@@ -191,6 +191,7 @@ void report(const results_t& results)
     std::cout << std::left;
     std::cout << std::endl;
     std::cout << std::string(namew + sizeof(titles)/sizeof(*titles) * (resw+1), '-') << std::endl;
+    std::cout << std::dec;
     for (const auto& res : results) {
         auto ts = res.second;
         std::sort(ts.begin(), ts.end());
@@ -202,13 +203,13 @@ void report(const results_t& results)
         const double stdandard_deviation = sqrt(sum_deviation2 / ts.size());
         std::cout << std::setw(namew) << res.first;
         std::cout << std::right;
-        std::cout << " " << std::setw(resw) << (int64_t)ts[0];
-        std::cout << " " << std::setw(resw) << (int64_t)ts[ts.size()/4];
-        std::cout << " " << std::setw(resw) << (int64_t)ts[ts.size()/2];
-        std::cout << " " << std::setw(resw) << (int64_t)ts[ts.size()*3/4];
-        std::cout << " " << std::setw(resw) << (int64_t)ts[ts.size()-1];
-        std::cout << " " << std::setw(resw) << mean;
-        std::cout << " " << std::setw(resw) << stdandard_deviation;
+        std::cout << " " << std::setw(resw) << (uint64_t)ts[0];
+        std::cout << " " << std::setw(resw) << (uint64_t)ts[ts.size()/4];
+        std::cout << " " << std::setw(resw) << (uint64_t)ts[ts.size()/2];
+        std::cout << " " << std::setw(resw) << (uint64_t)ts[ts.size()*3/4];
+        std::cout << " " << std::setw(resw) << (uint64_t)ts[ts.size()-1];
+        std::cout << " " << std::setw(resw) << (uint64_t)mean;
+        std::cout << " " << std::setw(resw) << (uint64_t)stdandard_deviation;
         std::cout << std::left;
         std::cout << std::endl;
     }

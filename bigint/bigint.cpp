@@ -180,11 +180,31 @@ biguint& biguint::mul(biguint& res, const biguint& lhs, const biguint& rhs)
     const auto rs = rhs.size_;
 
     //
-    // Handle trivial case
-    // TODO: Handle ls == 1 || rs == 1
+    // Handle trivial cases
     //
     if (ls == 1 && rs == 1) {
         return res = static_cast<dlimb_type>(lhs.v_[0]) * rhs.v_[0];
+    } else if (ls == 1 || rs == 1) {
+        limb_type m;
+        if (ls == 1) {
+            m = lhs.v_[0];
+            if (&res != &rhs) res = rhs;
+        } else {
+            m = rhs.v_[0];
+            if (&res != &lhs) res = lhs;
+        }
+        dlimb_type carry = 0;
+        for (size_type i = 0; i < res.size_; ++i) {
+            carry += static_cast<dlimb_type>(res.v_[i]) * m;
+            res.v_[i] = static_cast<limb_type>(carry);
+            carry >>= limb_bits;
+        }
+        if (carry && res.size_ < biguint::max_size) {
+            assert((carry>>limb_bits)==0);
+            res.v_[res.size_++] = static_cast<limb_type>(carry);
+        }
+        res.check_repr();
+        return res;
     }
 
     if (&res == &lhs || &res == &rhs) {
@@ -399,8 +419,8 @@ void biguint::divmod(biguint& quot, biguint& rem, const biguint& lhs, const bigu
 #ifdef DIVIDE_DEBUG
         std::cout << " quot[i] " << wrapped(quot.v_[i]);
         std::cout << " tmp " << tmp;
-        unsigned padj = 0, madj = 0;
 #endif
+        unsigned padj = 0, madj = 0;
         while (tmp > rem) {
             biguint error = tmp - rem;
 #ifdef DIVIDE_DEBUG
@@ -415,8 +435,8 @@ void biguint::divmod(biguint& quot, biguint& rem, const biguint& lhs, const bigu
             const biguint tmp2 = guess2 * rhs;
 #ifdef DIVIDE_DEBUG
             std::cout << " guess2 " << wrapped(guess2) << " tmp2 " << tmp2 << std::flush;
-            ++madj;
 #endif
+            ++madj;
             quot.v_[i] -= guess2;
             tmp = tmp - tmp2;
         }
@@ -425,8 +445,8 @@ void biguint::divmod(biguint& quot, biguint& rem, const biguint& lhs, const bigu
         while (rem >= rhs) {
 #ifdef DIVIDE_DEBUG
             std::cout << "\n  error -" << biguint(rem-rhs);
-            ++padj;
 #endif
+            ++padj;
             limb_type guess2 = div_guess(rem-rhs, rhs);
             biguint tmp2 = guess2*rhs;
 #ifdef DIVIDE_DEBUG
@@ -447,6 +467,8 @@ void biguint::divmod(biguint& quot, biguint& rem, const biguint& lhs, const bigu
             if((madj&&padj) || madj+padj>2)abort();
         }
 #endif
+        assert(!(madj && padj));
+        assert(madj+padj <= 2);
     }
 #endif
 
