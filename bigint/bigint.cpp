@@ -652,7 +652,7 @@ bool miller_rabin_test(const biguint& n, unsigned g)
 {
     assert(g > 1);
     if (n < 2) return false;        // 0,1  -> not prime
-    if (n < 3) return true;         // 2,3  -> prime
+    if (n < 4) return true;         // 2,3  -> prime
     if ((n & 1) == 0) return false; // even -> not prime
 
     // write n − 1 as 2**s * d with d odd by factoring powers of 2 from n − 1
