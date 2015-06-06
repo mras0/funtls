@@ -5,19 +5,11 @@
 #include <vector>
 #include <cassert>
 
-#ifdef USE_FUNTLS_BIGINT
-#include <bigint/bigint.h>
-#else
-#include <boost/multiprecision/cpp_int.hpp>
-#endif
+#include <int_util/int.h>
 
 namespace funtls { namespace ec {
 
-#ifdef USE_FUNTLS_BIGINT
-using field_elem = funtls::bigint::biguint;
-#else
-using field_elem = boost::multiprecision::cpp_int;
-#endif
+using field_elem = large_uint;
 
 struct point {
     field_elem x;

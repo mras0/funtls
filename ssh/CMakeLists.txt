@@ -6,7 +6,7 @@ add_library(ssh STATIC ssh.cpp)
 target_link_libraries(ssh util)
 
 add_executable(ssh_test ssh_test.cpp)
-target_link_libraries(ssh_test util ssh boost)
+target_link_libraries(ssh_test util ssh boost int_util)
 add_test(ssh_test ssh_test)
 
 add_executable(ssh_client ssh_client.cpp)

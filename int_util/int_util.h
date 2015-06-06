@@ -1,9 +1,10 @@
-#ifndef UTIL_INT_UTIL_H_INCLUDED
-#define UTIL_INT_UTIL_H_INCLUDED
+#ifndef INT_UTIL_INT_UTIL_H_INCLUDED
+#define INT_UTIL_INT_UTIL_H_INCLUDED
 
 #include <cassert>
 #include <vector>
 #include <util/random.h>
+#include <stdint.h>
 
 #ifndef USE_FUNTLS_BIGINT
 #include <boost/multiprecision/miller_rabin.hpp>

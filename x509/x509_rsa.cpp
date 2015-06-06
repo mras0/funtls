@@ -3,16 +3,9 @@
 #include <util/base_conversion.h>
 #include <util/buffer.h>
 #include <util/random.h>
-#include <util/int_util.h>
+#include <int_util/int.h>
+#include <int_util/int_util.h>
 #include <hash/hash.h>
-
-#ifdef USE_FUNTLS_BIGINT
-#include <bigint/bigint.h>
-using int_type = funtls::bigint::biguint;
-#else
-#include <boost/multiprecision/cpp_int.hpp>
-using int_type = boost::multiprecision::cpp_int;
-#endif
 
 using namespace funtls;
 
@@ -81,12 +74,12 @@ digest_info pkcs1_decode(const rsa_public_key& pk, const std::vector<uint8_t>& d
     // See 9.2 EMSA-PKCS1-v1_5 in RFC3447
 
     // The encrypted signature is stored as a base-256 encoded number in the bitstring
-    const auto sig_int  = x509::base256_decode<int_type>(data);
+    const auto sig_int  = x509::base256_decode<large_uint>(data);
     const size_t em_len = data.size(); // encrypted message length
     FUNTLS_CHECK_BINARY(pk.key_length(), ==, em_len, "Invalid PKCS#1 1.5 signature");
 
     // Decode the signature using the issuers public key (here using the subjects PK since the cert is selfsigned)
-    int_type d = powm(sig_int, pk.public_exponent.as<int_type>(), pk.modulus.as<int_type>());
+    large_uint d = powm(sig_int, pk.public_exponent.as<large_uint>(), pk.modulus.as<large_uint>());
     const auto decoded = x509::base256_encode(d, em_len);
 
     // EM = 0x00 || 0x01 || PS || 0x00 || T (T=DER encoded DigestInfo)
@@ -120,8 +113,8 @@ digest_info pkcs1_decode(const rsa_public_key& pk, const std::vector<uint8_t>& d
 
 std::vector<uint8_t> pkcs1_encode(const rsa_private_key& key, const std::vector<uint8_t>& message)
 {
-    const auto n = key.modulus.as<int_type>();
-    const auto d = key.private_exponent.as<int_type>();
+    const auto n = key.modulus.as<large_uint>();
+    const auto d = key.private_exponent.as<large_uint>();
     const size_t k = ilog256(n);
 
     std::vector<uint8_t> EM(k-message.size());
@@ -134,18 +127,18 @@ std::vector<uint8_t> pkcs1_encode(const rsa_private_key& key, const std::vector<
     EM.insert(EM.end(), std::begin(message), std::end(message));
     assert(EM.size()==k);
     // 3.a
-    const auto m = x509::base256_decode<int_type>(EM); // m = OS2IP (EM)
+    const auto m = x509::base256_decode<large_uint>(EM); // m = OS2IP (EM)
     assert(m < n); // Is the message too long?
     // 3.b
-    const int_type c = powm(m, d, n);
+    const large_uint c = powm(m, d, n);
     return x509::base256_encode(c, k);
 }
 
 std::vector<uint8_t> pkcs1_encode(const rsa_public_key& key, const std::vector<uint8_t>& message)
 {
     FUNTLS_CHECK_BINARY(key.key_length() & (key.key_length()-1), ==, 0, "Non pow2 key length?");
-    const auto n = key.modulus.as<int_type>();
-    const auto e = key.public_exponent.as<int_type>();
+    const auto n = key.modulus.as<large_uint>();
+    const auto e = key.public_exponent.as<large_uint>();
 
     // Perform RSAES-PKCS1-V1_5-ENCRYPT (http://tools.ietf.org/html/rfc3447 7.2.1)
 
@@ -169,12 +162,12 @@ std::vector<uint8_t> pkcs1_encode(const rsa_public_key& key, const std::vector<u
     assert(EM.size()==k);
 
     // 3.a
-    const auto m = x509::base256_decode<int_type>(EM); // m = OS2IP (EM)
+    const auto m = x509::base256_decode<large_uint>(EM); // m = OS2IP (EM)
     assert(m < n); // Is the message too long?
     //std::cout << "m (" << EM.size() << ") = " << util::base16_encode(EM) << std::dec << "\n";
 
     // 3.b
-    const int_type c = powm(m, e, n); // c = RSAEP ((n, e), m)
+    const large_uint c = powm(m, e, n); // c = RSAEP ((n, e), m)
     //std::cout << "c:\n" << c << std::endl;
 
     // 3.c Convert the ciphertext representative c to a ciphertext C of length k octets

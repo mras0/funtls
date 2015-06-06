@@ -168,5 +168,4 @@ int main()
     base64_test();
     buffer_test();
     test_buffer_getters();
-    // TODO: Test int_util
 }

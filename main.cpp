@@ -14,18 +14,10 @@
 #include <util/base_conversion.h>
 #include <util/test.h>
 #include <util/buffer.h>
-#include <util/int_util.h>
+#include <int_util/int_util.h>
 #include <tls/tls.h>
 #include <tls/tls_ecc.h>
 #include <tls/tls_kex.h>
-
-#ifdef USE_FUNTLS_BIGINT
-#include <bigint/bigint.h>
-using int_type = funtls::bigint::biguint;
-#else
-#include <boost/multiprecision/cpp_int.hpp>
-using int_type = boost::multiprecision::cpp_int;
-#endif
 
 using namespace funtls;
 

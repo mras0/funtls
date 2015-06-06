@@ -6,7 +6,7 @@
 #include <algorithm>
 #include <math.h>
 #include <util/test.h>
-#include <util/int_util.h>
+#include <int_util/int_util.h>
 
 constexpr size_t test_max_bits = 4096;
 constexpr int    test_times    = 20;

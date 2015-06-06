@@ -3,27 +3,20 @@
 #include <ssh/ssh.h>
 #include <util/test.h>
 #include <util/base_conversion.h>
-#include <util/int_util.h>
+#include <int_util/int_util.h>
 #include <x509/x509_rsa.h>
 #include <x509/x509_io.h>
 #include <hash/hash.h>
 #include <aes/aes.h>
 
-#ifdef USE_FUNTLS_BIGINT
-#include <bigint/bigint.h>
-using int_type = funtls::bigint::biguint;
-#else
-#include <boost/multiprecision/cpp_int.hpp>
-using int_type = boost::multiprecision::cpp_int;
-#endif
-
+#include <int_util/int.h>
 using namespace funtls;
 
 namespace {
 
 // From http://tools.ietf.org/html/rfc3526
 int modp2048_g = 2;
-int_type modp2048_p("0x"
+large_uint modp2048_p("0x"
 "FFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD1"
 "29024E088A67CC74020BBEA63B139B22514A08798E3404DD"
 "EF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245"
@@ -364,12 +357,12 @@ void test_client(const char* host, const char* port, const char* user_name, cons
         // Do kexdh_init
         // http://tools.ietf.org/html/rfc4253#section-8
         //  1. C generates a random number x (1 < x < q) and computes e = g^x mod p.  C sends e to S.
-        const int_type& p = modp2048_p;
+        const large_uint& p = modp2048_p;
         std::cout << "x " << std::flush;
-        int_type x = rand_positive_int_less(p);
+        large_uint x = rand_positive_int_less(p);
         std::cout << x << std::endl;
         std::cout << "e " << std::flush;
-        int_type e = powm(int_type(modp2048_g), x, p);
+        large_uint e = powm(large_uint(modp2048_g), x, p);
         std::cout << e << std::endl;
         auto e_bytes = be_uint_to_bytes(e, ilog256(modp2048_p));
         if (e_bytes[0]&0x80) e_bytes.insert(e_bytes.begin(), 0);
@@ -386,7 +379,7 @@ void test_client(const char* host, const char* port, const char* user_name, cons
         const auto f = ssh::get_string(kexdh_reply);
         const auto sig_H = ssh::get_string(kexdh_reply);
 
-        K = mpint_to_string(int_type(powm(ssh::string_to_int<int_type>(f), x, p)), ilog256(p));
+        K = mpint_to_string(large_uint(powm(ssh::string_to_int<large_uint>(f), x, p)), ilog256(p));
 
         buffer_builder hashb;
         put_string(hashb, client_id);

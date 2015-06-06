@@ -1,7 +1,7 @@
 #include "tls_ecc.h"
 #include <util/test.h>
 #include <util/base_conversion.h>
-#include <util/int_util.h>
+#include <int_util/int_util.h>
 #include <ec/ec.h>
 
 namespace funtls { namespace tls {

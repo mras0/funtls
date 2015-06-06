@@ -8,13 +8,7 @@
 #include <iomanip>
 #include <array>
 
-#ifdef USE_FUNTLS_BIGINT
-#include <bigint/bigint.h>
-using int_type = funtls::bigint::biguint;
-#else
-#include <boost/multiprecision/cpp_int.hpp>
-using int_type = boost::multiprecision::cpp_int;
-#endif
+#include <int_util/int.h>
 
 #include <util/base_conversion.h>
 #include <util/buffer.h>
@@ -111,7 +105,7 @@ void test_cert()
     const auto cert0 = x509::read_pem_certificate_from_string(test_cert0);
     x509::verify_x509_signature(cert0, cert0);
     test_load_save(test_cert0);
-    FUNTLS_ASSERT_EQUAL(int_type("11259235216357634699"), cert0.tbs().serial_number.as<int_type>());
+    FUNTLS_ASSERT_EQUAL(large_uint("11259235216357634699"), cert0.tbs().serial_number.as<large_uint>());
     FUNTLS_ASSERT_EQUAL(x509::id_sha256WithRSAEncryption, cert0.tbs().signature_algorithm.id());
     FUNTLS_ASSERT_EQUAL(2, cert0.tbs().signature_algorithm.parameters().size());
     FUNTLS_ASSERT_EQUAL(util::base16_decode("0500"), cert0.tbs().signature_algorithm.parameters());
@@ -161,7 +155,7 @@ void test_cert()
     const auto cert3 = x509::read_pem_certificate_from_string(test_cert3);
     std::ostringstream cert3_subject_name;
     cert3_subject_name << cert3.tbs().subject;
-    FUNTLS_ASSERT_EQUAL(int_type("0x055556bcf25ea43535c3a40fd5ab4572"), cert3.tbs().serial_number.as<int_type>());
+    FUNTLS_ASSERT_EQUAL(large_uint("0x055556bcf25ea43535c3a40fd5ab4572"), cert3.tbs().serial_number.as<large_uint>());
     FUNTLS_ASSERT_EQUAL(cert3_subject_name.str(), test_cert3_subject_name);
     FUNTLS_ASSERT_EQUAL(cert3.tbs().issuer, cert3.tbs().subject);
     FUNTLS_ASSERT_EQUAL(x509::id_ecdsaWithSHA384, cert3.tbs().signature_algorithm.id());
@@ -218,7 +212,7 @@ void test_pkey()
     auto pkey = x509::rsa_private_key_from_pki(pki);
 
 #if 0
-#define P(f) std::cout << #f << " " << std::hex << pkey.f.as<int_type>() << std::endl
+#define P(f) std::cout << #f << " " << std::hex << pkey.f.as<large_uint>() << std::endl
     P(version);
     P(modulus);
     P(public_exponent);

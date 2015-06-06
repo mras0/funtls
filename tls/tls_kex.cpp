@@ -3,19 +3,14 @@
 #include <x509/x509_ec.h>
 #include <util/test.h>
 #include <util/base_conversion.h>
-#include <util/int_util.h>
+#include <int_util/int_util.h>
 #include "tls_ecc.h"
 #include <ec/ec.h>
 
 #include <iostream>
 
-#ifdef USE_FUNTLS_BIGINT
-#include <bigint/bigint.h>
-using int_type = funtls::bigint::biguint;
-#else
-#include <boost/multiprecision/cpp_int.hpp>
-using int_type = boost::multiprecision::cpp_int;
-#endif
+#include <int_util/int.h>
+
 using namespace funtls;
 
 namespace {
@@ -179,15 +174,15 @@ void dhe_rsa_client_kex_protocol::do_server_key_exchange(const handshake& ske)
 dhe_rsa_client_kex_protocol::result_type dhe_rsa_client_kex_protocol::do_result() const
 {
     if (!server_dh_params_) FUNTLS_CHECK_FAILURE("");
-    const int_type p  = x509::base256_decode<int_type>(server_dh_params_->dh_p.as_vector());
-    const int_type g  = x509::base256_decode<int_type>(server_dh_params_->dh_g.as_vector());
-    const int_type Ys = x509::base256_decode<int_type>(server_dh_params_->dh_Ys.as_vector());
+    const large_uint p  = x509::base256_decode<large_uint>(server_dh_params_->dh_p.as_vector());
+    const large_uint g  = x509::base256_decode<large_uint>(server_dh_params_->dh_g.as_vector());
+    const large_uint Ys = x509::base256_decode<large_uint>(server_dh_params_->dh_Ys.as_vector());
     const size_t key_size = server_dh_params_->dh_p.size();
-    const int_type private_key = rand_positive_int_less(p);
+    const large_uint private_key = rand_positive_int_less(p);
 
     //std::cout << "DHE client private key: " << std::hex << private_key << std::dec << std::endl;
 
-    const int_type Yc = powm(g, private_key, p);
+    const large_uint Yc = powm(g, private_key, p);
     const auto dh_Yc  = x509::base256_encode(Yc, key_size);
 
     //std::cout << "dh_Yc = " << util::base16_encode(dh_Yc) << std::endl;
@@ -195,7 +190,7 @@ dhe_rsa_client_kex_protocol::result_type dhe_rsa_client_kex_protocol::do_result(
     client_key_exchange_dhe_rsa client_key_exchange{dh_Yc};
     auto handshake = make_handshake(client_key_exchange);
 
-    const int_type Z = powm(Ys, private_key, p);
+    const large_uint Z = powm(Ys, private_key, p);
     auto dh_Z  = x509::base256_encode(Z, key_size);
     //std::cout << "Negotaited key = " << util::base16_encode(dh_Z) << std::endl;
     return std::make_pair(std::move(dh_Z), std::move(handshake));

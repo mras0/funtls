@@ -1,7 +1,7 @@
 #include <ec/ec.h>
 #include <util/base_conversion.h>
 #include <util/test.h>
-#include <util/int_util.h>
+#include <int_util/int_util.h>
 
 #include <iostream>
 

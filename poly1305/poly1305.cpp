@@ -2,16 +2,12 @@
 #include <util/test.h>
 #include <string.h>
 
-#ifdef USE_FUNTLS_BIGINT
-#include <bigint/bigint.h>
-using int_type = funtls::bigint::biguint;
-#else
-#include <boost/multiprecision/cpp_int.hpp>
-using int_type = boost::multiprecision::cpp_int;
-#endif
+#include <int_util/int.h>
+
+using namespace funtls;
 
 namespace {
-void append_le_bytes(int_type& res, const uint8_t* n, size_t size = 16)
+void append_le_bytes(large_uint& res, const uint8_t* n, size_t size = 16)
 {
     while (size--) {
         res <<= 8;
@@ -19,8 +15,8 @@ void append_le_bytes(int_type& res, const uint8_t* n, size_t size = 16)
     }
 }
 
-const int_type r_clamp_mask("0x0ffffffc0ffffffc0ffffffc0fffffff");
-const int_type P("0x3fffffffffffffffffffffffffffffffb"); // 2^130-5
+const large_uint r_clamp_mask("0x0ffffffc0ffffffc0ffffffc0fffffff");
+const large_uint P("0x3fffffffffffffffffffffffffffffffb"); // 2^130-5
 }
 
 namespace funtls { namespace poly1305 {
@@ -30,7 +26,7 @@ std::vector<uint8_t> poly1305(const std::vector<uint8_t>& key, const std::vector
     FUNTLS_CHECK_BINARY(key.size(), ==, key_length_bytes, "Invalid key length. Must be 32 bytes.");
 
     // Partition the key in to two parts
-    int_type r = 0, s = 0;
+    large_uint r = 0, s = 0;
     append_le_bytes(r, &key[0]);
     r &= r_clamp_mask;
     append_le_bytes(s, &key[16]);
@@ -39,7 +35,7 @@ std::vector<uint8_t> poly1305(const std::vector<uint8_t>& key, const std::vector
     std::cout << "s " << std::hex << s << std::endl;
 #endif
 
-    int_type accumulator = 0;
+    large_uint accumulator = 0;
 
     // Divide the message into 16-byte blocks
     for (size_t i = 0; i < message.size(); i += block_length_bytes) {
@@ -47,7 +43,7 @@ std::vector<uint8_t> poly1305(const std::vector<uint8_t>& key, const std::vector
 
         // Read the block as a little-endian number
         // Add one bit beyond the number of octets.
-        int_type n = 1;
+        large_uint n = 1;
         append_le_bytes(n, &message[i], this_block);
 
         accumulator += n;

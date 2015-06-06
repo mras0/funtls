@@ -508,7 +508,7 @@ void test_divmod()
     FUNTLS_ASSERT_EQUAL(0, r);
 }
 
-#include <util/int_util.h>
+#include <int_util/int_util.h>
 template<typename impl>
 void rsa_test()
 {
