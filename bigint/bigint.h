@@ -176,6 +176,7 @@ inline biguint operator<<(const biguint& lhs, uint32_t rhs) {
     return res <<= rhs;
 }
 
+#if 1
 enum class bin_expr_tag { add, sub, mul, div, mod };
 
 template<bin_expr_tag tag, typename L, typename R>
@@ -270,11 +271,21 @@ auto operator%(const L& lhs, const R& rhs) -> decltype(detail::make_bin_expr<bin
     return detail::make_bin_expr<bin_expr_tag::mod>(detail::wrap(lhs), detail::wrap(rhs));
 }
 
+#else
+inline biguint operator+(const biguint& lhs, const biguint& rhs) { biguint res; biguint::add(res, lhs, rhs); return res; }
+inline biguint operator-(const biguint& lhs, const biguint& rhs) { biguint res; biguint::sub(res, lhs, rhs); return res; }
+inline biguint operator*(const biguint& lhs, const biguint& rhs) { biguint res; biguint::mul(res, lhs, rhs); return res; }
+inline biguint operator/(const biguint& lhs, const biguint& rhs) { biguint res; biguint::div(res, lhs, rhs); return res; }
+inline biguint operator%(const biguint& lhs, const biguint& rhs) { biguint res; biguint::mod(res, lhs, rhs); return res; }
+#endif
+
 template<typename L, typename R>
 biguint powm(const L& lhs, const R& rhs, const biguint& n) {
     biguint tmp;
     return biguint::pow(tmp, lhs, rhs, n);
 }
+
+bool miller_rabin_test(const biguint& n, unsigned g);
 
 } } // namespace funtls::bigint
 

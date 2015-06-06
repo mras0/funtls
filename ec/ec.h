@@ -5,18 +5,26 @@
 #include <vector>
 #include <cassert>
 
+#ifdef USE_FUNTLS_BIGINT
+#include <bigint/bigint.h>
+#else
 #include <boost/multiprecision/cpp_int.hpp>
+#endif
 
 namespace funtls { namespace ec {
 
+#ifdef USE_FUNTLS_BIGINT
+using field_elem = funtls::bigint::biguint;
+#else
 using field_elem = boost::multiprecision::cpp_int;
+#endif
 
 struct point {
     field_elem x;
     field_elem y;
 };
 
-static const point infinity{-1, -1}; // HACK, don't depend on the exact value
+static const point infinity{424242, 424242}; // HACK, don't depend on the exact value
 
 inline bool operator==(const point& lhs, const point& rhs) {
     return lhs.x == rhs.x && lhs.y == rhs.y;

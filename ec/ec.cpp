@@ -2,15 +2,29 @@
 #include <util/test.h>
 #include <util/int_util.h>
 
-#include <boost/multiprecision/miller_rabin.hpp>
-
 using namespace funtls;
 
 namespace {
-template<typename int_type>
-bool is_prime(const int_type& n) {
-    return miller_rabin_test(n, 25);
+
+ec::field_elem psub(ec::field_elem l, ec::field_elem r, const ec::field_elem& p)
+{
+    l = pmod(l, p);
+    r = pmod(r, p);
+    if (l < r) {
+        l += p;
+    }
+    assert(l >= r);
+    l = l - r;
+    assert(l < p);
+    return l;
 }
+
+template<typename L, typename R1, typename R2, typename IntType>
+IntType psub(const L& l, const R1& r1, const R2& r2, const IntType& p)
+{
+    return psub(psub(l, r1, p), r2, p);
+}
+
 } // unnamed namespace
 
 namespace funtls { namespace ec {
@@ -137,9 +151,9 @@ point curve::add(const point& lhs, const point& rhs) const {
         return infinity;
     }
     assert(lhs.x != rhs.x);
-    const field_elem lambda = div_mod(rhs.y - lhs.y, rhs.x - lhs.x, p);
-    const field_elem x      = pmod(lambda*lambda - lhs.x - rhs.x, p);
-    const field_elem y      = pmod(lambda*(lhs.x-x) - lhs.y, p);
+    const field_elem lambda = div_mod(psub(rhs.y, lhs.y, p), psub(rhs.x, lhs.x, p), p);
+    const field_elem x      = psub(lambda*lambda, lhs.x, rhs.x, p);
+    const field_elem y      = psub(lambda*psub(lhs.x, x, p), lhs.y, p);
     assert(on_curve({x,y}));
     return {x, y};
 }
@@ -148,8 +162,8 @@ point curve::sqr(const point& point) const {
     assert(on_curve(point));
     assert(point.y != 0);
     const field_elem lambda = div_mod(3*point.x*point.x + a, 2*point.y, p);
-    const field_elem x      = pmod(lambda*lambda - 2*point.x, p);
-    const field_elem y      = pmod(lambda*(point.x-x) - point.y, p);
+    const field_elem x      = psub(lambda*lambda, 2*point.x, p);
+    const field_elem y      = psub(lambda*psub(point.x, x, p), point.y, p);
     assert(on_curve({x,y}));
     return {x, y};
 }
@@ -185,7 +199,7 @@ void curve::verify_ecdsa_signature(const point& Q, const field_elem& r, const fi
     // R = (xR, yR) = u1 * G + u2 * Q
     const auto R = add(mul(u1, G), mul(u2, Q));
     FUNTLS_CHECK_BINARY(R, !=, ec::infinity, "Signature invalid");
-    FUNTLS_CHECK_BINARY(R.x % n, ==, r, "Signature mismatch");
+    FUNTLS_CHECK_BINARY(field_elem(R.x % n), ==, r, "Signature mismatch");
 }
 
 const curve secp256r1 {

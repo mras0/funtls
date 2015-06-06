@@ -613,4 +613,15 @@ biguint& biguint::operator&=(const biguint& rhs) {
     check_repr();
     return *this;
 }
+
+bool miller_rabin_test(const biguint& n, unsigned g)
+{
+    assert(g > 1);
+    if (n < 2) return false;        // 0,1  -> not prime
+    if (n < 3) return true;         // 2,3  -> prime
+    if ((n & 1) == 0) return false; // even -> not prime
+    // TODO
+    return true; // probably prime
+}
+
 } } // namespace funtls::bigint

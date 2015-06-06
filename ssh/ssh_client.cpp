@@ -1,4 +1,5 @@
 #include <iostream>
+#include <iomanip>
 #include <ssh/ssh.h>
 #include <util/test.h>
 #include <util/base_conversion.h>

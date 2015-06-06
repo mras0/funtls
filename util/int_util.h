@@ -1,17 +1,22 @@
 #ifndef UTIL_INT_UTIL_H_INCLUDED
 #define UTIL_INT_UTIL_H_INCLUDED
 
-#include <boost/multiprecision/miller_rabin.hpp>
 #include <cassert>
 #include <vector>
 #include <util/random.h>
+
+#ifndef USE_FUNTLS_BIGINT
+#include <boost/multiprecision/miller_rabin.hpp>
+#endif
 
 namespace funtls {
 
 template<typename a_expr, typename int_type>
 int_type pmod(const a_expr& a, const int_type& p) {
     int_type res = a % p;
+#ifndef USE_FUNTLS_BIGINT
     if (res < 0) res += p;
+#endif
     assert(res >= 0 && res < p);
     return res;
 }
@@ -95,6 +100,11 @@ IntType rand_positive_int_less(const IntType& n) {
         res = be_uint_from_bytes<IntType>(bytes);
     } while (res == 0 || res >= n);
     return res;
+}
+
+template<typename int_type>
+bool is_prime(const int_type& n) {
+    return miller_rabin_test(n, 25);
 }
 
 } // namespace funtls

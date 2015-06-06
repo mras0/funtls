@@ -26,9 +26,10 @@ int main()
         FUNTLS_ASSERT_EQUAL(ec::infinity, C.add(C.add(P,P),P));
     }
     {
-        const auto C = make_curve(2147483647, -2, 4);
+        const auto curve_p = 2147483647;
+        const auto min_2 = curve_p-2;
+        const auto C = make_curve(curve_p, min_2, 4);
         const auto P = ec::point{3, 5};
-        const auto min_2 = pmod(-2, C.p);
         const auto Q = ec::point{min_2, 0};
         FUNTLS_ASSERT_EQUAL(true, C.on_curve(P));
         FUNTLS_ASSERT_EQUAL(true, C.on_curve(Q));
