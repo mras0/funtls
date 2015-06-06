@@ -2,8 +2,6 @@
 #include <util/test.h>
 #include <cassert>
 
-#include <iostream>
-
 using namespace funtls;
 
 namespace {

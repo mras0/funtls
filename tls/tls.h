@@ -9,7 +9,6 @@
 #include <functional>
 #include <vector>
 #include <string>
-#include <iostream>
 
 #include <util/buffer.h>
 
@@ -602,12 +601,12 @@ inline void from_bytes(certificate& item, util::buffer_view& buffer) {
     uint24 length;
     from_bytes(length, buffer);
     std::vector<tls::asn1cert> certificate_list;
-    std::cout << "Reading " << length << " bytes of certificate data\n";
+    //std::cout << "Reading " << length << " bytes of certificate data\n";
     size_t bytes_used = 0;
     for (;;) {
         uint24 cert_length;
         from_bytes(cert_length, buffer);
-        std::cout << " Found certificate of length " << cert_length << "\n";
+        //std::cout << " Found certificate of length " << cert_length << "\n";
         if (!cert_length) throw std::runtime_error("Empty certificate found");
         std::vector<uint8> cert_data(cert_length);
         buffer.read(&cert_data[0], cert_data.size());

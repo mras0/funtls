@@ -5,7 +5,6 @@
 #include <hash/hash.h>
 
 #include <cassert>
-#include <iostream> // TEMP
 
 using namespace funtls;
 

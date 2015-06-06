@@ -271,7 +271,7 @@ std::vector<uint8_t> do_poly1305(const std::vector<uint8_t>& key, const std::vec
     append_le_u64(buf, aad.size());
     tls::append_to_buffer(buf, cipher_text);
     append_le_u64(buf, cipher_text.size());
-    std::cout << "poly1305 buffer: " << util::base16_encode(buf) << std::endl;
+    //std::cout << "poly1305 buffer: " << util::base16_encode(buf) << std::endl;
     return poly1305::poly1305(key, buf);
 }
 
@@ -284,9 +284,9 @@ std::vector<uint8_t> chacha20_cipher::do_process(const std::vector<uint8_t>& dat
     const auto& key = parameters().enc_key();
     assert(key.size() == chacha::key_length_bytes);
     const auto one_time_key = chacha::poly1305_key_gen(key, nonce);
-    std::cout << "nonce " << util::base16_encode(nonce) << std::endl;
-    std::cout << "key   " << util::base16_encode(key) << std::endl;
-    std::cout << "otk   " << util::base16_encode(one_time_key) << std::endl;
+    //std::cout << "nonce " << util::base16_encode(nonce) << std::endl;
+    //std::cout << "key   " << util::base16_encode(key) << std::endl;
+    //std::cout << "otk   " << util::base16_encode(one_time_key) << std::endl;
 
     if (parameters().operation() == tls::cipher_parameters::decrypt) {
         FUNTLS_CHECK_BINARY(data.size(), >=, tag_length, "Not enough data");
@@ -296,11 +296,11 @@ std::vector<uint8_t> chacha20_cipher::do_process(const std::vector<uint8_t>& dat
         assert(vbuf.size()==13);
         vbuf[11] = static_cast<uint16_t>(cipher_text.size()>>8);
         vbuf[12] = static_cast<uint16_t>(cipher_text.size());
-        std::cout << "ctext " << util::base16_encode(cipher_text) << std::endl;
-        std::cout << "aad   " << util::base16_encode(vbuf) << std::endl;
-        std::cout << "mtag  " << util::base16_encode(message_tag) << std::endl;
+        //std::cout << "ctext " << util::base16_encode(cipher_text) << std::endl;
+        //std::cout << "aad   " << util::base16_encode(vbuf) << std::endl;
+        //std::cout << "mtag  " << util::base16_encode(message_tag) << std::endl;
         auto tag = do_poly1305(one_time_key, vbuf, cipher_text);
-        std::cout << "ctag  " << util::base16_encode(tag) << std::endl;
+        //std::cout << "ctag  " << util::base16_encode(tag) << std::endl;
         if (tag != message_tag) {
             std::ostringstream msg;
             msg << "Tag check failed. Expected " << util::base16_encode(tag) << " got '" << util::base16_encode(message_tag);
@@ -310,11 +310,11 @@ std::vector<uint8_t> chacha20_cipher::do_process(const std::vector<uint8_t>& dat
     } else {
         assert(parameters().operation() == tls::cipher_parameters::encrypt);
         auto res = chacha::chacha20(key, nonce, data);
-        std::cout << "res   " << util::base16_encode(res) << std::endl;
-        std::cout << "aad   " << util::base16_encode(verbuffer) << std::endl;
+        //std::cout << "res   " << util::base16_encode(res) << std::endl;
+        //std::cout << "aad   " << util::base16_encode(verbuffer) << std::endl;
         auto tag = do_poly1305(one_time_key, verbuffer, res);
         assert(tag.size() == tag_length);
-        std::cout << "tag   " << util::base16_encode(tag) << std::endl;
+        //std::cout << "tag   " << util::base16_encode(tag) << std::endl;
         tls::append_to_buffer(res, tag);
         return res;
     }
