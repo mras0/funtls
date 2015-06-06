@@ -2,27 +2,30 @@
 #include <ostream>
 #include <util/base_conversion.h>
 #include <util/test.h>
+#include <util/random.h>
 #include <algorithm>
 #include <string.h>
 
 //#define DIVIDE_DEBUG
 
+using namespace funtls;
+
 #ifdef DIVIDE_DEBUG
 #include <iostream>
 #include <iomanip>
 struct wrapped {
-    wrapped(funtls::bigint::biguint::dlimb_type i) : i(i){}
-    funtls::bigint::biguint::dlimb_type i;
+    wrapped(bigint::biguint::dlimb_type i) : i(i){}
+    bigint::biguint::dlimb_type i;
     friend std::ostream& operator<<(std::ostream& os, wrapped w) {
         assert(std::ios::hex == (os.flags() & std::ios::basefield));
-        uint64_t hi = static_cast<funtls::bigint::biguint::limb_type>(w.i>>funtls::bigint::biguint::limb_bits);
-        uint64_t lo = static_cast<funtls::bigint::biguint::limb_type>(w.i);
+        uint64_t hi = static_cast<bigint::biguint::limb_type>(w.i>>bigint::biguint::limb_bits);
+        uint64_t lo = static_cast<bigint::biguint::limb_type>(w.i);
         if (!hi) {
             return os << lo;
         }
         os << hi;
         const auto fill = os.fill();
-        os << std::setfill('0') << std::setw(funtls::bigint::biguint::limb_bits/4) << lo;
+        os << std::setfill('0') << std::setw(bigint::biguint::limb_bits/4) << lo;
         os << std::setfill(fill);
         return os;
     }
@@ -541,20 +544,29 @@ biguint& biguint::operator<<=(uint32_t shift)
 
 biguint& biguint::pow(biguint& res, const biguint& lhs, const biguint& rhs, const biguint& n)
 {
+    assert(n.size_ <= max_size / 2);
     if (&res == &lhs || &res == &rhs || &res == &n) {
         biguint tmp;
         return res = biguint::pow(tmp, lhs, rhs, n);
     }
 
-    res = 1;
     biguint base;
     biguint::mod(base, lhs, n);
 
+    if (base.size_ == 0) {
+        // 0^X = 0
+        return res = 0;
+    }
+
+    res = 1;
     biguint exponent=rhs;
     while (exponent.size_) {
         if (exponent & 1) {
             biguint::mul(res, res, base);
             biguint::mod(res, res, n);
+            if (!res.size_) {
+                break;
+            }
         }
         exponent >>= 1;
         biguint::mul(base, base, base);
@@ -614,13 +626,79 @@ biguint& biguint::operator&=(const biguint& rhs) {
     return *this;
 }
 
+void biguint::rand_int(biguint& dst, const biguint& low, const biguint& high)
+{
+    assert(low < high);
+
+    biguint range = high - low;
+
+    dst.size_ = range.size_;
+    auto dv = reinterpret_cast<uint8_t*>(&dst.v_[0]);
+    size_type range_bytes = range.size_ * limb_bits / 8;
+    while (!reinterpret_cast<const uint8_t*>(range.v_)[range_bytes-1]) {
+        dv[range_bytes-1] = 0;
+        range_bytes--;
+    }
+
+    do {
+        util::get_random_bytes(dv, range_bytes);
+        dst.trim();
+    } while (dst > range);
+    biguint::add(dst, dst, low);
+    assert(dst >= low && dst <= high);
+}
+
 bool miller_rabin_test(const biguint& n, unsigned g)
 {
     assert(g > 1);
     if (n < 2) return false;        // 0,1  -> not prime
     if (n < 3) return true;         // 2,3  -> prime
     if ((n & 1) == 0) return false; // even -> not prime
-    // TODO
+
+    // write n − 1 as 2**s * d with d odd by factoring powers of 2 from n − 1
+    biguint n_m1 = n - 1;
+    biguint d = n_m1;
+    int s = 0;
+    while ((d & 1) == 0) {
+        d >>= 1;
+        s++;
+    }
+    assert((n-1) == (d<<s));
+
+    // Witness loop
+    biguint a, x;
+    for (unsigned trial = 0; trial < g; ++trial) {
+        // pick a random integer a in the range [2, n − 2]
+        biguint::rand_int(a, 2, n-2);
+        // x <- a**d mod n
+        biguint::pow(x, a, d, n);
+
+        // if x = 1 or x = n − 1 then do next WitnessLoop
+        if (x == 1 || x == n_m1) {
+            continue;
+        }
+
+        // repeat s − 1 times:
+        bool definitely_composite = true;
+        for (int i = 0; i < s - 1; ++i) {
+            // x <- x**2 mod n
+            biguint::pow(x, x, 2, n);
+
+            // if x = 1 then return composite
+            if (x == 1) {
+                break; // composite
+            }
+            // if x = n − 1 then do next WitnessLoop
+            if (x == n_m1) {
+                definitely_composite = false;
+                break;
+            }
+        }
+        if (definitely_composite) {
+            return false;
+        }
+    }
+
     return true; // probably prime
 }
 

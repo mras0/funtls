@@ -13,8 +13,9 @@
 
 using namespace funtls;
 
-const auto max_int_s = std::string(bigint::biguint::max_bits/4, 'F');
-const auto max_int_b = std::vector<uint8_t>(bigint::biguint::max_bits/8, 0xff);
+const auto max_bits  = bigint::biguint::max_bits;
+const auto max_int_s = std::string(max_bits/4, 'F');
+const auto max_int_b = std::vector<uint8_t>(max_bits/8, 0xff);
 
 const struct {
     const char* expected;
@@ -586,6 +587,163 @@ void test_dec_io()
 }
 
 template<typename impl>
+void test_miller_rabin()
+{
+    static const struct {
+        const char* a;
+        const char* b;
+    } composites[] = {
+        { "37", "97" },
+        { "523", "107" },
+        { "6325", "5619" },
+        { "40371", "82367" },
+        { "163395", "689085" },
+        { "2976803", "6270635" },
+        { "17441845", "18391975" },
+        { "214420083", "153352879" },
+        { "9027416037", "3755121647" },
+        { "64167876411", "29278608915" },
+        { "997891780863", "724562125493" },
+        { "9276171306845", "5702949802583" },
+        { "98380358788181", "54298981451713" },
+        { "831804411592241", "632926283670541" },
+        { "9279322617234405", "2915296627607905" },
+        { "62312089088540355", "60462803768794853" },
+        { "916110188455939433", "981305878342085815" },
+        { "9557524690824549061", "8168762923296729173" },
+        { "57056290582900076063", "37159624767809705653" },
+        { "77205367883724246168008305491585964481196397", "320668528010579193373643209853643775095941147" },
+    };
+    for (const auto& t : composites) {
+        const impl a(t.a);
+        const impl b(t.b);
+        FUNTLS_ASSERT_EQUAL_MESSAGE(false, miller_rabin_test(impl(impl(t.a)*impl(t.b)), 25), std::string(t.a) + " * " + t.b);
+    }
+
+    const std::string primes[] = {
+    "6577", "6581", "6599", "6607", "6619", "6637", "6653", "6659", "6661", "6673",
+
+    "115792089210356248762697446949407573530086143415290314195533631308867097853951", // secp256r1
+    "39402006196394479212279040100143613805079739270465446667948293404245721771496870329047266088258938001861606973112319", // secp384r1
+
+    "0xfcb522021d1e6618bbc58d5dfaa6"
+    "99dc834dbfbc3e309f125c6360edd8"
+    "e66e0cc6e667a4a3203190a6b21517"
+    "4b1627ec22591a45c3b536821b2ab2"
+    "6b889f2548899a53ef2c07afad63d4"
+    "7cbd475401c08f1da7ec2c0e7497c1"
+    "69b9fcaff4f92ba47f08e3a09fd27a"
+    "5118fc2a6e147e5fab6625739509cd"
+    "70ffea10fca7df729f",
+
+    "0xf8d1958f38b707cfadce44a4e3af"
+    "7b2dadcde76d959d7fc04ebf003f6b"
+    "cab4e1cda0269ead763ad9e2a02cbd"
+    "f53d5f5cc868887ea644d2c5492d99"
+    "e023e337ffa4102b103210e56b77f6"
+    "4c703ad4ce9d51702e80c5c15e27aa"
+    "147f83f006f700aee65655551a99e7"
+    "ff6ff56e360666b6501dbc9765853a"
+    "95f4b339eec385cdd3",
+
+    "0xda1b81a7c40d41fc22689770ec85"
+    "752a170ada436dd90caaefd35c0541"
+    "b76964f1ea2d958a86306cc0a5ccd8"
+    "c49428815087300b8eed470db824d5"
+    "89ae9dfaca6c692f2d262aa99b179e"
+    "d86b4b1cdc73e7cd49fde271a84d77"
+    "13bdc99a17a242fa3b7de8e84356fd"
+    "d4898136773f88bb5da0a9c3def5a4"
+    "8ae300b11fe0d72014910ddd431533"
+    "5c856b7f71f564994ee5c7fff83a15"
+    "3c381940a87ec5f851c969fdb8a625"
+    "7ea7f3baa7e37ac7178f6ba145f4d5"
+    "3bbed40cbfc30750413f3e7cebd35b"
+    "7026253c09c53a10d95adbb1be6c65"
+    "b5da6434904d9588d248fdc417f7df"
+    "c6aaca9b8fd6562097e955221d5ef6"
+    "dda401c1b8772e55c4b9e3328a7159"
+    "84e1351b47e3874de3d6f3787ae56a"
+    "062da97d8d2fad259492e250e89ccd"
+    "c202352d0771f947065f0933286b3b"
+    "89603cd5cbcb16f9ac19c58471a3c1"
+    "48581aa71c7cdc1e3cc6088606dc5d"
+    "8750feae6ecc3fc13303fcd140ecd5"
+    "70421db10cd2b250d4bb191c4523c1"
+    "d62b555be273826642ddfa03b5724f"
+    "bb846063413b001e2be64ea816391a"
+    "c238db4df3ea219668c509ce4954b8"
+    "0323de3558adf7a0f5adb1e0fe4ccf"
+    "18d14e0668ea9a6f5ed3bc1d921abb"
+    "c2d3d3859ab95c47c4306cc92bbdf2"
+    "c1b2f6790a80bdaf6685d16bc51f28"
+    "4b19c1619ee53295273f94e40cec57"
+    "94f42d193899b7c5e61a1b4b29fc48"
+    "7ae3149008ac82f3cc8043ea94ccad"
+    "15087d",
+
+    "0xd0d3ac46e639d2b17d017716e820"
+    "086f3ec4057f0e7dc777012195dadc"
+    "c993ec96cf6e1ace63c1066aacd6fc"
+    "2d842dbec44bcf415926482020e5ba"
+    "9c50b363255b422a492a459a452675"
+    "d11ca5d84e0c0e6f8f5e3a2d7a5b0b"
+    "e3d39e3aad73f772a342d36bf4e34b"
+    "a3942b1acc814f76d177b806a7266f"
+    "43343f600a72634d61cacf1ba2bf31"
+    "539f66da786252bd9bc1da8aee19a8"
+    "def874b80aa9b64bdb5777a3f4cb78"
+    "6e902cd55d686923aec84315abf117"
+    "ae201fb5da841558bc0016ba2fad67"
+    "b1940ab50acd223aa5fb42af816b1a"
+    "a528a2aa6b8984dffc4ef8061960e9"
+    "a88b426a5c6dbd7a241866a774de7f"
+    "bd8df66b2b23ae786226f82da9033d"
+    "5e446510f52bd254fd711f021d85a7"
+    "9b8bfe18797ddbcea806e8f57bcc4f"
+    "0f037e912d48629e5d821a3bed6323"
+    "9c338236c480d8df09c1a248c4446b"
+    "765bb45917cd774fb9d983ae93a759"
+    "e69a1a3b197bee3dc8708f6c4d359d"
+    "aeece87c8a4d9b7d38d47b5c7d7c28"
+    "0932adbb06bda16dd4f16bc5f5a518"
+    "222130717677df454a4c4f3e285e77"
+    "237eec4ec6f00994a5fa003fd115cd"
+    "2eefc6eed378a8fdf5596c4870c48d"
+    "e2fa8c4b89dedc4b8d6b6aebafd6bc"
+    "7ea99475c62dfbca473084840bb5d0"
+    "0f4990669113f8d12bd57ac859cdfb"
+    "d8d5c52897a05438e6c7b5aa7452f9"
+    "8b04c0a1a9ad292f8143a6e29ee12f"
+    "b851c3c518822f1cd4fbd6090bb74c"
+    "488639",
+    };
+
+    for (const auto& p : primes) {
+        const impl n(p.c_str());
+        const auto sz = ilog256(n)*8;
+        int trials = 25;
+        // A miller_rabin_test takes quite a while, so limit the number of trials for large primes
+        if (sz > 512) trials = 6;
+        if (sz > 1024) trials = 2;
+
+        if (sz > max_bits / 2) { std::cout << "SKIPPED " << sz << std::endl; continue; }
+
+        FUNTLS_ASSERT_EQUAL_MESSAGE(true, miller_rabin_test(n, trials), p);
+
+        // Even numbers are never prime (obviously)
+        FUNTLS_ASSERT_EQUAL_MESSAGE(false, miller_rabin_test(impl(n+1), trials), p);
+
+        if (sz > 128 && sz < 4096) {
+            // We should be able to conclude that neither n-2 nor n+2 are prime
+            // (obviously this doens't hold in general - but it does for our test data)
+            FUNTLS_ASSERT_EQUAL_MESSAGE(false, miller_rabin_test(impl(n-2), trials), p);
+            FUNTLS_ASSERT_EQUAL_MESSAGE(false, miller_rabin_test(impl(n+2), trials), p);
+        }
+    }
+}
+
+template<typename impl>
 void test_impl()
 {
     test_hex_out<impl>();
@@ -599,6 +757,7 @@ void test_impl()
     test_powm<impl>();
     test_dec_io<impl>();
     rsa_test<impl>();
+    test_miller_rabin<impl>();
 }
 
 template<>
@@ -607,6 +766,7 @@ bigint::biguint from_be_bytes<bigint::biguint>(const std::vector<uint8_t>& b) {
 }
 
 #include <boost/multiprecision/cpp_int.hpp>
+#include <boost/multiprecision/miller_rabin.hpp>
 using boost_int = boost::multiprecision::cpp_int;
 template<>
 boost_int from_be_bytes<boost_int>(const std::vector<uint8_t>& b) {

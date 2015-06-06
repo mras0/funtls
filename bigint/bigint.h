@@ -128,6 +128,9 @@ public:
     static int compare(const biguint& lhs, const biguint& rhs);
     friend std::ostream& operator<<(std::ostream& os, const biguint& ui);
 
+    // dst <- random integer in range [low; high]
+    // i.e. rand_int(dst, 0, 9) will uniformly generate a single decimal digit
+    static void rand_int(biguint& dst, const biguint& low, const biguint& high);
 private:
     static constexpr size_type max_size = max_bits / limb_bits;
     size_type size_;
