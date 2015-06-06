@@ -239,6 +239,7 @@ class ssh_client {
 public:
     ssh_client(const char* host, const char* port, const char* user_name, const x509::rsa_private_key& key);
 
+    void do_command(const std::string& command);
 private:
     boost::asio::io_service      io_service;
     boost::asio::ip::tcp::socket socket;
@@ -459,8 +460,6 @@ void ssh_client::send_encrypted(const std::vector<uint8_t>& payload)
     const auto unecrypted_packet = make_ssh_packet(payload, aes::block_size_bytes);
     const auto mac = hash::hmac_sha1{client_mac_key}.input(u32buf(client_sequence_number)).input(unecrypted_packet).result();
 
-    std::cout << "mac " << util::base16_encode(mac) << std::endl;
-
     buffer_builder packet;
     put(packet, aes_ctr(client_key, client_iv, unecrypted_packet));
     put(packet, mac);
@@ -482,7 +481,7 @@ std::vector<uint8_t> ssh_client::recv_encrypted()
         const auto packet_size = u32_from_bytes(&first_block[0]);
         const auto pad_size    = first_block[4];
         FUNTLS_CHECK_BINARY(packet_size, <, 40000, "Invalid header: " + util::base16_encode(first_block));
-        std::cout << "Packet size " << packet_size << " padding " << (unsigned)pad_size << std::endl;
+        //std::cout << "Packet size " << packet_size << " padding " << (unsigned)pad_size << std::endl;
 
         std::vector<uint8_t> payload(first_block.begin()+5,first_block.end());
         if (packet_size > 12) {
@@ -495,7 +494,6 @@ std::vector<uint8_t> ssh_client::recv_encrypted()
         // discard padding
         FUNTLS_CHECK_BINARY(payload.size(), >=, pad_size, "Not enough data");
         payload.erase(payload.end() - pad_size, payload.end());
-        std::cout << util::base16_encode(payload) << std::endl;
 
         buf.resize(result_size(hash::algorithm::sha1));
         boost::asio::read(socket, boost::asio::buffer(buf));
@@ -521,6 +519,14 @@ std::vector<uint8_t> ssh_client::recv_encrypted()
                 std::ostringstream oss;
                 oss << "Disconnected: " << reason << " " << std::string(description.begin(), description.end()) << std::endl;
                 throw std::runtime_error(oss.str());
+            } else if (msg_type == ssh::message_type::global_request) {
+                const auto request_name = ssh::get_string(msg);
+                const auto want_reply = msg.get();
+                std::cout << "Got global request: " << std::string(request_name.begin(),request_name.end());
+                std::cout << " want reply " << (want_reply?"true":"false");
+                std::cout << " remaining " << msg.remaining() << std::endl;
+                FUNTLS_CHECK_BINARY(want_reply, ==, false, "");
+                continue;
             }
         }
         return payload;
@@ -614,6 +620,118 @@ void ssh_client::do_user_auth(const std::string& service, const std::string& use
     std::cout << "Sucessfully authed as " << user_name << std::endl;
 }
 
+void ssh_client::do_command(const std::string& command)
+{
+    uint32_t sender_channel = 0;
+    uint32_t recipient_channel;
+
+    {
+        buffer_builder b;
+        put(b, ssh::message_type::channel_open);
+        put_string(b, "session"); // channel_type
+        b.put_u32(sender_channel);
+        b.put_u32(32<<10); // initial window size
+        b.put_u32(2<<10);  // maximum packet size
+        send_encrypted(b.as_vector());
+    }
+
+    {
+        const auto msg_buf = recv_encrypted();
+        util::buffer_view msg{msg_buf.data(), msg_buf.size()};
+
+        const auto msg_type = static_cast<ssh::message_type>(msg.get());
+
+        FUNTLS_CHECK_BINARY(ssh::message_type::channel_open_confirmation, ==, msg_type, "Unexpected message");
+        recipient_channel = util::get_be_uint32(msg);
+        FUNTLS_CHECK_BINARY(sender_channel, ==, util::get_be_uint32(msg), "Invalid sender channel");
+        const auto initial_window    = util::get_be_uint32(msg);
+        const auto max_packet        = util::get_be_uint32(msg);
+
+        std::cout << "recipient_channel " << recipient_channel << std::endl;
+        std::cout << "initial_window    " << initial_window << std::endl;
+        std::cout << "max_packet        " << max_packet << std::endl;
+        FUNTLS_CHECK_BINARY(msg.remaining(), ==, 0, "Unexpected data");
+    }
+
+    {
+        buffer_builder b;
+        put(b, ssh::message_type::channel_request);
+        b.put_u32(recipient_channel);
+        put_string(b, "exec"); // request type
+        b.put_u8(1);           // want reply
+        put_string(b, command);
+        send_encrypted(b.as_vector());
+    }
+
+    for (;;) {
+        const auto msg_buf = recv_encrypted();
+        util::buffer_view msg{msg_buf.data(), msg_buf.size()};
+        const auto msg_type = static_cast<ssh::message_type>(msg.get());
+        if (msg_type == ssh::message_type::channel_success) {
+            const auto r_ch  = util::get_be_uint32(msg);
+            FUNTLS_CHECK_BINARY(msg.remaining(), ==, 0, "Unexpected data");
+            FUNTLS_CHECK_BINARY(r_ch, ==, recipient_channel, "Unexpected channel");
+            std::cout << "Got " << msg_type << " rchannel " << r_ch << std::endl;
+        } else if (msg_type == ssh::message_type::channel_window_adjust) {
+            const auto r_ch  = util::get_be_uint32(msg);
+            const auto bytes = util::get_be_uint32(msg);
+            FUNTLS_CHECK_BINARY(msg.remaining(), ==, 0, "Unexpected data");
+            FUNTLS_CHECK_BINARY(r_ch, ==, recipient_channel, "Unexpected channel");
+            std::cout << "Got " << msg_type << " rchannel " << r_ch << " bytes " << bytes << std::endl;
+        } else if (msg_type == ssh::message_type::channel_data) {
+            const auto r_ch    = util::get_be_uint32(msg);
+            const auto data = ssh::get_string(msg);
+            FUNTLS_CHECK_BINARY(msg.remaining(), ==, 0, "Unexpected data");
+            FUNTLS_CHECK_BINARY(r_ch, ==, recipient_channel, "Unexpected channel");
+            std::cout << "Got " << msg_type << " rchannel " << r_ch << "\n" << std::string(data.begin(), data.end()) << std::endl;
+        } else if (msg_type == ssh::message_type::channel_extended_data) {
+            const auto r_ch    = util::get_be_uint32(msg);
+            const auto type_code = util::get_be_uint32(msg);
+            const auto data = ssh::get_string(msg);
+            FUNTLS_CHECK_BINARY(msg.remaining(), ==, 0, "Unexpected data");
+            FUNTLS_CHECK_BINARY(type_code, ==, ssh::extended_data_stderr, "Invalid data type code");
+            FUNTLS_CHECK_BINARY(r_ch, ==, recipient_channel, "Unexpected channel");
+            std::cout << "Got " << msg_type << " rchannel " << r_ch << "\n" << std::string(data.begin(), data.end()) << std::endl;
+        } else if (msg_type == ssh::message_type::channel_eof) {
+            const auto r_ch  = util::get_be_uint32(msg);
+            FUNTLS_CHECK_BINARY(msg.remaining(), ==, 0, "Unexpected data");
+            FUNTLS_CHECK_BINARY(r_ch, ==, recipient_channel, "Unexpected channel");
+            std::cout << "Got " << msg_type << " rchannel " << r_ch << std::endl;
+        } else if (msg_type == ssh::message_type::channel_close) {
+            const auto r_ch  = util::get_be_uint32(msg);
+            FUNTLS_CHECK_BINARY(msg.remaining(), ==, 0, "Unexpected data");
+            FUNTLS_CHECK_BINARY(r_ch, ==, recipient_channel, "Unexpected channel");
+            std::cout << "Got " << msg_type << " rchannel " << r_ch << std::endl;
+            break;
+        } else if (msg_type == ssh::message_type::channel_request) {
+            const auto r_ch       = util::get_be_uint32(msg);
+            const auto typev      = ssh::get_string(msg);
+            const auto type       = std::string(typev.begin(), typev.end());
+            const auto want_reply = msg.get();
+            FUNTLS_CHECK_BINARY(r_ch, ==, recipient_channel, "Unexpected channel");
+            std::cout << "Got " << msg_type << " rchannel " << r_ch << " " << type << std::endl;
+            FUNTLS_CHECK_BINARY(want_reply, ==, false, "");
+            if (type == "exit-status") {
+                std::cout << "exit-status: " << util::get_be_uint32(msg) << std::endl;
+                    FUNTLS_CHECK_BINARY(msg.remaining(), ==, 0, "Unexpected data");
+            } else {
+                FUNTLS_CHECK_FAILURE("Not implemneted " + type);
+            }
+        } else {
+            std::ostringstream oss;
+            oss << "Got unknown message of type " << msg_type << " size " << msg.remaining();
+            FUNTLS_CHECK_FAILURE(oss.str());
+        }
+    }
+
+
+    {
+        buffer_builder b;
+        put(b, ssh::message_type::channel_close);
+        b.put_u32(sender_channel);
+        send_encrypted(b.as_vector());
+    }
+}
 
 int main()
 {
@@ -621,4 +739,6 @@ int main()
     const char* user_name = u && u[0] ? u : "test";
     const auto private_key = x509::rsa_private_key_from_pki(x509::read_pem_private_key_from_file("../rsa-key.pem"));
     ssh_client client("localhost", "1234", user_name, private_key);
+    client.do_command("whoami");
+    client.do_command("ls");
 }

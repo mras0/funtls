@@ -62,6 +62,8 @@ enum class message_type : uint8_t {
 
 std::ostream& operator<<(std::ostream& os, message_type mt);
 
+constexpr uint32_t extended_data_stderr = 1;
+
 enum class disconnect_reason : uint32_t {
     host_not_allowed_to_connect       =  1,
     protocol_error                    =  2,
