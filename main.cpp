@@ -21,6 +21,16 @@
 
 using namespace funtls;
 
+namespace {
+
+std::string error_code_str(const boost::system::error_code& ec) {
+    std::ostringstream oss;
+    oss << ec;
+    return oss.str();
+}
+
+} // unnamed namespace
+
 namespace funtls { namespace tls {
 
 enum class connection_end { server, client };
@@ -28,14 +38,17 @@ enum class connection_end { server, client };
 // TODO: Handle record fragmentation/coalescence
 class socket {
 public:
-    void send_app_data(const std::vector<uint8_t>& d) {
-        send_record(content_type::application_data, d);
+    template<typename Handler>
+    void send_app_data(const std::vector<uint8_t>& d, Handler handler) {
+        send_record(content_type::application_data, d, handler);
     }
 
-    std::vector<uint8_t> next_app_data() {
-        const auto record = read_record();
-        FUNTLS_CHECK_BINARY(record.type, ==, content_type::application_data, "Unexpected content type");
-        return record.fragment;
+    template<typename Handler>
+    void next_app_data(Handler handler) {
+        read_record([handler] (tls::record&& record) {
+                FUNTLS_CHECK_BINARY(record.type, ==, content_type::application_data, "Unexpected content type");
+                handler(std::move(record.fragment));
+            });
     }
 
 protected:
@@ -44,7 +57,11 @@ protected:
         , connection_end_(ce) {
     }
 
-    void send_record(tls::content_type content_type, const std::vector<uint8_t>& plaintext) {
+    using done_handler           = std::function<void(void)>;
+    using recv_record_handler    = std::function<void(record&&)>;
+    using recv_handshake_handler = std::function<void(handshake&&)>;
+
+    void send_record(tls::content_type content_type, const std::vector<uint8_t>& plaintext, const done_handler& handler) {
         collapse_pending();
         FUNTLS_CHECK_BINARY(plaintext.size(), >=, 1, "Illegal plain text size"); // TODO: Empty plaintext is legal for app data
         FUNTLS_CHECK_BINARY(plaintext.size(), <=, record::max_plaintext_length, "Illegal plain text size");
@@ -60,91 +77,57 @@ protected:
         const auto fragment  = encrypt_cipher_->process(plaintext, ver_buffer);
         FUNTLS_CHECK_BINARY(fragment.size(), <=, record::max_ciphertext_length, "Illegal fragment size");
 
-        std::vector<uint8_t> header;
-        append_to_buffer(header, content_type);
-        append_to_buffer(header, current_protocol_version_);
-        append_to_buffer(header, uint16(fragment.size()));
-        assert(header.size() == 5);
+        send_buffer_.clear();
+        append_to_buffer(send_buffer_, content_type);
+        append_to_buffer(send_buffer_, current_protocol_version_);
+        append_to_buffer(send_buffer_, uint16(fragment.size()));
+        assert(send_buffer_.size() == 5);
+        append_to_buffer(send_buffer_, fragment);
 
-        boost::asio::write(socket_, boost::asio::buffer(header));
-        boost::asio::write(socket_, boost::asio::buffer(fragment));
+        boost::asio::async_write(socket_, boost::asio::buffer(send_buffer_),
+                [this, handler](const boost::system::error_code& ec, size_t) {
+                    if (ec) FUNTLS_CHECK_FAILURE(error_code_str(ec));
+                    handler();
+                });
     }
 
-    record read_record() {
+    void read_record(const recv_record_handler& handler) {
         collapse_pending();
-        std::vector<uint8_t> buffer(5);
-        boost::asio::read(socket_, boost::asio::buffer(buffer));
-
-        util::buffer_view     buf_view{&buffer[0], buffer.size()};
-        content_type     content_type;
-        protocol_version protocol_version;
-        uint16           length;
-        from_bytes(content_type, buf_view);
-        from_bytes(protocol_version, buf_view);
-        from_bytes(length, buf_view);
-        assert(buf_view.remaining() == 0);
-
-        FUNTLS_CHECK_BINARY(protocol_version, ==, current_protocol_version(), "Wrong TLS version");
-        FUNTLS_CHECK_BINARY(length, >=, 1, "Illegal fragment size");
-        FUNTLS_CHECK_BINARY(length, <=, record::max_ciphertext_length, "Illegal fragment size");
-
-        buffer.resize(length);
-        assert(buffer.size() <= record::max_ciphertext_length);
-        boost::asio::read(socket_, boost::asio::buffer(buffer));
-
-        //
-        // Decrypt
-        //
-        const auto ver_buffer = verification_buffer(decrypt_sequence_number_++, content_type, current_protocol_version(), 0 /* filled in later */);
-        buffer = decrypt_cipher_->process(buffer, ver_buffer);
-
-        // Decompression would happen here
-        FUNTLS_CHECK_BINARY(buffer.size(), <=, record::max_compressed_length, "Illegal decoded fragment size");
-
-        //
-        // We now have a TLSPlaintext buffer for consumption
-        //
-        FUNTLS_CHECK_BINARY(buffer.size(), <=, record::max_plaintext_length, "Illegal decoded fragment size");
-
-        if (content_type == tls::content_type::alert) {
-            util::buffer_view alert_buf(&buffer[0], buffer.size());
-            alert alert;
-            from_bytes(alert, alert_buf);
-            FUNTLS_CHECK_BINARY(alert_buf.remaining(), ==, 0, "Invalid alert message");
-
-            std::ostringstream oss;
-            oss << alert.level << " " << alert.description;
-            std::cout << "Got alert: " << oss.str() <<  std::endl;
-            throw std::runtime_error("Alert received: " + oss.str());
-        }
-
-        if (content_type == tls::content_type::handshake) {
-            assert(pending_handshake_messages_.empty());
-            pending_handshake_messages_ = buffer; // Will not become actove after this message has been parsed. This is a HACK
-        }
-
-        return record{content_type, protocol_version, std::move(buffer)};
+        recv_buffer_.resize(5);
+        boost::asio::async_read(socket_, boost::asio::buffer(recv_buffer_),
+                [this, handler](const boost::system::error_code& ec, size_t) {
+                    if (ec) {
+                        if (ec == boost::asio::error::eof) {
+                            std::cout << "\nEOF!!\n";
+                            socket_.get_io_service().stop();
+                            return;
+                        }
+                        FUNTLS_CHECK_FAILURE(error_code_str(ec));
+                    }
+                    do_read_record_content(handler);
+                });
     }
 
-    void send_handshake(const handshake& handshake) {
+    void send_handshake(const handshake& handshake, const done_handler& handler) {
         assert(handshake.content_type == content_type::handshake);
         std::vector<uint8_t> payload_buffer;
         append_to_buffer(payload_buffer, handshake);
 
-        send_record(handshake.content_type, payload_buffer);
+        send_record(handshake.content_type, payload_buffer, handler);
     }
 
-    handshake read_handshake() {
-        auto record = read_record();
-        FUNTLS_CHECK_BINARY(record.type, ==, content_type::handshake, "Invalid content type");
+    void read_handshake(const recv_handshake_handler& handler) {
+        read_record( [this, handler](record&& record) {
+                FUNTLS_CHECK_BINARY(record.type, ==, content_type::handshake, "Invalid content type");
 
-        util::buffer_view frag_buf{&record.fragment[0], record.fragment.size()};
-        handshake handshake;
-        from_bytes(handshake, frag_buf);
-        if (frag_buf.remaining()) {
-            FUNTLS_CHECK_FAILURE("Unread handshake data. Fragment: " + util::base16_encode(record.fragment));
-        }
-        return handshake;
+                util::buffer_view frag_buf{&record.fragment[0], record.fragment.size()};
+                handshake handshake;
+                from_bytes(handshake, frag_buf);
+                if (frag_buf.remaining()) {
+                    FUNTLS_CHECK_FAILURE("Unread handshake data. Fragment: " + util::base16_encode(record.fragment));
+                }
+                handler(std::move(handshake));
+            });
     }
 
     protocol_version current_protocol_version() const {
@@ -161,7 +144,7 @@ protected:
         pending_decrypt_cipher_ = make_cipher(server_cipher_parameters);
     }
 
-    void send_change_cipher_spec() {
+    void send_change_cipher_spec(const done_handler& handler) {
         std::cout << "Sending change cipher spec." << std::endl;
         if (!pending_encrypt_cipher_) {
             FUNTLS_CHECK_FAILURE("Sending ChangeCipherSpec without a pending cipher suite");
@@ -169,51 +152,46 @@ protected:
         change_cipher_spec msg{};
         std::vector<uint8_t> payload_buffer;
         append_to_buffer(payload_buffer, msg);
-        send_record(msg.content_type, payload_buffer);
         //
         // Immediately after sending [the ChangeCipherSpec] message, the sender MUST instruct the
         // record layer to make the write pending state the write active state.
         //
-        encrypt_cipher_ = std::move(pending_encrypt_cipher_);
-        //
-        // The sequence number MUST be set to zero whenever a connection state is made the
-        // active state.
-        //
-        encrypt_sequence_number_ = 0;
-        //
-        // A Finished message is always sent immediately after a change
-        // cipher spec message to verify that the key exchange and
-        // authentication processes were successful
-        //
-        send_handshake(tls::make_handshake(tls::finished{do_verify_data(connection_end_)}));
+        send_record(msg.content_type, payload_buffer, [this, handler] { send_finished(handler); });
     }
 
-    void read_change_cipher_spec() {
-        auto record = read_record();
-        FUNTLS_CHECK_BINARY(record.type,            ==, content_type::change_cipher_spec, "Invalid content type");
-        FUNTLS_CHECK_BINARY(record.fragment.size(), ==, 1, "Invalid ChangeCipherSpec fragment size");
-        FUNTLS_CHECK_BINARY(record.fragment[0],     !=, 0, "Invalid ChangeCipherSpec fragment data");
-        //
-        // Reception of [the ChangeCipherSpec] message causes the receiver to instruct the record layer to
-        // immediately copy the read pending state into the read current state.
-        //
-        if (!pending_decrypt_cipher_) {
-            FUNTLS_CHECK_FAILURE("Got ChangeCipherSpec without a pending cipher suite");
-        }
-        decrypt_cipher_          = std::move(pending_decrypt_cipher_);
-        decrypt_sequence_number_ = 0;
+    void read_change_cipher_spec(const done_handler& handler) {
+        read_record([this, handler] (tls::record&& record) {
+                FUNTLS_CHECK_BINARY(record.type,            ==, content_type::change_cipher_spec, "Invalid content type");
+                FUNTLS_CHECK_BINARY(record.fragment.size(), ==, 1, "Invalid ChangeCipherSpec fragment size");
+                FUNTLS_CHECK_BINARY(record.fragment[0],     !=, 0, "Invalid ChangeCipherSpec fragment data");
+                //
+                // Reception of [the ChangeCipherSpec] message causes the receiver to instruct the record layer to
+                // immediately copy the read pending state into the read current state.
+                //
+                if (!pending_decrypt_cipher_) {
+                    FUNTLS_CHECK_FAILURE("Got ChangeCipherSpec without a pending cipher suite");
+                }
+                decrypt_cipher_          = std::move(pending_decrypt_cipher_);
+                decrypt_sequence_number_ = 0;
 
+                do_read_finished(handler);
+            });
+    }
+
+    void do_read_finished(const done_handler& handler) {
         // Read finished
-        auto handshake = read_handshake();
-        auto finished = tls::get_as<tls::finished>(handshake);
-        const auto calced_verify_data = do_verify_data(connection_end_ == connection_end::server ? connection_end::client : connection_end::server);
-        if (finished.verify_data != calced_verify_data) {
-            std::ostringstream oss;
-            oss << "Got invalid finished message. verify_data check failed. Expected ";
-            oss << "'" << util::base16_encode(calced_verify_data) << "' Got";
-            oss << "'" << util::base16_encode(finished.verify_data);
-            FUNTLS_CHECK_FAILURE(oss.str());
-        }
+        read_handshake([this, handler] (tls::handshake&& handshake) {
+                auto finished = tls::get_as<tls::finished>(handshake);
+                const auto calced_verify_data = do_verify_data(connection_end_ == connection_end::server ? connection_end::client : connection_end::server);
+                if (finished.verify_data != calced_verify_data) {
+                    std::ostringstream oss;
+                    oss << "Got invalid finished message. verify_data check failed. Expected ";
+                    oss << "'" << util::base16_encode(calced_verify_data) << "' Got";
+                    oss << "'" << util::base16_encode(finished.verify_data);
+                    FUNTLS_CHECK_FAILURE(oss.str());
+                }
+                handler();
+            });
     }
 
 private:
@@ -231,10 +209,88 @@ private:
     std::vector<uint8_t>         handshake_messages_;
     std::vector<uint8_t>         pending_handshake_messages_;
 
+    std::vector<uint8_t>         send_buffer_;
+    std::vector<uint8_t>         recv_buffer_;
+
     void collapse_pending() {
         append_to_buffer(handshake_messages_, pending_handshake_messages_);
         pending_handshake_messages_.clear();
     }
+
+    void do_read_record_content(const recv_record_handler& handler) {
+        util::buffer_view     buf_view{&recv_buffer_[0], recv_buffer_.size()};
+        content_type          content_type;
+        protocol_version      protocol_version;
+        uint16                length;
+        from_bytes(content_type, buf_view);
+        from_bytes(protocol_version, buf_view);
+        from_bytes(length, buf_view);
+        assert(buf_view.remaining() == 0);
+
+        FUNTLS_CHECK_BINARY(protocol_version, ==, current_protocol_version(), "Wrong TLS version");
+        FUNTLS_CHECK_BINARY(length, >=, 1, "Illegal fragment size");
+        FUNTLS_CHECK_BINARY(length, <=, record::max_ciphertext_length, "Illegal fragment size");
+
+        recv_buffer_.resize(length);
+        assert(recv_buffer_.size() <= record::max_ciphertext_length);
+        boost::asio::async_read(socket_, boost::asio::buffer(recv_buffer_),
+                [this, content_type, protocol_version, handler](const boost::system::error_code& ec, size_t) {
+                    if (ec) FUNTLS_CHECK_FAILURE(error_code_str(ec));
+                    do_decrypt(content_type, protocol_version, handler);
+                });
+    }
+
+    void do_decrypt(tls::content_type content_type, tls::protocol_version protocol_version, const recv_record_handler& handler) {
+        //
+        // Decrypt
+        //
+        const auto ver_buffer = verification_buffer(decrypt_sequence_number_++, content_type, current_protocol_version(), 0 /* filled in later */);
+        recv_buffer_ = decrypt_cipher_->process(recv_buffer_, ver_buffer);
+
+        // Decompression would happen here
+        FUNTLS_CHECK_BINARY(recv_buffer_.size(), <=, record::max_compressed_length, "Illegal decoded fragment size");
+
+        //
+        // We now have a TLSPlaintext buffer for consumption
+        //
+        FUNTLS_CHECK_BINARY(recv_buffer_.size(), <=, record::max_plaintext_length, "Illegal decoded fragment size");
+
+        if (content_type == tls::content_type::alert) {
+            util::buffer_view alert_buf(&recv_buffer_[0], recv_buffer_.size());
+            alert alert;
+            from_bytes(alert, alert_buf);
+            FUNTLS_CHECK_BINARY(alert_buf.remaining(), ==, 0, "Invalid alert message");
+
+            std::ostringstream oss;
+            oss << alert.level << " " << alert.description;
+            std::cout << "Got alert: " << oss.str() <<  std::endl;
+            throw std::runtime_error("Alert received: " + oss.str());
+        }
+
+        if (content_type == tls::content_type::handshake) {
+            assert(pending_handshake_messages_.empty());
+            pending_handshake_messages_ = recv_buffer_; // Will not become actove after this message has been parsed. This is a HACK
+        }
+
+        handler(record{content_type, protocol_version, std::move(recv_buffer_)});
+    }
+
+    void send_finished(const done_handler& handler) {
+        assert(encrypt_cipher_);
+        encrypt_cipher_ = std::move(pending_encrypt_cipher_);
+        //
+        // The sequence number MUST be set to zero whenever a connection state is made the
+        // active state.
+        //
+        encrypt_sequence_number_ = 0;
+        //
+        // A Finished message is always sent immediately after a change
+        // cipher spec message to verify that the key exchange and
+        // authentication processes were successful
+        //
+        send_handshake(tls::make_handshake(tls::finished{do_verify_data(connection_end_)}), handler);
+    }
+
 
     virtual std::vector<uint8_t> do_verify_data(tls::connection_end ce) const = 0;
 };
@@ -251,7 +307,10 @@ public:
         , client_random(tls::make_random()) {
         assert(!wanted_ciphers_.empty());
         assert(std::find(wanted_ciphers_.begin(), wanted_ciphers_.end(), tls::cipher_suite::null_with_null_null) == wanted_ciphers_.end());
-        perform_handshake();
+    }
+
+    void perform_handshake(const done_handler& handler) {
+        send_client_hello(handler);
     }
 
 private:
@@ -264,7 +323,6 @@ private:
     tls::session_id                 sesion_id;
     std::vector<uint8_t>            master_secret;
 
-    void perform_handshake() {
         /*
         Client                                               Server
 
@@ -284,17 +342,8 @@ private:
         Application Data             <------->     Application Data
         */
 
-        send_client_hello();
-        read_server_hello();
-        read_until_server_hello_done();
-        send_client_key_exchange();
-        send_change_cipher_spec();
-        read_change_cipher_spec();
-
-        std::cout << "Session " << util::base16_encode(sesion_id.as_vector()) << " in progress\n";
-    }
-
-    void send_client_hello() {
+    void send_client_hello(const done_handler& handler) {
+        std::cout << "Sending client hello\n";
         std::vector<tls::extension> extensions;
 
         const bool use_ecc = std::any_of(
@@ -335,73 +384,96 @@ private:
                 wanted_ciphers_,
                 { tls::compression_method::null },
                 extensions
-            }
-        ));
+            }), [this, handler] { read_server_hello(handler); });
     }
 
-    void read_server_hello() {
+    void read_server_hello(const done_handler& handler) {
         std::cout << "Reading server hello." << std::endl;
-        auto handshake = read_handshake();
-        auto server_hello = tls::get_as<tls::server_hello>(handshake);
-        negotiated_cipher_ = server_hello.cipher_suite;
-        if (std::find(wanted_ciphers_.begin(), wanted_ciphers_.end(), negotiated_cipher_) == wanted_ciphers_.end()) {
-            throw std::runtime_error("Invalid cipher suite returned " + util::base16_encode(&server_hello.cipher_suite, 2));
-        }
-        if (server_hello.compression_method != tls::compression_method::null) {
-            throw std::runtime_error("Invalid compression method " + std::to_string((int)server_hello.compression_method));
-        }
-        for (const auto& e : server_hello.extensions) {
-            if (e.type == tls::extension::ec_point_formats) {
-                std::cerr << "Ignoring ec_point_formats extension in " << __FILE__ << ":" << __LINE__ << std::endl;
-            } else {
-                std::ostringstream msg;
-                msg << "Unsupported TLS ServerHello extension " << e.type;
-                FUNTLS_CHECK_FAILURE(msg.str());
-            }
-        }
-        server_random = server_hello.random;
-        sesion_id = server_hello.session_id;
-        std::cout << "Negotiated cipher suite:\n" << tls::parameters_from_suite(negotiated_cipher_) << std::endl;
+        read_handshake([this, handler] (tls::handshake&& handshake) {
+                auto server_hello = tls::get_as<tls::server_hello>(handshake);
+                negotiated_cipher_ = server_hello.cipher_suite;
+                if (std::find(wanted_ciphers_.begin(), wanted_ciphers_.end(), negotiated_cipher_) == wanted_ciphers_.end()) {
+                    throw std::runtime_error("Invalid cipher suite returned " + util::base16_encode(&server_hello.cipher_suite, 2));
+                }
+                if (server_hello.compression_method != tls::compression_method::null) {
+                    throw std::runtime_error("Invalid compression method " + std::to_string((int)server_hello.compression_method));
+                }
+                for (const auto& e : server_hello.extensions) {
+                    if (e.type == tls::extension::ec_point_formats) {
+                        std::cerr << "Ignoring ec_point_formats extension in " << __FILE__ << ":" << __LINE__ << std::endl;
+                    } else {
+                        std::ostringstream msg;
+                        msg << "Unsupported TLS ServerHello extension " << e.type;
+                        FUNTLS_CHECK_FAILURE(msg.str());
+                    }
+                }
+                server_random = server_hello.random;
+                sesion_id = server_hello.session_id;
+                std::cout << "Negotiated cipher suite:\n" << tls::parameters_from_suite(negotiated_cipher_) << std::endl;
+
+                const auto cipher_param = tls::parameters_from_suite(negotiated_cipher_);
+                client_kex = tls::make_client_key_exchange_protocol(cipher_param.key_exchange_algorithm, current_protocol_version(), client_random, server_random);
+
+                std::cout << "Reading until server hello done\n";
+                // Note: Handshake messages are only allowed in a specific order
+                read_next_server_handshake({
+                        tls::handshake_type::certificate,
+                        tls::handshake_type::server_key_exchange,
+                        tls::handshake_type::server_hello_done,
+                        }, handler);
+            });
     }
 
-    void read_until_server_hello_done() {
-        const auto cipher_param = tls::parameters_from_suite(negotiated_cipher_);
-        client_kex = tls::make_client_key_exchange_protocol(cipher_param.key_exchange_algorithm, current_protocol_version(), client_random, server_random);
+    void read_next_server_handshake(const std::vector<tls::handshake_type>& allowed_handshakes, const done_handler& handler) {
+        assert(!allowed_handshakes.empty());
+        read_handshake([this, allowed_handshakes, handler] (tls::handshake&& handshake) {
+                auto ah = allowed_handshakes;
+                while (!ah.empty() && ah.front() != handshake.type) {
+                    ah.erase(ah.begin());
+                }
+                if (ah.empty()) {
+                    std::ostringstream oss;
+                    oss << "Got unexpected handshake " << int(handshake.type);
+                    FUNTLS_CHECK_FAILURE(oss.str());
+                }
 
-        std::vector<x509::certificate> certificate_list;
+                if (handshake.type == tls::handshake_type::server_hello_done) {
+                    std::cout << "Reading server hello done." << std::endl;
 
-        // Note: Handshake messages are only allowed in a specific order
+                    (void) tls::get_as<tls::server_hello_done>(handshake);
+                    send_client_key_exchange(handler);
+                    return;
+                }
 
-        auto handshake = read_handshake();
-        if (handshake.type == tls::handshake_type::certificate) {
-            std::cout << "Reading server certificate list." << std::endl;
-            auto cert_message = tls::get_as<tls::certificate>(handshake);
-            for (const auto& c : cert_message.certificate_list) {
-                const auto v = c.as_vector();
-                auto cert_buf = util::buffer_view{&v[0], v.size()};
-                certificate_list.push_back(x509::certificate::parse(asn1::read_der_encoded_value(cert_buf)));
-            }
+                if (handshake.type == tls::handshake_type::certificate) {
+                    std::cout << "Reading server certificate list." << std::endl;
+                    auto cert_message = tls::get_as<tls::certificate>(handshake);
+                    std::vector<x509::certificate> certificate_list;
+                    for (const auto& c : cert_message.certificate_list) {
+                        const auto v = c.as_vector();
+                        auto cert_buf = util::buffer_view{&v[0], v.size()};
+                        certificate_list.push_back(x509::certificate::parse(asn1::read_der_encoded_value(cert_buf)));
+                    }
 
-            FUNTLS_CHECK_BINARY(certificate_list.size(), >, 0, "Empty certificate chain not allowed");
-            verify_certificate_chain_(certificate_list);
-            client_kex->certificate_list(certificate_list);
+                    FUNTLS_CHECK_BINARY(certificate_list.size(), >, 0, "Empty certificate chain not allowed");
+                    verify_certificate_chain_(certificate_list);
+                    client_kex->certificate_list(certificate_list);
+                } else if (handshake.type == tls::handshake_type::server_key_exchange) {
+                    std::cout << "Reading server key exchange." << std::endl;
+                    client_kex->server_key_exchange(handshake);
+                } else {
+                    // Only CertificateRequest allowed before ServerHelloDone
+                    std::ostringstream oss;
+                    oss << "Got unexpected handshake " << int(handshake.type);
+                    FUNTLS_CHECK_FAILURE(oss.str());
+                }
 
-            handshake = read_handshake();
-        }
-
-        if (handshake.type == tls::handshake_type::server_key_exchange) {
-            std::cout << "Reading server key exchange." << std::endl;
-            client_kex->server_key_exchange(handshake);
-            handshake = read_handshake();
-        }
-
-        // Only CertificateRequest allowed before ServerHelloDone
-        std::cout << "Reading server hello done." << std::endl;
-
-        (void) tls::get_as<tls::server_hello_done>(handshake);
+                read_next_server_handshake(ah, handler);
+            });
     }
 
-    void request_cipher_change(const std::vector<uint8_t>& pre_master_secret) {
+    void request_cipher_change(const std::vector<uint8_t>& pre_master_secret, const done_handler& handler) {
+        std::cout << "Requesting cipher change\n";
         // We can now compute the master_secret as specified in rfc5246 8.1
         // master_secret = PRF(pre_master_secret, "master secret", ClientHello.random + ServerHello.random)[0..47]
 
@@ -434,16 +506,27 @@ private:
 
         // TODO: This should obviously be reversed if running as a server
         set_pending_ciphers(std::move(client_cipher_parameters), std::move(server_cipher_parameters));
+
+        send_change_cipher_spec([this, handler] {
+                    std::cout << "Reading change cipher spec\n";
+                    read_change_cipher_spec([this, handler] {
+                                std::cout << "Handshake done. Session id " << util::base16_encode(sesion_id.as_vector()) << std::endl;
+                                handler();
+                            });
+                });
     }
 
-    void send_client_key_exchange() {
+    void send_client_key_exchange(const done_handler& handler) {
+        std::cout << "Sending client key exchange\n";
         std::vector<uint8_t> pre_master_secret;
         tls::handshake       client_key_exchange;
         assert(client_kex);
         std::tie(pre_master_secret, client_key_exchange) = client_kex->result();
         std::cout << "Sending client key exchange." << std::endl;
-        send_handshake(client_key_exchange);
-        request_cipher_change(pre_master_secret);
+        send_handshake(client_key_exchange,
+                [this, pre_master_secret, handler] {
+                    request_cipher_change(pre_master_secret, handler);
+                });
     }
 
     virtual std::vector<uint8_t> do_verify_data(tls::connection_end ce) const override {
@@ -677,22 +760,20 @@ int main(int argc, char* argv[])
     tls_client::verify_certificate_chain_func cf = std::bind(&verify_cert_chain, std::placeholders::_1, ts);
     tls_client client{std::move(socket), wanted_ciphers, cf};
 
-    const auto data = "GET "+path+" HTTP/1.1\r\nHost: "+host+"\r\nConnection: close\r\n\r\n";
-    client.send_app_data(std::vector<uint8_t>(data.begin(), data.end()));
+    std::function<void (std::vector<uint8_t>&&)> got_app_data = [&] (std::vector<uint8_t>&& res) {
+        std::cout << std::string(res.begin(), res.end()) << std::flush;
+        client.next_app_data(got_app_data);
+    };
 
-    // Ugly!
-    bool got_app_data = false;
-    for (;;) {
-        try {
-            const auto res = client.next_app_data();
-            std::cout << std::string(res.begin(), res.end()) << std::endl;
-            got_app_data = true;
-        } catch (const std::exception& e) {
-            if (!got_app_data) throw;
-            std::cout << e.what() << std::endl;
-            break;
-        }
-    }
+    client.perform_handshake([&] {
+            std::cout << "Handshake done!\n";
+            const auto data = "GET "+path+" HTTP/1.1\r\nHost: "+host+"\r\nConnection: close\r\n\r\n";
+            client.send_app_data(std::vector<uint8_t>(data.begin(), data.end()), [&] {
+                    client.next_app_data(got_app_data);
+                });
+        });
+    io_service.run();
+    std::cout << "io service exiting\n";
 
     return 0;
 }
