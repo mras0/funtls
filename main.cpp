@@ -24,15 +24,62 @@ using namespace funtls;
 
 namespace {
 
-std::string error_code_str(const boost::system::error_code& ec) {
-    std::ostringstream oss;
-    oss << ec;
-    return oss.str();
-}
-
 std::exception_ptr make_exception(boost::system::error_code ec)
 {
     return std::make_exception_ptr(boost::system::system_error(ec));
+}
+
+namespace detail {
+template<typename T>
+struct arg_type;
+
+template<typename T>
+struct arg_type : public arg_type<decltype(&T::operator())> {
+};
+
+template<typename C, typename R>
+struct arg_type<R (C::*)() const> {
+    using type = void;
+};
+
+template<typename C, typename R, typename A>
+struct arg_type<R (C::*)(A&&) const> {
+    using type = A;
+};
+} // namespace detail
+
+template<typename F, typename T>
+void do_wrapped(F f, const std::function<void (util::async_result<T>)>& handler) {
+    try {
+        f();
+    } catch (...) {
+        handler(std::current_exception());
+    }
+}
+
+template<typename F, typename T1 = typename detail::arg_type<F>::type, typename T2>
+typename std::enable_if<!std::is_same<T1, void>::value, std::function<void (util::async_result<T1>)>>::type wrapped(F f, const std::function<void (util::async_result<T2>)>& handler)
+{
+    return [=] (util::async_result<T1> res) {
+        try {
+            f(res.get());
+        } catch (...) {
+            handler(std::current_exception());
+        }
+    };
+}
+
+template<typename F, typename T1 = typename detail::arg_type<F>::type, typename T2>
+typename std::enable_if<std::is_same<T1, void>::value, std::function<void (util::async_result<T1>)>>::type wrapped(F f, const std::function<void (util::async_result<T2>)>& handler)
+{
+    return [=] (util::async_result<T1> res) {
+        try {
+            res.get();
+            f();
+        } catch (...) {
+            handler(std::current_exception());
+        }
+    };
 }
 
 } // unnamed namespace
@@ -42,7 +89,6 @@ namespace funtls { namespace tls {
 enum class connection_end { server, client };
 
 // TODO: Handle record fragmentation/coalescence
-// TODO: Make sure errors are passed on to handlers instead of letting exceptions escape
 class socket {
 public:
     using app_data_sent_handler = std::function<void (util::async_result<void>)>;
@@ -53,15 +99,11 @@ public:
     }
 
     void next_app_data(const app_data_handler& handler) {
-        read_record([handler] (util::async_result<record> res) {
-                if (!res) {
-                    handler(res.get_exception());
-                    return;
-                }
-                auto record = res.get();
+        recv_record(wrapped(
+            [handler] (record&& record) {
                 FUNTLS_CHECK_BINARY(record.type, ==, content_type::application_data, "Unexpected content type");
                 handler(std::move(record.fragment));
-            });
+            }, handler));
     }
 
 protected:
@@ -75,27 +117,29 @@ protected:
     using recv_handshake_handler = std::function<void(util::async_result<handshake>)>;
 
     void send_record(tls::content_type content_type, const std::vector<uint8_t>& plaintext, const done_handler& handler) {
-        collapse_pending();
-        FUNTLS_CHECK_BINARY(plaintext.size(), >=, 1, "Illegal plain text size"); // TODO: Empty plaintext is legal for app data
-        FUNTLS_CHECK_BINARY(plaintext.size(), <=, record::max_plaintext_length, "Illegal plain text size");
+        do_wrapped([&] {
+            collapse_pending();
+            FUNTLS_CHECK_BINARY(plaintext.size(), >=, 1, "Illegal plain text size"); // TODO: Empty plaintext is legal for app data
+            FUNTLS_CHECK_BINARY(plaintext.size(), <=, record::max_plaintext_length, "Illegal plain text size");
 
-        if (content_type == tls::content_type::handshake) {
-            append_to_buffer(handshake_messages_, plaintext);
-        }
+            if (content_type == tls::content_type::handshake) {
+                append_to_buffer(handshake_messages_, plaintext);
+            }
 
-        // Compression would happen here
+            // Compression would happen here
 
-        // Do encryption
-        const auto ver_buffer = verification_buffer(encrypt_sequence_number_++, content_type, current_protocol_version_, plaintext.size());
-        const auto fragment  = encrypt_cipher_->process(plaintext, ver_buffer);
-        FUNTLS_CHECK_BINARY(fragment.size(), <=, record::max_ciphertext_length, "Illegal fragment size");
+            // Do encryption
+            const auto ver_buffer = verification_buffer(encrypt_sequence_number_++, content_type, current_protocol_version_, plaintext.size());
+            const auto fragment  = encrypt_cipher_->process(plaintext, ver_buffer);
+            FUNTLS_CHECK_BINARY(fragment.size(), <=, record::max_ciphertext_length, "Illegal fragment size");
 
-        send_buffer_.clear();
-        append_to_buffer(send_buffer_, content_type);
-        append_to_buffer(send_buffer_, current_protocol_version_);
-        append_to_buffer(send_buffer_, uint16(fragment.size()));
-        assert(send_buffer_.size() == 5);
-        append_to_buffer(send_buffer_, fragment);
+            send_buffer_.clear();
+            append_to_buffer(send_buffer_, content_type);
+            append_to_buffer(send_buffer_, current_protocol_version_);
+            append_to_buffer(send_buffer_, uint16(fragment.size()));
+            assert(send_buffer_.size() == 5);
+            append_to_buffer(send_buffer_, fragment);
+        }, handler);
 
         boost::asio::async_write(socket_, boost::asio::buffer(send_buffer_),
                 [this, handler](const boost::system::error_code& ec, size_t) {
@@ -107,30 +151,32 @@ protected:
                 });
     }
 
-    void read_record(const recv_record_handler& handler) {
-        collapse_pending();
-        recv_buffer_.resize(5);
+    void recv_record(const recv_record_handler& handler) {
+        do_wrapped([&] {
+            collapse_pending();
+            recv_buffer_.resize(5);
+        }, handler);
         boost::asio::async_read(socket_, boost::asio::buffer(recv_buffer_),
                 [this, handler](const boost::system::error_code& ec, size_t) {
                     if (ec) {
                         handler(make_exception(ec));
                         return;
                     }
-                    do_read_record_content(handler);
+                    do_recv_record_content(handler);
                 });
     }
 
     void send_handshake(const handshake& handshake, const done_handler& handler) {
-        assert(handshake.content_type == content_type::handshake);
-        std::vector<uint8_t> payload_buffer;
-        append_to_buffer(payload_buffer, handshake);
-
-        send_record(handshake.content_type, payload_buffer, handler);
+        do_wrapped([&] {
+            assert(handshake.content_type == content_type::handshake);
+            std::vector<uint8_t> payload_buffer;
+            append_to_buffer(payload_buffer, handshake);
+            send_record(handshake.content_type, payload_buffer, handler);
+        }, handler);
     }
 
     void read_handshake(const recv_handshake_handler& handler) {
-        read_record( [this, handler](util::async_result<record> res) {
-                auto record = res.get();
+        recv_record(wrapped([this, handler](record&& record) {
                 FUNTLS_CHECK_BINARY(record.type, ==, content_type::handshake, "Invalid content type");
 
                 util::buffer_view frag_buf{&record.fragment[0], record.fragment.size()};
@@ -140,7 +186,7 @@ protected:
                     FUNTLS_CHECK_FAILURE("Unread handshake data. Fragment: " + util::base16_encode(record.fragment));
                 }
                 handler(std::move(handshake));
-            });
+            }, handler));
     }
 
     protocol_version current_protocol_version() const {
@@ -158,29 +204,26 @@ protected:
     }
 
     void send_change_cipher_spec(const done_handler& handler) {
-        std::cout << "Sending change cipher spec." << std::endl;
-        if (!pending_encrypt_cipher_) {
-            FUNTLS_CHECK_FAILURE("Sending ChangeCipherSpec without a pending cipher suite");
-        }
-        change_cipher_spec msg{};
-        std::vector<uint8_t> payload_buffer;
-        append_to_buffer(payload_buffer, msg);
-        //
-        // Immediately after sending [the ChangeCipherSpec] message, the sender MUST instruct the
-        // record layer to make the write pending state the write active state.
-        //
-        send_record(msg.content_type, payload_buffer, [this, handler] (util::async_result<void> res) {
-                if (!res) {
-                    handler(res.get_exception());
-                    return;
-                }
-                send_finished(handler);
-            });
+        do_wrapped([&] {
+            std::cout << "Sending change cipher spec." << std::endl;
+            if (!pending_encrypt_cipher_) {
+                FUNTLS_CHECK_FAILURE("Sending ChangeCipherSpec without a pending cipher suite");
+            }
+            change_cipher_spec msg{};
+            std::vector<uint8_t> payload_buffer;
+            append_to_buffer(payload_buffer, msg);
+            //
+            // Immediately after sending [the ChangeCipherSpec] message, the sender MUST instruct the
+            // record layer to make the write pending state the write active state.
+            //
+            send_record(msg.content_type, payload_buffer, wrapped([this, handler] () {
+                    send_finished(handler);
+                }, handler));
+        }, handler);
     }
 
     void read_change_cipher_spec(const done_handler& handler) {
-        read_record([this, handler] (util::async_result<record> res) {
-                auto record = res.get();
+        recv_record(wrapped([this, handler] (record&& record) {
                 FUNTLS_CHECK_BINARY(record.type,            ==, content_type::change_cipher_spec, "Invalid content type");
                 FUNTLS_CHECK_BINARY(record.fragment.size(), ==, 1, "Invalid ChangeCipherSpec fragment size");
                 FUNTLS_CHECK_BINARY(record.fragment[0],     !=, 0, "Invalid ChangeCipherSpec fragment data");
@@ -195,17 +238,12 @@ protected:
                 decrypt_sequence_number_ = 0;
 
                 do_read_finished(handler);
-            });
+            }, handler));
     }
 
     void do_read_finished(const done_handler& handler) {
         // Read finished
-        read_handshake([this, handler] (util::async_result<tls::handshake> res) {
-                if (!res) {
-                    handler(res.get_exception());
-                    return;
-                }
-                auto handshake = res.get();
+        read_handshake(wrapped([this, handler] (handshake&& handshake) {
                 auto finished = tls::get_as<tls::finished>(handshake);
                 const auto calced_verify_data = do_verify_data(connection_end_ == connection_end::server ? connection_end::client : connection_end::server);
                 if (finished.verify_data != calced_verify_data) {
@@ -216,7 +254,7 @@ protected:
                     FUNTLS_CHECK_FAILURE(oss.str());
                 }
                 handler(util::async_result<void>{});
-            });
+            }, handler));
     }
 
 private:
@@ -242,62 +280,69 @@ private:
         pending_handshake_messages_.clear();
     }
 
-    void do_read_record_content(const recv_record_handler& handler) {
-        util::buffer_view     buf_view{&recv_buffer_[0], recv_buffer_.size()};
-        content_type          content_type;
-        protocol_version      protocol_version;
-        uint16                length;
-        from_bytes(content_type, buf_view);
-        from_bytes(protocol_version, buf_view);
-        from_bytes(length, buf_view);
-        assert(buf_view.remaining() == 0);
+    void do_recv_record_content(const recv_record_handler& handler) {
+        do_wrapped([&] {
+            util::buffer_view     buf_view{&recv_buffer_[0], recv_buffer_.size()};
+            content_type          content_type;
+            protocol_version      protocol_version;
+            uint16                length;
+            from_bytes(content_type, buf_view);
+            from_bytes(protocol_version, buf_view);
+            from_bytes(length, buf_view);
+            assert(buf_view.remaining() == 0);
 
-        FUNTLS_CHECK_BINARY(protocol_version, ==, current_protocol_version(), "Wrong TLS version");
-        FUNTLS_CHECK_BINARY(length, >=, 1, "Illegal fragment size");
-        FUNTLS_CHECK_BINARY(length, <=, record::max_ciphertext_length, "Illegal fragment size");
+            FUNTLS_CHECK_BINARY(protocol_version, ==, current_protocol_version(), "Wrong TLS version");
+            FUNTLS_CHECK_BINARY(length, >=, 1, "Illegal fragment size");
+            FUNTLS_CHECK_BINARY(length, <=, record::max_ciphertext_length, "Illegal fragment size");
 
-        recv_buffer_.resize(length);
-        assert(recv_buffer_.size() <= record::max_ciphertext_length);
-        boost::asio::async_read(socket_, boost::asio::buffer(recv_buffer_),
-                [this, content_type, protocol_version, handler](const boost::system::error_code& ec, size_t) {
-                    if (ec) FUNTLS_CHECK_FAILURE(error_code_str(ec));
-                    do_decrypt(content_type, protocol_version, handler);
-                });
+            recv_buffer_.resize(length);
+            assert(recv_buffer_.size() <= record::max_ciphertext_length);
+            boost::asio::async_read(socket_, boost::asio::buffer(recv_buffer_),
+                    [this, content_type, protocol_version, handler](const boost::system::error_code& ec, size_t) {
+                        if (ec) {
+                            handler(make_exception(ec));
+                            return;
+                        }
+                        do_decrypt(content_type, protocol_version, handler);
+                    });
+        }, handler);
     }
 
     void do_decrypt(tls::content_type content_type, tls::protocol_version protocol_version, const recv_record_handler& handler) {
-        //
-        // Decrypt
-        //
-        const auto ver_buffer = verification_buffer(decrypt_sequence_number_++, content_type, current_protocol_version(), 0 /* filled in later */);
-        recv_buffer_ = decrypt_cipher_->process(recv_buffer_, ver_buffer);
+        do_wrapped([&] {
+            //
+            // Decrypt
+            //
+            const auto ver_buffer = verification_buffer(decrypt_sequence_number_++, content_type, current_protocol_version(), 0 /* filled in later */);
+            recv_buffer_ = decrypt_cipher_->process(recv_buffer_, ver_buffer);
 
-        // Decompression would happen here
-        FUNTLS_CHECK_BINARY(recv_buffer_.size(), <=, record::max_compressed_length, "Illegal decoded fragment size");
+            // Decompression would happen here
+            FUNTLS_CHECK_BINARY(recv_buffer_.size(), <=, record::max_compressed_length, "Illegal decoded fragment size");
 
-        //
-        // We now have a TLSPlaintext buffer for consumption
-        //
-        FUNTLS_CHECK_BINARY(recv_buffer_.size(), <=, record::max_plaintext_length, "Illegal decoded fragment size");
+            //
+            // We now have a TLSPlaintext buffer for consumption
+            //
+            FUNTLS_CHECK_BINARY(recv_buffer_.size(), <=, record::max_plaintext_length, "Illegal decoded fragment size");
 
-        if (content_type == tls::content_type::alert) {
-            util::buffer_view alert_buf(&recv_buffer_[0], recv_buffer_.size());
-            alert alert;
-            from_bytes(alert, alert_buf);
-            FUNTLS_CHECK_BINARY(alert_buf.remaining(), ==, 0, "Invalid alert message");
+            if (content_type == tls::content_type::alert) {
+                util::buffer_view alert_buf(&recv_buffer_[0], recv_buffer_.size());
+                alert alert;
+                from_bytes(alert, alert_buf);
+                FUNTLS_CHECK_BINARY(alert_buf.remaining(), ==, 0, "Invalid alert message");
 
-            std::ostringstream oss;
-            oss << alert.level << " " << alert.description;
-            std::cout << "Got alert: " << oss.str() <<  std::endl;
-            throw std::runtime_error("Alert received: " + oss.str());
-        }
+                std::ostringstream oss;
+                oss << alert.level << " " << alert.description;
+                std::cout << "Got alert: " << oss.str() <<  std::endl;
+                throw std::runtime_error("Alert received: " + oss.str());
+            }
 
-        if (content_type == tls::content_type::handshake) {
-            assert(pending_handshake_messages_.empty());
-            pending_handshake_messages_ = recv_buffer_; // Will not become actove after this message has been parsed. This is a HACK
-        }
+            if (content_type == tls::content_type::handshake) {
+                assert(pending_handshake_messages_.empty());
+                pending_handshake_messages_ = recv_buffer_; // Will not become actove after this message has been parsed. This is a HACK
+            }
 
-        handler(record{content_type, protocol_version, std::move(recv_buffer_)});
+            handler(record{content_type, protocol_version, std::move(recv_buffer_)});
+        }, handler);
     }
 
     void send_finished(const done_handler& handler) {
@@ -335,7 +380,7 @@ public:
     }
 
     void perform_handshake(const done_handler& handler) {
-        send_client_hello(handler);
+        do_wrapped([this, handler] { send_client_hello(handler); }, handler);
     }
 
 private:
@@ -409,23 +454,14 @@ private:
                 wanted_ciphers_,
                 { tls::compression_method::null },
                 extensions
-            }), [this, handler] (util::async_result<void> res) {
-                if (!res) {
-                    handler(res.get_exception());
-                    return;
-                }
+            }), wrapped([this, handler] () {
                 read_server_hello(handler);
-            });
+            }, handler));
     }
 
     void read_server_hello(const done_handler& handler) {
         std::cout << "Reading server hello." << std::endl;
-        read_handshake([this, handler] (util::async_result<tls::handshake> res) {
-                if (!res) {
-                    handler(res.get_exception());
-                    return;
-                }
-                auto handshake = res.get();
+        read_handshake(wrapped([this, handler] (tls::handshake&& handshake) {
                 auto server_hello = tls::get_as<tls::server_hello>(handshake);
                 negotiated_cipher_ = server_hello.cipher_suite;
                 if (std::find(wanted_ciphers_.begin(), wanted_ciphers_.end(), negotiated_cipher_) == wanted_ciphers_.end()) {
@@ -457,17 +493,12 @@ private:
                         tls::handshake_type::server_key_exchange,
                         tls::handshake_type::server_hello_done,
                         }, handler);
-            });
+            }, handler));
     }
 
     void read_next_server_handshake(const std::vector<tls::handshake_type>& allowed_handshakes, const done_handler& handler) {
         assert(!allowed_handshakes.empty());
-        read_handshake([this, allowed_handshakes, handler] (util::async_result<tls::handshake> res) {
-                if (!res) {
-                    handler(res.get_exception());
-                    return;
-                }
-                auto handshake = res.get();
+        read_handshake(wrapped([this, allowed_handshakes, handler] (tls::handshake&& handshake) {
                 auto ah = allowed_handshakes;
                 while (!ah.empty() && ah.front() != handshake.type) {
                     ah.erase(ah.begin());
@@ -510,74 +541,68 @@ private:
                 }
 
                 read_next_server_handshake(ah, handler);
-            });
+            }, handler));
     }
 
     void request_cipher_change(const std::vector<uint8_t>& pre_master_secret, const done_handler& handler) {
-        std::cout << "Requesting cipher change\n";
-        // We can now compute the master_secret as specified in rfc5246 8.1
-        // master_secret = PRF(pre_master_secret, "master secret", ClientHello.random + ServerHello.random)[0..47]
+        do_wrapped([&] {
+            std::cout << "Requesting cipher change\n";
+            // We can now compute the master_secret as specified in rfc5246 8.1
+            // master_secret = PRF(pre_master_secret, "master secret", ClientHello.random + ServerHello.random)[0..47]
 
-        const auto cipher_param = tls::parameters_from_suite(negotiated_cipher_);
-        std::vector<uint8_t> rand_buf;
-        tls::append_to_buffer(rand_buf, client_random);
-        tls::append_to_buffer(rand_buf, server_random);
-        master_secret = tls::PRF(cipher_param.prf_algorithm, pre_master_secret, "master secret", rand_buf, tls::master_secret_size);
-        assert(master_secret.size() == tls::master_secret_size);
-        //std::cout << "Master secret: " << util::base16_encode(master_secret) << std::endl;
+            const auto cipher_param = tls::parameters_from_suite(negotiated_cipher_);
+            std::vector<uint8_t> rand_buf;
+            tls::append_to_buffer(rand_buf, client_random);
+            tls::append_to_buffer(rand_buf, server_random);
+            master_secret = tls::PRF(cipher_param.prf_algorithm, pre_master_secret, "master secret", rand_buf, tls::master_secret_size);
+            assert(master_secret.size() == tls::master_secret_size);
+            //std::cout << "Master secret: " << util::base16_encode(master_secret) << std::endl;
 
-        // Now do Key Calculation http://tools.ietf.org/html/rfc5246#section-6.3
-        // key_block = PRF(SecurityParameters.master_secret, "key expansion", SecurityParameters.server_random + SecurityParameters.client_random)
-        const size_t key_block_length  = 2 * cipher_param.mac_key_length + 2 * cipher_param.key_length + 2 * cipher_param.fixed_iv_length;
-        auto key_block = tls::PRF(cipher_param.prf_algorithm, master_secret, "key expansion", tls::vec_concat(server_random.as_vector(), client_random.as_vector()), key_block_length);
+            // Now do Key Calculation http://tools.ietf.org/html/rfc5246#section-6.3
+            // key_block = PRF(SecurityParameters.master_secret, "key expansion", SecurityParameters.server_random + SecurityParameters.client_random)
+            const size_t key_block_length  = 2 * cipher_param.mac_key_length + 2 * cipher_param.key_length + 2 * cipher_param.fixed_iv_length;
+            auto key_block = tls::PRF(cipher_param.prf_algorithm, master_secret, "key expansion", tls::vec_concat(server_random.as_vector(), client_random.as_vector()), key_block_length);
 
-        //std::cout << "Keyblock:\n" << util::base16_encode(key_block) << "\n";
+            //std::cout << "Keyblock:\n" << util::base16_encode(key_block) << "\n";
 
-        size_t i = 0;
-        auto client_mac_key = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.mac_key_length]};  i += cipher_param.mac_key_length;
-        auto server_mac_key = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.mac_key_length]};  i += cipher_param.mac_key_length;
-        auto client_enc_key = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.key_length]};      i += cipher_param.key_length;
-        auto server_enc_key = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.key_length]};      i += cipher_param.key_length;
-        auto client_iv      = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.fixed_iv_length]}; i += cipher_param.fixed_iv_length;
-        auto server_iv      = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.fixed_iv_length]}; i += cipher_param.fixed_iv_length;
-        assert(i == key_block.size());
+            size_t i = 0;
+            auto client_mac_key = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.mac_key_length]};  i += cipher_param.mac_key_length;
+            auto server_mac_key = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.mac_key_length]};  i += cipher_param.mac_key_length;
+            auto client_enc_key = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.key_length]};      i += cipher_param.key_length;
+            auto server_enc_key = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.key_length]};      i += cipher_param.key_length;
+            auto client_iv      = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.fixed_iv_length]}; i += cipher_param.fixed_iv_length;
+            auto server_iv      = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.fixed_iv_length]}; i += cipher_param.fixed_iv_length;
+            assert(i == key_block.size());
 
-        tls::cipher_parameters client_cipher_parameters{tls::cipher_parameters::encrypt, cipher_param, client_mac_key, client_enc_key, client_iv};
-        tls::cipher_parameters server_cipher_parameters{tls::cipher_parameters::decrypt, cipher_param, server_mac_key, server_enc_key, server_iv};
+            tls::cipher_parameters client_cipher_parameters{tls::cipher_parameters::encrypt, cipher_param, client_mac_key, client_enc_key, client_iv};
+            tls::cipher_parameters server_cipher_parameters{tls::cipher_parameters::decrypt, cipher_param, server_mac_key, server_enc_key, server_iv};
 
-        // TODO: This should obviously be reversed if running as a server
-        set_pending_ciphers(std::move(client_cipher_parameters), std::move(server_cipher_parameters));
+            // TODO: This should obviously be reversed if running as a server
+            set_pending_ciphers(std::move(client_cipher_parameters), std::move(server_cipher_parameters));
 
-        send_change_cipher_spec([this, handler] (util::async_result<void> res) {
-                    if (!res) {
-                        handler(std::move(res));
-                        return;
-                    }
-                    std::cout << "Reading change cipher spec\n";
-                    read_change_cipher_spec([this, handler] (util::async_result<void> res) {
-                                if (res) {
+            send_change_cipher_spec(wrapped([this, handler] () {
+                        std::cout << "Reading change cipher spec\n";
+                        read_change_cipher_spec(wrapped([this, handler] () {
                                     std::cout << "Handshake done. Session id " << util::base16_encode(sesion_id.as_vector()) << std::endl;
-                                }
-                                handler(std::move(res));
-                            });
-                });
+                                    handler(util::async_result<void>{});
+                                }, handler));
+                    }, handler));
+        }, handler);
     }
 
     void send_client_key_exchange(const done_handler& handler) {
-        std::cout << "Sending client key exchange\n";
-        std::vector<uint8_t> pre_master_secret;
-        tls::handshake       client_key_exchange;
-        assert(client_kex);
-        std::tie(pre_master_secret, client_key_exchange) = client_kex->result();
-        std::cout << "Sending client key exchange." << std::endl;
-        send_handshake(client_key_exchange,
-                [this, pre_master_secret, handler] (util::async_result<void> res) {
-                    if (!res) {
-                        handler(std::move(res));
-                        return;
-                    }
-                    request_cipher_change(pre_master_secret, handler);
-                });
+        do_wrapped([&] {
+            std::cout << "Sending client key exchange\n";
+            std::vector<uint8_t> pre_master_secret;
+            tls::handshake       client_key_exchange;
+            assert(client_kex);
+            std::tie(pre_master_secret, client_key_exchange) = client_kex->result();
+            std::cout << "Sending client key exchange." << std::endl;
+            send_handshake(client_key_exchange,
+                    wrapped([this, pre_master_secret, handler] () {
+                        request_cipher_change(pre_master_secret, handler);
+                    }, handler));
+        }, handler);
     }
 
     virtual std::vector<uint8_t> do_verify_data(tls::connection_end ce) const override {
