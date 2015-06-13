@@ -1,4 +1,5 @@
-#include "tls_ecc.h"
+#include <tls/tls_ecc.h>
+#include <tls/tls_ser.h>
 #include <util/test.h>
 #include <util/base_conversion.h>
 #include <int_util/int_util.h>
@@ -67,5 +68,14 @@ void from_bytes(server_key_exchange_ec_dhe& item, util::buffer_view& buffer) {
 void append_to_buffer(std::vector<uint8_t>& buffer, const client_key_exchange_ecdhe_ecdsa& item) {
     append_to_buffer(buffer, item.ecdh_Yc);
 }
+
+extension make_named_curves(const named_curves_list& named_curves) {
+    return extension{extension::elliptic_curves, as_buffer(named_curves)};
+}
+
+extension make_ec_point_formats(const ec_point_format_list& point_formats) {
+    return extension{extension::ec_point_formats, as_buffer(point_formats)};
+}
+
 
 } } // namespace funtls::tls

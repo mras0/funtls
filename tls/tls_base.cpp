@@ -1,4 +1,5 @@
 #include <tls/tls_base.h>
+#include <tls/tls_ser.h>
 #include <util/test.h>
 #include <util/base_conversion.h>
 

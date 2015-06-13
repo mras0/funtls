@@ -9,14 +9,14 @@
 using namespace funtls;
 
 namespace {
+
 template<typename T>
 void get_random_bytes(T& t) {
     static_assert(std::is_pod<T>::value && !std::is_pointer<T>::value, "");
     util::get_random_bytes(&t, sizeof(T));
 }
 
-uint32_t get_gmt_unix_time()
-{
+uint32_t get_gmt_unix_time() {
     struct timeval tv;
     gettimeofday(&tv, nullptr);
     return static_cast<uint32_t>(tv.tv_sec);
@@ -27,6 +27,13 @@ std::vector<uint8_t> HMAC_hash(const std::vector<uint8_t>& secret, const std::ve
     assert(!secret.empty());
     assert(!data.empty());
     return T{secret}.input(data).result();
+}
+
+std::vector<uint8_t> vec_concat(const std::vector<uint8_t>& a, const std::vector<uint8_t>& b) {
+    std::vector<uint8_t> combined;
+    combined.insert(combined.end(), a.begin(), a.end());
+    combined.insert(combined.end(), b.begin(), b.end());
+    return combined;
 }
 
 template<typename hmac_func_type>
@@ -52,7 +59,7 @@ std::vector<uint8_t> P_hash(const hmac_func_type& HMAC_hash, const std::vector<u
     std::vector<uint8_t> result;
     while (result.size() < wanted_size) {
         a = HMAC_hash(a); // A(i) = HMAC_hash(secret, A(i-1))
-        auto digest = HMAC_hash(tls::vec_concat(a, seed));
+        auto digest = HMAC_hash(vec_concat(a, seed));
         result.insert(result.end(), digest.begin(), digest.end());
     }
 
@@ -69,12 +76,6 @@ random make_random() {
     r.gmt_unix_time = get_gmt_unix_time();
     ::get_random_bytes(r.random_bytes);
     return r;
-}
-
-std::vector<uint8_t> random::as_vector() const {
-    std::vector<uint8_t> buf;
-    append_to_buffer(buf, *this);
-    return buf;
 }
 
 std::ostream& operator<<(std::ostream& os, content_type type)
@@ -154,13 +155,6 @@ std::ostream& operator<<(std::ostream& os, const protocol_version& version)
     return os;
 }
 
-std::vector<uint8_t> vec_concat(const std::vector<uint8_t>& a, const std::vector<uint8_t>& b) {
-    std::vector<uint8_t> combined;
-    combined.insert(combined.end(), a.begin(), a.end());
-    combined.insert(combined.end(), b.begin(), b.end());
-    return combined;
-}
-
 // Pseudo Random Function rfc5246 section 5
 std::vector<uint8_t> PRF(prf_algorithm algo, const std::vector<uint8_t>& secret, const std::string& label, const std::vector<uint8_t>& seed, size_t wanted_size) {
 
@@ -176,17 +170,6 @@ std::vector<uint8_t> PRF(prf_algorithm algo, const std::vector<uint8_t>& secret,
     // PRF(secret, label, seed) = P_<hash>(secret, label + seed)
     auto HMAC_hash = [&](const std::vector<uint8_t>& data) { return HMAC_hash_func(secret, data); };
     return P_hash(HMAC_hash, vec_concat(std::vector<uint8_t>{label.begin(), label.end()}, seed), wanted_size);
-}
-
-std::vector<uint8_t> verification_buffer(uint64_t seq_no, content_type content_type, protocol_version version, uint16 length)
-{
-    std::vector<uint8_t> buffer;
-    buffer.reserve(8 + 1 + 2 + 2);
-    append_to_buffer(buffer, seq_no);
-    append_to_buffer(buffer, content_type);
-    append_to_buffer(buffer, version);
-    append_to_buffer(buffer, length);
-    return buffer;
 }
 
 std::ostream& operator<<(std::ostream& os, hash_algorithm h)

@@ -1,5 +1,6 @@
 #include <tls/tls_client.h>
 #include <tls/tls_kex.h>
+#include <tls/tls_ser.h>
 #include <util/test.h>
 #include <util/base_conversion.h>
 #include <assert.h>
@@ -202,7 +203,10 @@ void client::request_cipher_change(const std::vector<uint8_t>& pre_master_secret
         // Now do Key Calculation http://tools.ietf.org/html/rfc5246#section-6.3
         // key_block = PRF(SecurityParameters.master_secret, "key expansion", SecurityParameters.server_random + SecurityParameters.client_random)
         const size_t key_block_length  = 2 * cipher_param.mac_key_length + 2 * cipher_param.key_length + 2 * cipher_param.fixed_iv_length;
-        auto key_block = PRF(cipher_param.prf_algorithm, master_secret, "key expansion", vec_concat(server_random.as_vector(), client_random.as_vector()), key_block_length);
+        std::vector<uint8_t> randbuf;
+        append_to_buffer(randbuf, server_random);
+        append_to_buffer(randbuf, client_random);
+        auto key_block = PRF(cipher_param.prf_algorithm, master_secret, "key expansion", randbuf, key_block_length);
 
         //std::cout << "Keyblock:\n" << util::base16_encode(key_block) << "\n";
 

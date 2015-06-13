@@ -1,4 +1,5 @@
 #include <tls/tls.h>
+#include <tls/tls_ser.h>
 #include <util/base_conversion.h>
 #include <util/test.h>
 #include <iostream>
@@ -208,4 +209,5 @@ int main()
     test_cipher_traits();
     test_cipher_parsing();
 
+    // TODO: Test tls::tls_base and tls::client
 }

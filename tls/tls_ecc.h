@@ -3,9 +3,11 @@
 
 #include "tls.h"
 
-namespace funtls { namespace ec {
-struct curve;
-} }
+// Forward declarations
+namespace funtls {
+    namespace ec { struct curve; }
+    namespace util { class buffer_view; }
+}
 
 namespace funtls { namespace tls {
 
@@ -45,9 +47,7 @@ const ec::curve& curve_from_name(named_curve nc);
 std::ostream& operator<<(std::ostream& os, named_curve nc);
 
 using named_curves_list = vector<named_curve, 2, (1<<16)-2>;
-inline extension make_named_curves(const named_curves_list& named_curves) {
-    return extension{extension::elliptic_curves, as_buffer(named_curves)};
-}
+extension make_named_curves(const named_curves_list& named_curves);
 
 // ec_point_formats extension
 enum class ec_point_format : uint8 {
@@ -57,9 +57,7 @@ enum class ec_point_format : uint8 {
 };
 using ec_point_format_list = vector<ec_point_format, 1, (1<<8)-1>;
 
-inline extension make_ec_point_formats(const ec_point_format_list& point_formats) {
-    return extension{extension::ec_point_formats, as_buffer(point_formats)};
-}
+extension make_ec_point_formats(const ec_point_format_list& point_formats);
 
 enum class ec_curve_type : uint8 {
     explicit_prime = 1,
