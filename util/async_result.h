@@ -168,10 +168,10 @@ void do_wrapped(F f, const std::function<void (util::async_result<T>)>& handler)
     }
 }
 
-template<typename F, typename T1 = typename detail::arg_type<F>::type, typename T2>
-typename std::enable_if<!std::is_same<T1, void>::value, std::function<void (util::async_result<T1>)>>::type wrapped(F f, const std::function<void (util::async_result<T2>)>& handler)
+template<typename F, typename T = typename detail::arg_type<F>::type, typename H>
+typename std::enable_if<!std::is_same<T, void>::value, std::function<void (util::async_result<T>)>>::type wrapped(F f, H handler)
 {
-    return [=] (util::async_result<T1> res) {
+    return [=] (util::async_result<T> res) {
         try {
             f(res.get());
         } catch (...) {
@@ -180,10 +180,10 @@ typename std::enable_if<!std::is_same<T1, void>::value, std::function<void (util
     };
 }
 
-template<typename F, typename T1 = typename detail::arg_type<F>::type, typename T2>
-typename std::enable_if<std::is_same<T1, void>::value, std::function<void (util::async_result<T1>)>>::type wrapped(F f, const std::function<void (util::async_result<T2>)>& handler)
+template<typename F, typename T = typename detail::arg_type<F>::type, typename H>
+typename std::enable_if<std::is_same<T, void>::value, std::function<void (util::async_result<T>)>>::type wrapped(F f, H handler)
 {
-    return [=] (util::async_result<T1> res) {
+    return [=] (util::async_result<T> res) {
         try {
             res.get();
             f();

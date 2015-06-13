@@ -1,61 +1,12 @@
 #include <iostream>
-#include <cstdint>
-#include <vector>
-#include <string>
-#include <functional>
 
 #include <util/test.h>
 #include <tls/tls_client.h>
 #include <x509/trust_store.h>
 
-#include <boost/asio.hpp>
+#include <asio_stream_adapter.h>
 
 using namespace funtls;
-
-namespace {
-
-std::exception_ptr make_exception(boost::system::error_code ec)
-{
-    return std::make_exception_ptr(boost::system::system_error(ec));
-}
-
-template<typename S>
-class tls_stream : public tls::stream {
-public:
-    explicit tls_stream(S&& s) : s_(std::move(s)) {
-    }
-
-private:
-    S s_;
-
-    virtual void do_read(std::vector<uint8_t>& buf, const tls::done_handler& handler) override {
-        async_read(s_, boost::asio::buffer(buf), [this, handler](const boost::system::error_code& ec, size_t) {
-                    if (ec) {
-                        handler(make_exception(ec));
-                    } else {
-                        handler(util::async_result<void>());
-                    }
-                });
-    }
-
-    virtual void do_write(const std::vector<uint8_t>& buf, const tls::done_handler& handler) override {
-        async_write(s_, boost::asio::buffer(buf), [this, handler](const boost::system::error_code& ec, size_t) {
-                    if (ec) {
-                        handler(make_exception(ec));
-                    } else {
-                        handler(util::async_result<void>());
-                    }
-                });
-    }
-};
-
-template<typename S>
-std::unique_ptr<tls::stream> make_tls_stream(S&& s)
-{
-    return std::unique_ptr<tls::stream>(new tls_stream<S>(std::move(s)));
-}
-
-} // unnamed namespace
 
 int main(int argc, char* argv[])
 {

@@ -36,8 +36,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 ${common_flags}")
 # Ugly handling of boost stuff
 set(boost_dir "${CMAKE_CURRENT_SOURCE_DIR}/../boost_1_57_0/" CACHE PATH "Root of boost installation")
 include_directories(${boost_dir})
-add_definitions("-DBOOST_ALL_NO_LIB -DBOOST_SYSTEM_NO_DEPRECATED")
-add_library(boost STATIC ${boost_dir}/libs/system/src/error_code.cpp)
+add_definitions("-DBOOST_ALL_NO_LIB -DBOOST_SYSTEM_NO_DEPRECATED -DBOOST_ERROR_CODE_HEADER_ONLY")
 
 add_subdirectory(util)
 add_subdirectory(bigint)
@@ -56,7 +55,11 @@ add_subdirectory(ssh)
 
 include_directories(${funtls_SOURCE_DIR})
 add_executable(funtls client.cpp)
-target_link_libraries(funtls boost util hash asn1 x509 tls)
+target_link_libraries(funtls tls)
+
+include_directories(${funtls_SOURCE_DIR})
+add_executable(test_server test_server.cpp)
+target_link_libraries(test_server tls)
 
 find_program(HAS_CTAGS ctags)
 if (HAS_CTAGS)

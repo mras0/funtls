@@ -6,7 +6,7 @@
 // Forward declarations
 namespace funtls {
     namespace ec { struct curve; }
-    namespace util { class buffer_view; }
+    namespace util { struct buffer_view; }
 }
 
 namespace funtls { namespace tls {

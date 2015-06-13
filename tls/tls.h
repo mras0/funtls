@@ -116,6 +116,7 @@ enum class handshake_type : uint8 {
     client_key_exchange = 16,
     finished = 20
 };
+std::ostream& operator<<(std::ostream& os, handshake_type h);
 
 struct protocol_version {
     uint8 major;

@@ -140,6 +140,26 @@ std::ostream& operator<<(std::ostream& os, alert_description desc)
     return os;
 }
 
+std::ostream& operator<<(std::ostream& os, handshake_type h)
+{
+    switch (h) {
+    case handshake_type::hello_request:       return os << "hello_request";
+    case handshake_type::client_hello:        return os << "client_hello";
+    case handshake_type::server_hello:        return os << "server_hello";
+    case handshake_type::certificate:         return os << "certificate";
+    case handshake_type::server_key_exchange: return os << "server_key_exchange";
+    case handshake_type::certificate_request: return os << "certificate_request";
+    case handshake_type::server_hello_done:   return os << "server_hello_done";
+    case handshake_type::certificate_verify:  return os << "certificate_verify";
+    case handshake_type::client_key_exchange: return os << "client_key_exchange";
+    case handshake_type::finished:            return os << "finished";
+    }
+    os << "Unknown TLS HandshakeType 0x" << util::base16_encode(&h, sizeof(h));
+    assert(false);
+    return os;
+}
+
+
 std::ostream& operator<<(std::ostream& os, const protocol_version& version)
 {
     if (version == protocol_version_tls_1_0) {

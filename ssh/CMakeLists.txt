@@ -6,11 +6,11 @@ add_library(ssh STATIC ssh.cpp)
 target_link_libraries(ssh util)
 
 add_executable(ssh_test ssh_test.cpp)
-target_link_libraries(ssh_test util ssh boost int_util)
+target_link_libraries(ssh_test ssh int_util)
 add_test(ssh_test ssh_test)
 
 add_executable(ssh_client ssh_client.cpp)
-target_link_libraries(ssh_client util ssh boost x509 aes)
+target_link_libraries(ssh_client ssh x509 aes)
 
 set(OPENSSH_DIR "$ENV{HOME}/build/openssh-6.8p1" CACHE PATH "Path to openssh commands")
 configure_file(sshd_config.in ${CMAKE_CURRENT_BINARY_DIR}/sshd_config @ONLY)
