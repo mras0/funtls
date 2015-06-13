@@ -1,7 +1,9 @@
+#include "async_result.h"
 #include "base_conversion.h"
 #include "buffer.h"
 #include "test.h"
 #include <stdexcept>
+#include <memory>
 
 template<typename T>
 std::ostream& operator<<(std::ostream& os, const std::vector<T>& vec)
@@ -162,10 +164,80 @@ void test_buffer_getters()
     { buffer_view buf{buffer, sizeof(buffer)}; FUNTLS_ASSERT_EQUAL(0x0123456789abcdef, get_be_uint64(buf)); }
 }
 
+void test_async_result()
+{
+    using namespace funtls::util;
+    {
+        async_result<int> res(42);
+        FUNTLS_ASSERT_EQUAL(true, static_cast<bool>(res));
+        FUNTLS_ASSERT_EQUAL(42, res.get());
+        FUNTLS_ASSERT_EQUAL(42, make_async_result<int>(42).get());
+    }
+    {
+        async_result<int> res(std::make_exception_ptr(std::logic_error("Test")));
+        FUNTLS_ASSERT_EQUAL(false, static_cast<bool>(res));
+        FUNTLS_ASSERT_THROWS(res.get(), std::logic_error);
+        FUNTLS_ASSERT_THROWS(std::rethrow_exception(res.get_exception()), std::logic_error);
+    }
+    {
+        async_result<std::vector<uint8_t>> res(std::vector<uint8_t>{1,2,3});
+        FUNTLS_ASSERT_EQUAL(true, static_cast<bool>(res));
+        FUNTLS_ASSERT_EQUAL((std::vector<uint8_t>{1,2,3}), res.get());
+        FUNTLS_ASSERT_EQUAL((std::vector<uint8_t>{1,2,3}), make_async_result(std::vector<uint8_t>{1,2,3}).get());
+    }
+    {
+        async_result<void> res{};
+        FUNTLS_ASSERT_EQUAL(true, static_cast<bool>(res));
+        res.get();
+        make_async_result().get();
+    }
+    {
+        async_result<void> res(std::make_exception_ptr(std::logic_error("Test")));
+        FUNTLS_ASSERT_EQUAL(false, static_cast<bool>(res));
+        FUNTLS_ASSERT_THROWS(res.get(), std::logic_error);
+        FUNTLS_ASSERT_THROWS(std::rethrow_exception(res.get_exception()), std::logic_error);
+    }
+
+    // Make sure async_result can be moved and returned
+    {
+        async_result<int> res(42);
+        auto foo = [] (async_result<int>&& r) {
+            FUNTLS_ASSERT_EQUAL(42, r.get());
+            return make_async_result<int>(60);
+        };
+        auto r2 = foo(std::move(res));
+        FUNTLS_ASSERT_EQUAL(60, r2.get());
+    }
+    {
+        async_result<void> res{};
+        auto foo = [] (async_result<void>&& r) {
+            r.get();
+            return async_result<void>(std::make_exception_ptr(std::logic_error("Test")));
+        };
+        auto r2 = foo(std::move(res));
+        FUNTLS_ASSERT_THROWS(r2.get(), std::logic_error);
+    }
+    {
+        async_result<std::vector<int>> res({8,4,2});
+        auto foo = [] (async_result<std::vector<int>>&& r) {
+            FUNTLS_ASSERT_EQUAL((std::vector<int>{8,4,2}), r.get());
+            return make_async_result<std::vector<int>>({2,3,4});
+        };
+        auto r2 = foo(std::move(res));
+        FUNTLS_ASSERT_EQUAL((std::vector<int>{2,3,4}), r2.get());
+    }
+
+    {
+        auto r = make_async_result(std::unique_ptr<int>(new int(1337)));
+        FUNTLS_ASSERT_EQUAL(1337, *r.get());
+    }
+}
+
 int main()
 {
     base16_test();
     base64_test();
     buffer_test();
     test_buffer_getters();
+    test_async_result();
 }
