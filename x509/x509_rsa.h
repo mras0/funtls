@@ -47,6 +47,7 @@ struct digest_info {
     std::vector<uint8_t>    digest;
 };
 
+std::vector<uint8_t> pkcs1_decode(const rsa_private_key& key, const std::vector<uint8_t>& message);
 digest_info pkcs1_decode(const rsa_public_key& pk, const std::vector<uint8_t>& data);
 std::vector<uint8_t> pkcs1_encode(const rsa_private_key& key, const std::vector<uint8_t>& message);
 std::vector<uint8_t> pkcs1_encode(const rsa_public_key& key, const std::vector<uint8_t>& message);

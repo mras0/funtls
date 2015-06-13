@@ -9,6 +9,7 @@
 #include <array>
 
 #include <int_util/int.h>
+#include <int_util/int_util.h>
 
 #include <util/base_conversion.h>
 #include <util/buffer.h>
@@ -233,6 +234,17 @@ void test_pkey()
     FUNTLS_ASSERT_EQUAL(test_pkey0_e1, util::base16_encode(pkey.exponent1.as_vector()));
     FUNTLS_ASSERT_EQUAL(test_pkey0_e2, util::base16_encode(pkey.exponent2.as_vector()));
     FUNTLS_ASSERT_EQUAL(test_pkey0_c, util::base16_encode(pkey.coefficient.as_vector()));
+
+    const x509::rsa_public_key pub{pkey.modulus, pkey.public_exponent};
+    const std::vector<uint8_t> msg{0x30, 0x21, 0x30, 0x09, 0x06, 0x05, 0x2b, 0x0e, 0x03, 0x02, 0x1a, 0x05, 0x00, 0x04, 0x14,
+        0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14 };
+    const auto e1_msg = x509::pkcs1_encode(pkey, msg);
+    auto di = x509::pkcs1_decode(pub, e1_msg);
+    FUNTLS_ASSERT_EQUAL(x509::id_sha1, di.digest_algorithm);
+    FUNTLS_ASSERT_EQUAL((std::vector<uint8_t>{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14}), di.digest);
+
+    const auto e2_msg = x509::pkcs1_encode(pub, msg);
+    FUNTLS_ASSERT_EQUAL(msg, x509::pkcs1_decode(pkey, e2_msg));
 }
 
 int main()

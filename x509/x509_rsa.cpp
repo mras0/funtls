@@ -111,6 +111,27 @@ digest_info pkcs1_decode(const rsa_public_key& pk, const std::vector<uint8_t>& d
     return x509::digest_info{digest_algo, digest};
 }
 
+std::vector<uint8_t> pkcs1_decode(const rsa_private_key& pk, const std::vector<uint8_t>& data)
+{
+    const auto n = pk.modulus.as<large_uint>();
+    const auto e = pk.private_exponent.as<large_uint>();
+    FUNTLS_CHECK_BINARY(data.size(), <=, ilog256(n), "Signature too large");
+    const large_uint d = powm(x509::base256_decode<large_uint>(data), e, n);
+    auto decoded = x509::base256_encode(d, data.size());
+    // Build message to encrypt: EM = 0x00 || 0x02 || PS || 0x00 || M
+    FUNTLS_CHECK_BINARY(decoded.size(), >=, 2 + 8 + 1, "Invalid PKCS#1 1.5 signature");
+    FUNTLS_CHECK_BINARY(0x00, ==, static_cast<unsigned>(decoded[0]), "Invalid PKCS#1 1.5 signature");
+    FUNTLS_CHECK_BINARY(0x02, ==, static_cast<unsigned>(decoded[1]), "Invalid PKCS#1 1.5 signature");
+    unsigned pad_end = 2;
+    while (pad_end < decoded.size() && decoded[pad_end]) {
+        ++pad_end;
+    }
+    FUNTLS_CHECK_BINARY(pad_end, <, decoded.size(), "Invalid PKCS#1 1.5 signature");
+    assert(decoded[pad_end] == 0);
+    decoded.erase(decoded.begin(), decoded.begin()+pad_end+1);
+    return decoded;
+}
+
 std::vector<uint8_t> pkcs1_encode(const rsa_private_key& key, const std::vector<uint8_t>& message)
 {
     const auto n = key.modulus.as<large_uint>();

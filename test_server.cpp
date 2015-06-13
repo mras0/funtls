@@ -18,6 +18,7 @@ namespace funtls { namespace tls {
 class server_id {
 public:
     virtual bool supports(key_exchange_algorithm) const = 0;
+    virtual void client_key_exchange(const handshake&) const = 0;
     virtual std::vector<asn1cert> certificate_chain() const = 0;
 };
 
@@ -25,18 +26,19 @@ class connection : public tls_base, public std::enable_shared_from_this<connecti
 public:
     using ptr_t = std::shared_ptr<connection>;
 
-    static ptr_t make(const std::string& name, std::unique_ptr<stream> stream, const std::vector<server_id*> server_id) {
-        auto c = ptr_t(new connection{name, std::move(stream), server_id});
+    static ptr_t make(const std::string& name, std::unique_ptr<stream> stream, const std::vector<const server_id*> server_ids) {
+        auto c = ptr_t(new connection{name, std::move(stream), server_ids});
         c->read_client_hello();
         return c;
     }
 
     ~connection();
 private:
-    std::string             name_;
-    std::vector<server_id*> server_id_;
+    std::string                   name_;
+    std::vector<const server_id*> server_ids_;
+    const server_id*              server_id_;
 
-    connection(const std::string& name, std::unique_ptr<stream> stream, const std::vector<server_id*> server_id);
+    connection(const std::string& name, std::unique_ptr<stream> stream, const std::vector<const server_id*> server_ids);
 
     void read_client_hello();
     void send_server_hello();
@@ -52,14 +54,14 @@ private:
     }
 };
 
-connection::connection(const std::string& name, std::unique_ptr<stream> stream, const std::vector<server_id*> server_id)
+connection::connection(const std::string& name, std::unique_ptr<stream> stream, const std::vector<const server_id*> server_ids)
     : tls_base(std::move(stream), tls_base::connection_end::server)
     , name_(name)
-    , server_id_(server_id)
+    , server_ids_(server_ids)
+    , server_id_(nullptr)
 {
     std::cout << name_ << ": Connected\n";
-    assert(server_id.size() == 1); // Multiple certificates not implemented
-    assert(server_id[0]);
+    assert(!server_ids_.empty());
 }
 
 connection::~connection()
@@ -100,9 +102,10 @@ void connection::read_client_hello() {
                 for (auto cs : client_hello.cipher_suites.as_vector()) {
                     if (cipher == cipher_suite::null_with_null_null && is_supported(cs)) {
                         const auto kex = parameters_from_suite(cs).key_exchange_algorithm;
-                        for (auto id : self->server_id_) {
+                        for (auto id : self->server_ids_) {
                             if (id->supports(kex)) {
-                                cipher = cs;
+                                cipher           = cs;
+                                self->server_id_ = id;
                                 break;
                             }
                         }
@@ -126,6 +129,7 @@ void connection::read_client_hello() {
                 self->negotiated_cipher(cipher);
                 // TODO: Check that "No compression" is supported
                 std::cout << "Negotatiated cipher: " << cipher << std::endl;
+                assert(self->server_id_);
 
                 self->send_server_hello();
             },
@@ -151,10 +155,11 @@ void connection::send_server_hello()
 
 void connection::send_server_certificate()
 {
+    assert(server_id_);
     std::cout << name_ << ": Sending ServerCertificate\n";
     auto self = shared_from_this();
     send_handshake(make_handshake(
-        certificate{ server_id_[0]->certificate_chain() }), wrapped([self] () {
+        certificate{ server_id_->certificate_chain() }), wrapped([self] () {
             self->send_server_hello_done();
         }, std::bind(&connection::handle_error, self, std::placeholders::_1)));
 }
@@ -175,8 +180,14 @@ void connection::read_client_key_exchange() {
     auto self = shared_from_this();
     read_handshake(wrapped(
             [self] (tls::handshake&& handshake) {
-                auto kex_rsa = get_as<client_key_exchange_rsa>(handshake);
-                std::cout << "Encrypted pre-master secret: " << util::base16_encode(kex_rsa.encrypted_pre_master_secret.as_vector()) << std::endl;
+                self->server_id_->client_key_exchange(handshake);
+                std::cout << "Reading ChangeCipherSpec\n";
+                self->read_change_cipher_spec(wrapped(
+                            [self] () {
+                                std::cout << "Sending ChangeCipherSpec\n";
+                                std::cout << "NOT DONE!\n";
+                            },
+                            std::bind(&connection::handle_error, self, std::placeholders::_1)));
             },
             std::bind(&connection::handle_error, self, std::placeholders::_1)));
 }
@@ -197,6 +208,12 @@ private:
 
     virtual bool supports(tls::key_exchange_algorithm kex) const override {
         return kex == tls::key_exchange_algorithm::rsa;
+    }
+
+    virtual void client_key_exchange(const tls::handshake& handshake) const override {
+        auto kex_rsa = tls::get_as<tls::client_key_exchange_rsa>(handshake);
+        auto pre_master_secret = x509::pkcs1_decode(private_key_, kex_rsa.encrypted_pre_master_secret.as_vector());
+        std::cout << "Pre-master secret: " << util::base16_encode(pre_master_secret) << std::endl;
     }
 
     virtual std::vector<tls::asn1cert> certificate_chain() const override {
