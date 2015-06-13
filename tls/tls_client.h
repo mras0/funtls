@@ -25,8 +25,6 @@ private:
     void read_next_server_handshake(const std::vector<handshake_type>& allowed_handshakes, const done_handler& handler);
     void request_cipher_change(const std::vector<uint8_t>& pre_master_secret, const done_handler& handler);
     void send_client_key_exchange(const done_handler& handler);
-
-    virtual std::vector<uint8_t> do_verify_data(tls_base::connection_end ce) const override;
 };
 
 } } // namespace funtls::tls

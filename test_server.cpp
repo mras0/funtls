@@ -18,11 +18,11 @@ namespace funtls { namespace tls {
 class server_id {
 public:
     virtual bool supports(key_exchange_algorithm) const = 0;
-    virtual void client_key_exchange(const handshake&) const = 0;
+    virtual std::vector<uint8_t> client_key_exchange(const handshake&) const = 0;
     virtual std::vector<asn1cert> certificate_chain() const = 0;
 };
 
-class connection : public tls_base, public std::enable_shared_from_this<connection> {
+class connection : private tls_base, public std::enable_shared_from_this<connection> {
 public:
     using ptr_t = std::shared_ptr<connection>;
 
@@ -45,13 +45,9 @@ private:
     void send_server_certificate();
     void send_server_hello_done();
     void read_client_key_exchange();
+    void main_loop();
 
     void handle_error(std::exception_ptr e) const;
-
-    virtual std::vector<uint8_t> do_verify_data(tls_base::connection_end ce) const override {
-        (void)ce;
-        FUNTLS_CHECK_FAILURE("Not implemented");
-    }
 };
 
 connection::connection(const std::string& name, std::unique_ptr<stream> stream, const std::vector<const server_id*> server_ids)
@@ -180,16 +176,34 @@ void connection::read_client_key_exchange() {
     auto self = shared_from_this();
     read_handshake(wrapped(
             [self] (tls::handshake&& handshake) {
-                self->server_id_->client_key_exchange(handshake);
+                auto pre_master_secret = self->server_id_->client_key_exchange(handshake);
+                std::cout << "Premaster secret: " << util::base16_encode(pre_master_secret) << std::endl;
+                self->set_pending_ciphers(pre_master_secret);
                 std::cout << "Reading ChangeCipherSpec\n";
                 self->read_change_cipher_spec(wrapped(
                             [self] () {
                                 std::cout << "Sending ChangeCipherSpec\n";
-                                std::cout << "NOT DONE!\n";
+                                self->send_change_cipher_spec(wrapped(
+                                    [self] () {
+                                        std::cout << "Handshake done. Session id " << util::base16_encode(self->session_id().as_vector()) << std::endl;
+                                        self->main_loop();
+                                    },
+                                    std::bind(&connection::handle_error, self, std::placeholders::_1)));
                             },
                             std::bind(&connection::handle_error, self, std::placeholders::_1)));
             },
             std::bind(&connection::handle_error, self, std::placeholders::_1)));
+}
+
+void connection::main_loop()
+{
+    auto self = shared_from_this();
+    recv_app_data(wrapped(
+        [self] (std::vector<uint8_t>&& data) {
+            std::cout << "Got app data: " << std::string(data.begin(), data.end());
+        //    self->main_loop();
+        },
+        std::bind(&connection::handle_error, self, std::placeholders::_1)));
 }
 
 } } // namespace funtls::tls
@@ -210,10 +224,12 @@ private:
         return kex == tls::key_exchange_algorithm::rsa;
     }
 
-    virtual void client_key_exchange(const tls::handshake& handshake) const override {
+    virtual std::vector<uint8_t> client_key_exchange(const tls::handshake& handshake) const override {
         auto kex_rsa = tls::get_as<tls::client_key_exchange_rsa>(handshake);
         auto pre_master_secret = x509::pkcs1_decode(private_key_, kex_rsa.encrypted_pre_master_secret.as_vector());
-        std::cout << "Pre-master secret: " << util::base16_encode(pre_master_secret) << std::endl;
+        FUNTLS_CHECK_BINARY((unsigned)pre_master_secret[0], ==, 0x03, "Invalid version in premaster secret");
+        FUNTLS_CHECK_BINARY((unsigned)pre_master_secret[1], ==, 0x03, "Invalid version in premaster secret");
+        return pre_master_secret;
     }
 
     virtual std::vector<tls::asn1cert> certificate_chain() const override {
@@ -278,13 +294,24 @@ AZokDceX95yJnwKqa6SzgQ==
     return rsa_server_id{{util::base64_decode(certificate, sizeof(certificate)-1)}, x509::rsa_private_key_from_pki(pki)};
 }
 
-#include <thread>
+// #define OPENSSL_TEST
 
-int main()
+#ifdef OPENSSL_TEST
+#include <thread>
+#endif
+
+int main(int argc, char* argv[])
 {
+    int wanted_port = 0;
+    if (argc > 1) {
+        std::istringstream iss(argv[1]);
+        if (!(iss >> wanted_port) || wanted_port < 0 || wanted_port > 65535) {
+            std::cerr << "Invalid port " << argv[1] << "\n";
+            return 1;
+        }
+    }
     boost::asio::io_service        io_service;
-    boost::asio::ip::tcp::acceptor acceptor(io_service, boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), 0));
-    unsigned short port = acceptor.local_endpoint().port();
+    boost::asio::ip::tcp::acceptor acceptor(io_service, boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), wanted_port));
 
     struct accept_state {
         accept_state(boost::asio::io_service& io_service) : socket(io_service) {
@@ -305,18 +332,21 @@ int main()
                     oss << state->socket.remote_endpoint();
                     tls::connection::make(oss.str(), make_tls_stream(std::move(state->socket)), {&server_id});
                 }
-                std::cout << "Not calling start_accept in " << __FILE__ << " " << __LINE__ << std::endl;
-                //start_accept();
+#ifndef OPENSSL_TEST
+                start_accept();
+#endif
             });
     };
 
     start_accept();
     std::cout << "Server running: " << acceptor.local_endpoint() << std::endl;
 
+#ifdef OPENSSL_TEST
+    unsigned short port = acceptor.local_endpoint().port();
     std::thread client_thread([port, &io_service] {
             boost::asio::io_service::work work(io_service); // keep the io_service running as long as the thread does
             std::ostringstream cmd;
-            cmd << "openssl s_client -debug -msg -connect localhost:" << port << " 2>&1";
+            cmd << "echo HELLO WORLD | openssl s_client -debug -msg -connect localhost:" << port << " 2>&1";
             io_service.post([&] {
                     std::cout << "Running command: " << cmd.str() << std::endl;
                     });
@@ -331,9 +361,12 @@ int main()
                         });
             }
         });
+#endif
 
     io_service.run();
+#ifdef OPENSSL_TEST
     client_thread.join();
+#endif
     return 0;
 }
 

@@ -56,17 +56,6 @@ void tls_base::send_record(tls::content_type content_type, const std::vector<uin
     stream_->write(send_buffer_, handler);
 }
 
-void tls_base::recv_record(const recv_record_handler& handler)
-{
-    do_wrapped([&] {
-        collapse_pending();
-        recv_buffer_.resize(5);
-    }, handler);
-    stream_->read(recv_buffer_, wrapped([this, handler]() {
-                do_recv_record_content(handler);
-            }, handler));
-}
-
 void tls_base::send_handshake(const handshake& handshake, const done_handler& handler)
 {
     do_wrapped([&] {
@@ -86,17 +75,52 @@ void tls_base::read_handshake(const recv_handshake_handler& handler)
             handshake handshake;
             from_bytes(handshake, frag_buf);
             if (frag_buf.remaining()) {
-                FUNTLS_CHECK_FAILURE("Unread handshake data. Fragment: " + util::base16_encode(record.fragment));
+                std::vector<uint8_t> excess(frag_buf.remaining());
+                frag_buf.read(&excess[0], excess.size());
+                FUNTLS_CHECK_FAILURE("Unread handshake data. Excess: " + util::base16_encode(excess));
             }
             handler(std::move(handshake));
         }, handler));
 }
 
-void tls_base::set_pending_ciphers(cipher_parameters&& client_cipher_parameters, cipher_parameters&& server_cipher_parameters)
+void tls_base::set_pending_ciphers(const std::vector<uint8_t>& pre_master_secret)
 {
-    assert(!pending_encrypt_cipher_ && !pending_decrypt_cipher_);
-    pending_encrypt_cipher_ = make_cipher(client_cipher_parameters);
-    pending_decrypt_cipher_ = make_cipher(server_cipher_parameters);
+    // We can now compute the master_secret as specified in rfc5246 8.1
+    // master_secret = PRF(pre_master_secret, "master secret", ClientHello.random + ServerHello.random)[0..47]
+
+    const auto cipher_param = current_cipher_parameters();
+    std::vector<uint8_t> rand_buf;
+    append_to_buffer(rand_buf, client_random());
+    append_to_buffer(rand_buf, server_random());
+    master_secret(PRF(cipher_param.prf_algorithm, pre_master_secret, "master secret", rand_buf, master_secret_size));
+    //std::cout << "Master secret: " << util::base16_encode(master_secret) << std::endl;
+
+    // Now do Key Calculation http://tools.ietf.org/html/rfc5246#section-6.3
+    // key_block = PRF(SecurityParameters.master_secret, "key expansion", SecurityParameters.server_random + SecurityParameters.client_random)
+    const size_t key_block_length  = 2 * cipher_param.mac_key_length + 2 * cipher_param.key_length + 2 * cipher_param.fixed_iv_length;
+    std::vector<uint8_t> randbuf;
+    append_to_buffer(randbuf, server_random());
+    append_to_buffer(randbuf, client_random());
+    auto key_block = PRF(cipher_param.prf_algorithm, master_secret(), "key expansion", randbuf, key_block_length);
+
+    //std::cout << "Keyblock:\n" << util::base16_encode(key_block) << "\n";
+
+    size_t i = 0;
+    auto client_mac_key = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.mac_key_length]};  i += cipher_param.mac_key_length;
+    auto server_mac_key = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.mac_key_length]};  i += cipher_param.mac_key_length;
+    auto client_enc_key = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.key_length]};      i += cipher_param.key_length;
+    auto server_enc_key = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.key_length]};      i += cipher_param.key_length;
+    auto client_iv      = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.fixed_iv_length]}; i += cipher_param.fixed_iv_length;
+    auto server_iv      = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.fixed_iv_length]}; i += cipher_param.fixed_iv_length;
+    assert(i == key_block.size());
+
+    if (connection_end_ == connection_end::client) {
+        pending_encrypt_cipher_ = make_cipher(cipher_parameters{cipher_parameters::encrypt, cipher_param, client_mac_key, client_enc_key, client_iv});
+        pending_decrypt_cipher_ = make_cipher(cipher_parameters{cipher_parameters::decrypt, cipher_param, server_mac_key, server_enc_key, server_iv});
+    } else {
+        pending_encrypt_cipher_ = make_cipher(cipher_parameters{cipher_parameters::encrypt, cipher_param, server_mac_key, server_enc_key, server_iv});
+        pending_decrypt_cipher_ = make_cipher(cipher_parameters{cipher_parameters::decrypt, cipher_param, client_mac_key, client_enc_key, client_iv});
+    }
 }
 
 void tls_base::send_change_cipher_spec(const done_handler& handler)
@@ -162,6 +186,17 @@ void tls_base::collapse_pending()
     pending_handshake_messages_.clear();
 }
 
+void tls_base::recv_record(const recv_record_handler& handler)
+{
+    do_wrapped([&] {
+        collapse_pending();
+        recv_buffer_.resize(5);
+    }, handler);
+    stream_->read(recv_buffer_, wrapped([this, handler]() {
+                do_recv_record_content(handler);
+            }, handler));
+}
+
 void tls_base::do_recv_record_content(const recv_record_handler& handler)
 {
     do_wrapped([&] {
@@ -174,7 +209,6 @@ void tls_base::do_recv_record_content(const recv_record_handler& handler)
         from_bytes(length, buf_view);
         assert(buf_view.remaining() == 0);
 
-        FUNTLS_CHECK_BINARY(protocol_version, ==, current_protocol_version(), "Wrong TLS version");
         FUNTLS_CHECK_BINARY(length, >=, 1, "Illegal fragment size");
         FUNTLS_CHECK_BINARY(length, <=, record::max_ciphertext_length, "Illegal fragment size");
 
@@ -216,9 +250,26 @@ void tls_base::do_decrypt(tls::content_type content_type, tls::protocol_version 
             throw std::runtime_error("Alert received: " + oss.str());
         }
 
+        bool check_version = true;
+
         if (content_type == tls::content_type::handshake) {
             assert(pending_handshake_messages_.empty());
             pending_handshake_messages_ = recv_buffer_; // Will not become actove after this message has been parsed. This is a HACK
+
+            //
+            // The client hello message is allowed to newer than the current version
+            // (which at the start is the lowest possible version)
+            //
+            if (recv_buffer_.size() > 1 && recv_buffer_[0] == static_cast<uint8_t>(handshake_type::client_hello)) {
+                FUNTLS_CHECK_BINARY(protocol_version.major, ==, current_protocol_version().major, "Invalid TLS version");
+                FUNTLS_CHECK_BINARY(protocol_version.minor, >=, current_protocol_version().minor, "Invalid TLS version");
+                FUNTLS_CHECK_BINARY(protocol_version.minor, <=, protocol_version_tls_1_2.minor, "Invalid TLS version");
+                check_version = false;
+            }
+        }
+
+        if (check_version) {
+            FUNTLS_CHECK_BINARY(protocol_version, ==, current_protocol_version(), "Wrong TLS version");
         }
 
         handler(record{content_type, protocol_version, std::move(recv_buffer_)});
@@ -240,6 +291,32 @@ void tls_base::send_finished(const done_handler& handler)
     // authentication processes were successful
     //
     send_handshake(tls::make_handshake(tls::finished{do_verify_data(connection_end_)}), handler);
+}
+
+std::vector<uint8_t> tls_base::do_verify_data(tls_base::connection_end ce) const
+{
+    // verify_data = PRF(master_secret, finished_label, Hash(handshake_messages))[0..verify_data_length-1]
+    // finished_label: 
+    //      For Finished messages sent by the client, the string "client finished".
+    //      For Finished messages sent by the server, the string "server finished".
+    // handshake_messages:
+    //      All of the data from all messages in this handshake (not
+    //      including any HelloRequest messages) up to, but not including,
+    //      this message
+    const auto prf_algo       = current_cipher_parameters().prf_algorithm;
+    const auto finished_label = ce == tls_base::connection_end::server ? "server finished" : "client finished";
+
+    std::vector<uint8_t> handshake_digest;
+    if (prf_algo == prf_algorithm::sha256) {
+        handshake_digest = hash::sha256{}.input(handshake_messages()).result();
+    } else if (prf_algo == prf_algorithm::sha384) {
+         handshake_digest = hash::sha384{}.input(handshake_messages()).result();
+    } else {
+        std::ostringstream msg;
+        msg << "Unsupported PRF algorithm " << prf_algo;
+        FUNTLS_CHECK_FAILURE(msg.str());
+    }
+    return PRF(prf_algo, master_secret(), finished_label, handshake_digest, finished::verify_data_min_length);
 }
 
 } } // namespace funtls::tls

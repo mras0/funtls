@@ -188,40 +188,7 @@ void client::request_cipher_change(const std::vector<uint8_t>& pre_master_secret
 {
     do_wrapped([&] {
         std::cout << "Requesting cipher change\n";
-        // We can now compute the master_secret as specified in rfc5246 8.1
-        // master_secret = PRF(pre_master_secret, "master secret", ClientHello.random + ServerHello.random)[0..47]
-
-        const auto cipher_param = current_cipher_parameters();
-        std::vector<uint8_t> rand_buf;
-        append_to_buffer(rand_buf, client_random());
-        append_to_buffer(rand_buf, server_random());
-        master_secret(PRF(cipher_param.prf_algorithm, pre_master_secret, "master secret", rand_buf, master_secret_size));
-        //std::cout << "Master secret: " << util::base16_encode(master_secret) << std::endl;
-
-        // Now do Key Calculation http://tools.ietf.org/html/rfc5246#section-6.3
-        // key_block = PRF(SecurityParameters.master_secret, "key expansion", SecurityParameters.server_random + SecurityParameters.client_random)
-        const size_t key_block_length  = 2 * cipher_param.mac_key_length + 2 * cipher_param.key_length + 2 * cipher_param.fixed_iv_length;
-        std::vector<uint8_t> randbuf;
-        append_to_buffer(randbuf, server_random());
-        append_to_buffer(randbuf, client_random());
-        auto key_block = PRF(cipher_param.prf_algorithm, master_secret(), "key expansion", randbuf, key_block_length);
-
-        //std::cout << "Keyblock:\n" << util::base16_encode(key_block) << "\n";
-
-        size_t i = 0;
-        auto client_mac_key = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.mac_key_length]};  i += cipher_param.mac_key_length;
-        auto server_mac_key = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.mac_key_length]};  i += cipher_param.mac_key_length;
-        auto client_enc_key = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.key_length]};      i += cipher_param.key_length;
-        auto server_enc_key = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.key_length]};      i += cipher_param.key_length;
-        auto client_iv      = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.fixed_iv_length]}; i += cipher_param.fixed_iv_length;
-        auto server_iv      = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.fixed_iv_length]}; i += cipher_param.fixed_iv_length;
-        assert(i == key_block.size());
-
-        cipher_parameters client_cipher_parameters{cipher_parameters::encrypt, cipher_param, client_mac_key, client_enc_key, client_iv};
-        cipher_parameters server_cipher_parameters{cipher_parameters::decrypt, cipher_param, server_mac_key, server_enc_key, server_iv};
-
-        // TODO: This should obviously be reversed if running as a server
-        set_pending_ciphers(std::move(client_cipher_parameters), std::move(server_cipher_parameters));
+        set_pending_ciphers(pre_master_secret);
 
         send_change_cipher_spec(wrapped([this, handler] () {
                     std::cout << "Reading change cipher spec\n";
@@ -247,32 +214,6 @@ void client::send_client_key_exchange(const done_handler& handler)
                     request_cipher_change(pre_master_secret, handler);
                 }, handler));
     }, handler);
-}
-
-std::vector<uint8_t> client::do_verify_data(tls_base::connection_end ce) const
-{
-    // verify_data = PRF(master_secret, finished_label, Hash(handshake_messages))[0..verify_data_length-1]
-    // finished_label: 
-    //      For Finished messages sent by the client, the string "client finished".
-    //      For Finished messages sent by the server, the string "server finished".
-    // handshake_messages:
-    //      All of the data from all messages in this handshake (not
-    //      including any HelloRequest messages) up to, but not including,
-    //      this message
-    const auto prf_algo       = current_cipher_parameters().prf_algorithm;
-    const auto finished_label = ce == tls_base::connection_end::server ? "server finished" : "client finished";
-
-    std::vector<uint8_t> handshake_digest;
-    if (prf_algo == prf_algorithm::sha256) {
-        handshake_digest = hash::sha256{}.input(handshake_messages()).result();
-    } else if (prf_algo == prf_algorithm::sha384) {
-         handshake_digest = hash::sha384{}.input(handshake_messages()).result();
-    } else {
-        std::ostringstream msg;
-        msg << "Unsupported PRF algorithm " << prf_algo;
-        FUNTLS_CHECK_FAILURE(msg.str());
-    }
-    return PRF(prf_algo, master_secret(), finished_label, handshake_digest, finished::verify_data_min_length);
 }
 
 } } // namespace funtls::tls

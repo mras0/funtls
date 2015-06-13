@@ -155,7 +155,6 @@ std::ostream& operator<<(std::ostream& os, handshake_type h)
     case handshake_type::finished:            return os << "finished";
     }
     os << "Unknown TLS HandshakeType 0x" << util::base16_encode(&h, sizeof(h));
-    assert(false);
     return os;
 }
 

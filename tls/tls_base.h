@@ -45,7 +45,6 @@ public:
 protected:
     enum class connection_end { server, client };
 
-    using recv_record_handler    = std::function<void(util::async_result<record>)>;
     using recv_handshake_handler = std::function<void(util::async_result<handshake>)>;
 
     explicit tls_base(std::unique_ptr<stream> stream, connection_end ce) : stream_(std::move(stream)), connection_end_(ce) {
@@ -61,7 +60,6 @@ protected:
     ~tls_base();
 
     void send_record(tls::content_type content_type, const std::vector<uint8_t>& plaintext, const done_handler& handler);
-    void recv_record(const recv_record_handler& handler);
     void send_handshake(const handshake& handshake, const done_handler& handler);
     void read_handshake(const recv_handshake_handler& handler);
 
@@ -111,7 +109,7 @@ protected:
         return handshake_messages_;
     }
 
-    void set_pending_ciphers(cipher_parameters&& client_cipher_parameters, cipher_parameters&& server_cipher_parameters);
+    void set_pending_ciphers(const std::vector<uint8_t>& pre_master_secret);
 
     void send_change_cipher_spec(const done_handler& handler);
     void read_change_cipher_spec(const done_handler& handler);
@@ -140,12 +138,14 @@ private:
     std::vector<uint8_t>         send_buffer_;
     std::vector<uint8_t>         recv_buffer_;
 
+    using recv_record_handler    = std::function<void(util::async_result<record>)>;
+
     void collapse_pending();
+    void recv_record(const recv_record_handler& handler);
     void do_recv_record_content(const recv_record_handler& handler);
     void do_decrypt(tls::content_type content_type, tls::protocol_version protocol_version, const recv_record_handler& handler);
     void send_finished(const done_handler& handler);
-
-    virtual std::vector<uint8_t> do_verify_data(tls::tls_base::connection_end ce) const = 0;
+    std::vector<uint8_t> do_verify_data(tls_base::connection_end ce) const;
 };
 } } // namespace funtls::tls
 
