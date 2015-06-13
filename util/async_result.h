@@ -4,6 +4,7 @@
 #include <utility>
 #include <exception>
 #include <new>
+#include <functional>
 #include <assert.h>
 
 namespace funtls { namespace util {
@@ -137,6 +138,59 @@ inline async_result<T> make_async_result(T&& result) {
 
 inline async_result<void> make_async_result() {
     return async_result<void>{};
+}
+
+namespace detail {
+template<typename T>
+struct arg_type;
+
+template<typename T>
+struct arg_type : public arg_type<decltype(&T::operator())> {
+};
+
+template<typename C, typename R>
+struct arg_type<R (C::*)() const> {
+    using type = void;
+};
+
+template<typename C, typename R, typename A>
+struct arg_type<R (C::*)(A&&) const> {
+    using type = A;
+};
+} // namespace detail
+
+template<typename F, typename T>
+void do_wrapped(F f, const std::function<void (util::async_result<T>)>& handler) {
+    try {
+        f();
+    } catch (...) {
+        handler(std::current_exception());
+    }
+}
+
+template<typename F, typename T1 = typename detail::arg_type<F>::type, typename T2>
+typename std::enable_if<!std::is_same<T1, void>::value, std::function<void (util::async_result<T1>)>>::type wrapped(F f, const std::function<void (util::async_result<T2>)>& handler)
+{
+    return [=] (util::async_result<T1> res) {
+        try {
+            f(res.get());
+        } catch (...) {
+            handler(std::current_exception());
+        }
+    };
+}
+
+template<typename F, typename T1 = typename detail::arg_type<F>::type, typename T2>
+typename std::enable_if<std::is_same<T1, void>::value, std::function<void (util::async_result<T1>)>>::type wrapped(F f, const std::function<void (util::async_result<T2>)>& handler)
+{
+    return [=] (util::async_result<T1> res) {
+        try {
+            res.get();
+            f();
+        } catch (...) {
+            handler(std::current_exception());
+        }
+    };
 }
 
 } } // namespace funtls::util

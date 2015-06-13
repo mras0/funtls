@@ -2,7 +2,7 @@ project(x509)
 
 include_directories(${funtls_SOURCE_DIR})
 
-add_library(x509 STATIC x509.cpp x509_rsa.cpp x509_ec.cpp x509_io.cpp)
+add_library(x509 STATIC x509.cpp x509_rsa.cpp x509_ec.cpp x509_io.cpp trust_store.cpp)
 target_link_libraries(x509 util asn1 hash ec int_util)
 
 add_executable(x509_test x509_test.cpp)

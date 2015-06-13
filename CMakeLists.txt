@@ -55,7 +55,7 @@ add_subdirectory(tls)
 add_subdirectory(ssh)
 
 include_directories(${funtls_SOURCE_DIR})
-add_executable(funtls main.cpp)
+add_executable(funtls client.cpp)
 target_link_libraries(funtls boost util hash asn1 x509 tls)
 
 find_program(HAS_CTAGS ctags)

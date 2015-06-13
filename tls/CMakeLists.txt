@@ -2,7 +2,7 @@ project(tls)
 
 include_directories(${funtls_SOURCE_DIR})
 
-add_library(tls STATIC tls.cpp tls_ciphers.cpp tls_ecc.cpp tls_kex.cpp)
+add_library(tls STATIC tls.cpp tls_ciphers.cpp tls_ecc.cpp tls_kex.cpp tls_base.cpp tls_client.cpp)
 target_link_libraries(tls util x509 hash aes rc4 3des ec chacha poly1305 int_util)
 
 add_executable(tls_test tls_test.cpp)
