@@ -14,6 +14,7 @@
 #include <util/base_conversion.h>
 #include <util/test.h>
 #include <util/buffer.h>
+#include <util/async_result.h>
 #include <int_util/int_util.h>
 #include <tls/tls.h>
 #include <tls/tls_ecc.h>
@@ -29,6 +30,11 @@ std::string error_code_str(const boost::system::error_code& ec) {
     return oss.str();
 }
 
+std::exception_ptr make_exception(boost::system::error_code ec)
+{
+    return std::make_exception_ptr(boost::system::system_error(ec));
+}
+
 } // unnamed namespace
 
 namespace funtls { namespace tls {
@@ -36,16 +42,23 @@ namespace funtls { namespace tls {
 enum class connection_end { server, client };
 
 // TODO: Handle record fragmentation/coalescence
+// TODO: Make sure errors are passed on to handlers instead of letting exceptions escape
 class socket {
 public:
-    template<typename Handler>
-    void send_app_data(const std::vector<uint8_t>& d, Handler handler) {
+    using app_data_sent_handler = std::function<void (util::async_result<void>)>;
+    using app_data_handler = std::function<void (util::async_result<std::vector<uint8_t>>)>;
+
+    void send_app_data(const std::vector<uint8_t>& d, const app_data_sent_handler& handler) {
         send_record(content_type::application_data, d, handler);
     }
 
-    template<typename Handler>
-    void next_app_data(Handler handler) {
-        read_record([handler] (tls::record&& record) {
+    void next_app_data(const app_data_handler& handler) {
+        read_record([handler] (util::async_result<record> res) {
+                if (!res) {
+                    handler(res.get_exception());
+                    return;
+                }
+                auto record = res.get();
                 FUNTLS_CHECK_BINARY(record.type, ==, content_type::application_data, "Unexpected content type");
                 handler(std::move(record.fragment));
             });
@@ -57,9 +70,9 @@ protected:
         , connection_end_(ce) {
     }
 
-    using done_handler           = std::function<void(void)>;
-    using recv_record_handler    = std::function<void(record&&)>;
-    using recv_handshake_handler = std::function<void(handshake&&)>;
+    using done_handler           = std::function<void(util::async_result<void>)>;
+    using recv_record_handler    = std::function<void(util::async_result<record>)>;
+    using recv_handshake_handler = std::function<void(util::async_result<handshake>)>;
 
     void send_record(tls::content_type content_type, const std::vector<uint8_t>& plaintext, const done_handler& handler) {
         collapse_pending();
@@ -86,8 +99,11 @@ protected:
 
         boost::asio::async_write(socket_, boost::asio::buffer(send_buffer_),
                 [this, handler](const boost::system::error_code& ec, size_t) {
-                    if (ec) FUNTLS_CHECK_FAILURE(error_code_str(ec));
-                    handler();
+                    if (ec) {
+                        handler(make_exception(ec));
+                        return;
+                    }
+                    handler(util::async_result<void>{});
                 });
     }
 
@@ -97,12 +113,8 @@ protected:
         boost::asio::async_read(socket_, boost::asio::buffer(recv_buffer_),
                 [this, handler](const boost::system::error_code& ec, size_t) {
                     if (ec) {
-                        if (ec == boost::asio::error::eof) {
-                            std::cout << "\nEOF!!\n";
-                            socket_.get_io_service().stop();
-                            return;
-                        }
-                        FUNTLS_CHECK_FAILURE(error_code_str(ec));
+                        handler(make_exception(ec));
+                        return;
                     }
                     do_read_record_content(handler);
                 });
@@ -117,7 +129,8 @@ protected:
     }
 
     void read_handshake(const recv_handshake_handler& handler) {
-        read_record( [this, handler](record&& record) {
+        read_record( [this, handler](util::async_result<record> res) {
+                auto record = res.get();
                 FUNTLS_CHECK_BINARY(record.type, ==, content_type::handshake, "Invalid content type");
 
                 util::buffer_view frag_buf{&record.fragment[0], record.fragment.size()};
@@ -156,11 +169,18 @@ protected:
         // Immediately after sending [the ChangeCipherSpec] message, the sender MUST instruct the
         // record layer to make the write pending state the write active state.
         //
-        send_record(msg.content_type, payload_buffer, [this, handler] { send_finished(handler); });
+        send_record(msg.content_type, payload_buffer, [this, handler] (util::async_result<void> res) {
+                if (!res) {
+                    handler(res.get_exception());
+                    return;
+                }
+                send_finished(handler);
+            });
     }
 
     void read_change_cipher_spec(const done_handler& handler) {
-        read_record([this, handler] (tls::record&& record) {
+        read_record([this, handler] (util::async_result<record> res) {
+                auto record = res.get();
                 FUNTLS_CHECK_BINARY(record.type,            ==, content_type::change_cipher_spec, "Invalid content type");
                 FUNTLS_CHECK_BINARY(record.fragment.size(), ==, 1, "Invalid ChangeCipherSpec fragment size");
                 FUNTLS_CHECK_BINARY(record.fragment[0],     !=, 0, "Invalid ChangeCipherSpec fragment data");
@@ -180,7 +200,12 @@ protected:
 
     void do_read_finished(const done_handler& handler) {
         // Read finished
-        read_handshake([this, handler] (tls::handshake&& handshake) {
+        read_handshake([this, handler] (util::async_result<tls::handshake> res) {
+                if (!res) {
+                    handler(res.get_exception());
+                    return;
+                }
+                auto handshake = res.get();
                 auto finished = tls::get_as<tls::finished>(handshake);
                 const auto calced_verify_data = do_verify_data(connection_end_ == connection_end::server ? connection_end::client : connection_end::server);
                 if (finished.verify_data != calced_verify_data) {
@@ -190,7 +215,7 @@ protected:
                     oss << "'" << util::base16_encode(finished.verify_data);
                     FUNTLS_CHECK_FAILURE(oss.str());
                 }
-                handler();
+                handler(util::async_result<void>{});
             });
     }
 
@@ -384,12 +409,23 @@ private:
                 wanted_ciphers_,
                 { tls::compression_method::null },
                 extensions
-            }), [this, handler] { read_server_hello(handler); });
+            }), [this, handler] (util::async_result<void> res) {
+                if (!res) {
+                    handler(res.get_exception());
+                    return;
+                }
+                read_server_hello(handler);
+            });
     }
 
     void read_server_hello(const done_handler& handler) {
         std::cout << "Reading server hello." << std::endl;
-        read_handshake([this, handler] (tls::handshake&& handshake) {
+        read_handshake([this, handler] (util::async_result<tls::handshake> res) {
+                if (!res) {
+                    handler(res.get_exception());
+                    return;
+                }
+                auto handshake = res.get();
                 auto server_hello = tls::get_as<tls::server_hello>(handshake);
                 negotiated_cipher_ = server_hello.cipher_suite;
                 if (std::find(wanted_ciphers_.begin(), wanted_ciphers_.end(), negotiated_cipher_) == wanted_ciphers_.end()) {
@@ -426,7 +462,12 @@ private:
 
     void read_next_server_handshake(const std::vector<tls::handshake_type>& allowed_handshakes, const done_handler& handler) {
         assert(!allowed_handshakes.empty());
-        read_handshake([this, allowed_handshakes, handler] (tls::handshake&& handshake) {
+        read_handshake([this, allowed_handshakes, handler] (util::async_result<tls::handshake> res) {
+                if (!res) {
+                    handler(res.get_exception());
+                    return;
+                }
+                auto handshake = res.get();
                 auto ah = allowed_handshakes;
                 while (!ah.empty() && ah.front() != handshake.type) {
                     ah.erase(ah.begin());
@@ -507,11 +548,17 @@ private:
         // TODO: This should obviously be reversed if running as a server
         set_pending_ciphers(std::move(client_cipher_parameters), std::move(server_cipher_parameters));
 
-        send_change_cipher_spec([this, handler] {
+        send_change_cipher_spec([this, handler] (util::async_result<void> res) {
+                    if (!res) {
+                        handler(std::move(res));
+                        return;
+                    }
                     std::cout << "Reading change cipher spec\n";
-                    read_change_cipher_spec([this, handler] {
-                                std::cout << "Handshake done. Session id " << util::base16_encode(sesion_id.as_vector()) << std::endl;
-                                handler();
+                    read_change_cipher_spec([this, handler] (util::async_result<void> res) {
+                                if (res) {
+                                    std::cout << "Handshake done. Session id " << util::base16_encode(sesion_id.as_vector()) << std::endl;
+                                }
+                                handler(std::move(res));
                             });
                 });
     }
@@ -524,7 +571,11 @@ private:
         std::tie(pre_master_secret, client_key_exchange) = client_kex->result();
         std::cout << "Sending client key exchange." << std::endl;
         send_handshake(client_key_exchange,
-                [this, pre_master_secret, handler] {
+                [this, pre_master_secret, handler] (util::async_result<void> res) {
+                    if (!res) {
+                        handler(std::move(res));
+                        return;
+                    }
                     request_cipher_change(pre_master_secret, handler);
                 });
     }
@@ -760,15 +811,27 @@ int main(int argc, char* argv[])
     tls_client::verify_certificate_chain_func cf = std::bind(&verify_cert_chain, std::placeholders::_1, ts);
     tls_client client{std::move(socket), wanted_ciphers, cf};
 
-    std::function<void (std::vector<uint8_t>&&)> got_app_data = [&] (std::vector<uint8_t>&& res) {
-        std::cout << std::string(res.begin(), res.end()) << std::flush;
-        client.next_app_data(got_app_data);
+    tls::socket::app_data_handler got_app_data = [&] (util::async_result<std::vector<uint8_t>> res) {
+        try {
+            auto data = res.get();
+            std::cout << std::string(data.begin(), data.end()) << std::flush;
+            client.next_app_data(got_app_data);
+        } catch (const boost::system::system_error& e) {
+            if (e.code() == boost::asio::error::eof) {
+                std::cout << "Got EOF\n";
+                io_service.stop();
+                return;
+            }
+            throw;
+        }
     };
 
-    client.perform_handshake([&] {
+    client.perform_handshake([&] (util::async_result<void> res) {
+            res.get();
             std::cout << "Handshake done!\n";
             const auto data = "GET "+path+" HTTP/1.1\r\nHost: "+host+"\r\nConnection: close\r\n\r\n";
-            client.send_app_data(std::vector<uint8_t>(data.begin(), data.end()), [&] {
+            client.send_app_data(std::vector<uint8_t>(data.begin(), data.end()), [&] (util::async_result<void> res) {
+                    res.get();
                     client.next_app_data(got_app_data);
                 });
         });
