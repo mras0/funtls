@@ -16,14 +16,9 @@ public:
     void perform_handshake(const done_handler& handler);
 
 private:
-    std::vector<cipher_suite>  wanted_ciphers_;
-    cipher_suite               negotiated_cipher_;
-    verify_certificate_chain_func   verify_certificate_chain_;
-    const random               client_random;
-    random                     server_random;
+    std::vector<cipher_suite>                     wanted_ciphers_;
+    verify_certificate_chain_func                 verify_certificate_chain_;
     std::unique_ptr<client_key_exchange_protocol> client_kex;
-    session_id                 sesion_id;
-    std::vector<uint8_t>       master_secret;
 
     void send_client_hello(const done_handler& handler);
     void read_server_hello(const done_handler& handler);

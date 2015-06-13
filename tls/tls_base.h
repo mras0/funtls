@@ -50,6 +50,12 @@ protected:
 
     explicit tls_base(std::unique_ptr<stream> stream, connection_end ce) : stream_(std::move(stream)), connection_end_(ce) {
         assert(stream_);
+        if (connection_end_ == connection_end::server) {
+            server_random_ = make_random();
+        } else {
+            assert(connection_end_ == connection_end::client);
+            client_random_ = make_random();
+        }
     }
 
     ~tls_base();
@@ -59,8 +65,46 @@ protected:
     void send_handshake(const handshake& handshake, const done_handler& handler);
     void read_handshake(const recv_handshake_handler& handler);
 
-    protocol_version current_protocol_version() const {
-        return current_protocol_version_;
+    protocol_version current_protocol_version() const { return current_protocol_version_; }
+    cipher_suite negotiated_cipher() const            { return negotiated_cipher_; }
+    random client_random() const                      { return client_random_; }
+    random server_random() const                      { return server_random_; }
+    tls::session_id session_id() const                { return session_id_; }
+    const std::vector<uint8_t>& master_secret() const { return master_secret_; }
+
+    cipher_suite_parameters current_cipher_parameters() const {
+        return parameters_from_suite(negotiated_cipher_);
+    }
+
+    void current_protocol_version(protocol_version version) {
+        assert(version.major == current_protocol_version_.major && version.minor >= current_protocol_version_.minor);
+        current_protocol_version_ = version;
+    }
+
+    void  negotiated_cipher(cipher_suite suite) {
+        assert(suite != cipher_suite::null_with_null_null);
+        assert(negotiated_cipher_ == cipher_suite::null_with_null_null);
+        negotiated_cipher_ = suite;
+    }
+
+    void client_random(const random& r) {
+        assert(connection_end_ == connection_end::server);
+        client_random_ = r;
+    }
+
+    void server_random(const random& r) {
+        assert(connection_end_ == connection_end::client);
+        server_random_ = r;
+    }
+
+    void session_id(const tls::session_id& id) {
+        session_id_ = id;
+    }
+
+    void master_secret(std::vector<uint8_t>&& s) {
+        assert(master_secret_.empty());
+        assert(s.size() == master_secret_size);
+        master_secret_ = std::move(s);
     }
 
     std::vector<uint8_t> handshake_messages() const {
@@ -78,7 +122,12 @@ private:
     std::unique_ptr<stream>      stream_;
     // State
     connection_end               connection_end_;
-    protocol_version             current_protocol_version_ = protocol_version_tls_1_2;
+    protocol_version             current_protocol_version_ = protocol_version_tls_1_0;
+    cipher_suite                 negotiated_cipher_ = cipher_suite::null_with_null_null;
+    random                       client_random_;
+    random                       server_random_;
+    tls::session_id              session_id_;
+    std::vector<uint8_t>         master_secret_;
     uint64_t                     encrypt_sequence_number_  = 0;
     uint64_t                     decrypt_sequence_number_  = 0;
     std::unique_ptr<cipher>      encrypt_cipher_           = make_cipher(null_cipher_parameters_e);

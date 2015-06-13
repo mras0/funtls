@@ -39,10 +39,10 @@ client::client(std::unique_ptr<stream> stream, const std::vector<cipher_suite>& 
     : tls_base(std::move(stream), tls_base::connection_end::client)
     , wanted_ciphers_(wanted_ciphers)
     , verify_certificate_chain_(verify_certificate_chain)
-    , client_random(make_random())
 {
     assert(!wanted_ciphers_.empty());
     assert(std::find(wanted_ciphers_.begin(), wanted_ciphers_.end(), cipher_suite::null_with_null_null) == wanted_ciphers_.end());
+    current_protocol_version(protocol_version_tls_1_2);
 }
 
 client::~client() = default;
@@ -88,8 +88,8 @@ void client::send_client_hello(const done_handler& handler) {
     send_handshake(make_handshake(
         client_hello{
             current_protocol_version(),
-            client_random,
-            sesion_id,
+            client_random(),
+            session_id(),
             wanted_ciphers_,
             { compression_method::null },
             extensions
@@ -103,8 +103,7 @@ void client::read_server_hello(const done_handler& handler)
     std::cout << "Reading server hello." << std::endl;
     read_handshake(wrapped([this, handler] (handshake&& handshake) {
             auto server_hello = get_as<tls::server_hello>(handshake);
-            negotiated_cipher_ = server_hello.cipher_suite;
-            if (std::find(wanted_ciphers_.begin(), wanted_ciphers_.end(), negotiated_cipher_) == wanted_ciphers_.end()) {
+            if (std::find(wanted_ciphers_.begin(), wanted_ciphers_.end(), server_hello.cipher_suite) == wanted_ciphers_.end()) {
                 throw std::runtime_error("Invalid cipher suite returned " + util::base16_encode(&server_hello.cipher_suite, 2));
             }
             if (server_hello.compression_method != compression_method::null) {
@@ -119,12 +118,12 @@ void client::read_server_hello(const done_handler& handler)
                     FUNTLS_CHECK_FAILURE(msg.str());
                 }
             }
-            server_random = server_hello.random;
-            sesion_id = server_hello.session_id;
-            std::cout << "Negotiated cipher suite:\n" << parameters_from_suite(negotiated_cipher_) << std::endl;
+            negotiated_cipher(server_hello.cipher_suite);
+            server_random(server_hello.random);
+            session_id(server_hello.session_id);
+            std::cout << "Negotiated cipher suite:\n" << current_cipher_parameters() << std::endl;
 
-            const auto cipher_param = parameters_from_suite(negotiated_cipher_);
-            client_kex = make_client_key_exchange_protocol(cipher_param.key_exchange_algorithm, current_protocol_version(), client_random, server_random);
+            client_kex = make_client_key_exchange_protocol(current_cipher_parameters().key_exchange_algorithm, current_protocol_version(), client_random(), server_random());
 
             std::cout << "Reading until server hello done\n";
             // Note: Handshake messages are only allowed in a specific order
@@ -192,21 +191,20 @@ void client::request_cipher_change(const std::vector<uint8_t>& pre_master_secret
         // We can now compute the master_secret as specified in rfc5246 8.1
         // master_secret = PRF(pre_master_secret, "master secret", ClientHello.random + ServerHello.random)[0..47]
 
-        const auto cipher_param = parameters_from_suite(negotiated_cipher_);
+        const auto cipher_param = current_cipher_parameters();
         std::vector<uint8_t> rand_buf;
-        append_to_buffer(rand_buf, client_random);
-        append_to_buffer(rand_buf, server_random);
-        master_secret = PRF(cipher_param.prf_algorithm, pre_master_secret, "master secret", rand_buf, master_secret_size);
-        assert(master_secret.size() == master_secret_size);
+        append_to_buffer(rand_buf, client_random());
+        append_to_buffer(rand_buf, server_random());
+        master_secret(PRF(cipher_param.prf_algorithm, pre_master_secret, "master secret", rand_buf, master_secret_size));
         //std::cout << "Master secret: " << util::base16_encode(master_secret) << std::endl;
 
         // Now do Key Calculation http://tools.ietf.org/html/rfc5246#section-6.3
         // key_block = PRF(SecurityParameters.master_secret, "key expansion", SecurityParameters.server_random + SecurityParameters.client_random)
         const size_t key_block_length  = 2 * cipher_param.mac_key_length + 2 * cipher_param.key_length + 2 * cipher_param.fixed_iv_length;
         std::vector<uint8_t> randbuf;
-        append_to_buffer(randbuf, server_random);
-        append_to_buffer(randbuf, client_random);
-        auto key_block = PRF(cipher_param.prf_algorithm, master_secret, "key expansion", randbuf, key_block_length);
+        append_to_buffer(randbuf, server_random());
+        append_to_buffer(randbuf, client_random());
+        auto key_block = PRF(cipher_param.prf_algorithm, master_secret(), "key expansion", randbuf, key_block_length);
 
         //std::cout << "Keyblock:\n" << util::base16_encode(key_block) << "\n";
 
@@ -228,7 +226,7 @@ void client::request_cipher_change(const std::vector<uint8_t>& pre_master_secret
         send_change_cipher_spec(wrapped([this, handler] () {
                     std::cout << "Reading change cipher spec\n";
                     read_change_cipher_spec(wrapped([this, handler] () {
-                                std::cout << "Handshake done. Session id " << util::base16_encode(sesion_id.as_vector()) << std::endl;
+                                std::cout << "Handshake done. Session id " << util::base16_encode(session_id().as_vector()) << std::endl;
                                 handler(util::async_result<void>{});
                             }, handler));
                 }, handler));
@@ -261,7 +259,7 @@ std::vector<uint8_t> client::do_verify_data(tls_base::connection_end ce) const
     //      All of the data from all messages in this handshake (not
     //      including any HelloRequest messages) up to, but not including,
     //      this message
-    const auto prf_algo       = parameters_from_suite(negotiated_cipher_).prf_algorithm;
+    const auto prf_algo       = current_cipher_parameters().prf_algorithm;
     const auto finished_label = ce == tls_base::connection_end::server ? "server finished" : "client finished";
 
     std::vector<uint8_t> handshake_digest;
@@ -274,7 +272,7 @@ std::vector<uint8_t> client::do_verify_data(tls_base::connection_end ce) const
         msg << "Unsupported PRF algorithm " << prf_algo;
         FUNTLS_CHECK_FAILURE(msg.str());
     }
-    return PRF(prf_algo, master_secret, finished_label, handshake_digest, finished::verify_data_min_length);
+    return PRF(prf_algo, master_secret(), finished_label, handshake_digest, finished::verify_data_min_length);
 }
 
 } } // namespace funtls::tls

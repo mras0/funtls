@@ -480,13 +480,23 @@ std::ostream& operator<<(std::ostream& os, mac_algorithm e)
         f(ecdhe_rsa_with_aes_256_gcm_sha384);\
         f(ecdhe_rsa_with_chacha20_poly1305_sha256);
 
+bool is_supported(cipher_suite suite)
+{
+    switch (suite) {
+#define PARAMETERS_FROM_SUITE_CASE(cs) case cipher_suite::cs: return true
+        ALL_SUPPORTED_SUITES(PARAMETERS_FROM_SUITE_CASE);
+#undef PARAMETERS_FROM_SUITE_CASE
+        default: return false;
+    }
+}
+
 cipher_suite_parameters parameters_from_suite(cipher_suite suite)
 {
     switch (suite) {
 #define PARAMETERS_FROM_SUITE_CASE(cs) case cipher_suite::cs: return from_suite_impl<cipher_suite::cs>()
         ALL_SUPPORTED_SUITES(PARAMETERS_FROM_SUITE_CASE);
 #undef PARAMETERS_FROM_SUITE_CASE
-        default: // TODO: REMOVE
+        default:
         break;
     }
     FUNTLS_CHECK_FAILURE("Unknown TLS cipher suite " + cipher_suite_hex(suite));
@@ -494,6 +504,9 @@ cipher_suite_parameters parameters_from_suite(cipher_suite suite)
 
 std::ostream& operator<<(std::ostream& os, cipher_suite suite)
 {
+    if (!is_supported(suite)) {
+        return os << "Unknown TLS cipher suite " << cipher_suite_hex(suite);
+    }
     const auto csp = parameters_from_suite(suite);
     os << "TLS_" << csp.key_exchange_algorithm;
     os << "_WITH_";

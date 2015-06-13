@@ -93,19 +93,38 @@ inline void append_to_buffer(std::vector<uint8_t>& buffer, const client_hello& i
     }
 }
 
-inline void append_to_buffer(std::vector<uint8_t>& buffer, const certificate& item) {
-    (void) buffer; (void) item;
-    assert(!"Not implemented");
+inline void append_to_buffer(std::vector<uint8_t>& buffer, const server_hello& item) {
+    append_to_buffer(buffer, item.server_version);
+    append_to_buffer(buffer, item.random);
+    append_to_buffer(buffer, item.session_id);
+    append_to_buffer(buffer, item.cipher_suite);
+    append_to_buffer(buffer, item.compression_method);
+
+    if (!item.extensions.empty()) {
+        std::vector<uint8_t> extension_buf;
+        for (const auto& ext : item.extensions) {
+            append_to_buffer(extension_buf, ext);
+        }
+        assert(extension_buf.size() < 65535);
+        append_to_buffer(buffer, uint16(extension_buf.size()));
+        append_to_buffer(buffer, extension_buf);
+    }
 }
 
-inline void append_to_buffer(std::vector<uint8_t>& buffer, const server_hello& item) {
-    (void) buffer; (void) item;
-    assert(!"Not implemented");
+inline void append_to_buffer(std::vector<uint8_t>& buffer, const certificate& item) {
+    uint32_t size = 0;
+    for (const auto& c : item.certificate_list) {
+        size += c.byte_count() + 3;
+    }
+    append_to_buffer(buffer, uint24(size));
+    for (const auto& c : item.certificate_list) {
+        append_to_buffer(buffer, c);
+    }
 }
 
 inline void append_to_buffer(std::vector<uint8_t>& buffer, const server_hello_done& item) {
     (void) buffer; (void) item;
-    assert(!"Not implemented");
+    // ServerHelloDone is empty
 }
 
 inline void append_to_buffer(std::vector<uint8_t>& buffer, const client_key_exchange_rsa& item) {
@@ -213,6 +232,31 @@ inline void from_bytes(extension& item, util::buffer_view& buffer) {
     from_bytes(item.data, buffer);
 }
 
+inline void from_bytes(client_hello& item, util::buffer_view& buffer) {
+    from_bytes(item.client_version, buffer);
+    from_bytes(item.random, buffer);
+    from_bytes(item.session_id, buffer);
+    from_bytes(item.cipher_suites, buffer);
+    from_bytes(item.compression_methods, buffer);
+    if (buffer.remaining()) {
+        // Extensions
+        assert(item.client_version == protocol_version_tls_1_2);
+
+        uint16 bytes;
+        from_bytes(bytes, buffer);
+        // TODO: Better length validation
+        if (bytes != buffer.remaining()) {
+            throw std::runtime_error("Invalid ServerHello extensions list length got " + std::to_string(bytes) + " expected " + std::to_string(buffer.remaining()));
+        }
+        assert(item.extensions.empty());
+        while (buffer.remaining()) {
+            extension e;
+            from_bytes(e, buffer);
+            item.extensions.push_back(e);
+        }
+    }
+}
+
 inline void from_bytes(server_hello& item, util::buffer_view& buffer) {
     from_bytes(item.server_version, buffer);
     from_bytes(item.random, buffer);
@@ -272,6 +316,10 @@ inline void from_bytes(server_hello_done&, util::buffer_view& buffer) {
     if (buffer.remaining() != 0) {
         throw std::runtime_error("Non empty server hello. Size: " + std::to_string(buffer.remaining()));
     }
+}
+
+inline void from_bytes(client_key_exchange_rsa& item, util::buffer_view& buffer) {
+    from_bytes(item.encrypted_pre_master_secret, buffer);
 }
 
 inline void from_bytes(server_key_exchange_dhe& item, util::buffer_view& buffer) {

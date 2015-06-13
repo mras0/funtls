@@ -341,6 +341,7 @@ struct cipher_suite_parameters {
 enum class hash_algorithm : uint8_t;
 hash::hash_algorithm get_hash(hash_algorithm algo);
 hash::hash_algorithm get_hmac(mac_algorithm algo, const std::vector<uint8_t>& key);
+bool is_supported(cipher_suite suite);
 cipher_suite_parameters parameters_from_suite(cipher_suite suite);
 
 std::ostream& operator<<(std::ostream& os, key_exchange_algorithm e);
