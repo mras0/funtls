@@ -3,10 +3,27 @@
 #include <util/test.h>
 #include <util/random.h>
 #include <hash/hash.h> // TODO: remove from this file
-#include <sys/time.h> // gettimeofday
 #include <fstream>
 
 using namespace funtls;
+
+#ifdef _MSC_VER
+namespace {
+#include <time.h>
+uint32_t get_gmt_unix_time() {
+	return static_cast<uint32_t>(time(nullptr));
+}
+} // unnamed namespace
+#else
+#include <sys/time.h> // gettimeofday
+namespace {
+uint32_t get_gmt_unix_time() {
+	struct timeval tv;
+	gettimeofday(&tv, nullptr);
+	return static_cast<uint32_t>(tv.tv_sec);
+}
+} // unnamed namespace
+#endif
 
 namespace {
 
@@ -14,12 +31,6 @@ template<typename T>
 void get_random_bytes(T& t) {
     static_assert(std::is_pod<T>::value && !std::is_pointer<T>::value, "");
     util::get_random_bytes(&t, sizeof(T));
-}
-
-uint32_t get_gmt_unix_time() {
-    struct timeval tv;
-    gettimeofday(&tv, nullptr);
-    return static_cast<uint32_t>(tv.tv_sec);
 }
 
 template<typename T>

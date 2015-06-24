@@ -56,7 +56,7 @@ I rand_int_non_zero(size_t max_bits = ::test_max_bits)
     I x;
     do {
         x = rand_int<I>(max_bits);
-    } while (!x);
+    } while (x == 0);
     return x;
 }
 

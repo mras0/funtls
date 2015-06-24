@@ -605,7 +605,7 @@ std::ostream& operator<<(std::ostream& os, const biguint& ui)
             biguint::divmod(n, rem, n, 10);
             assert(rem < 10);
             s += '0' + static_cast<uint8_t>(rem);
-            assert(!ui || n < ui);
+            assert(ui == 0 || n < ui);
         } while (n != 0);
         for (auto it = s.crbegin(), end = s.crend(); it != end; ++it) {
             os << *it;
