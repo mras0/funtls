@@ -15,6 +15,11 @@ if (MSVC)
 
     add_definitions("-D__PRETTY_FUNCTION__=__func__")
     add_definitions("-D_SCL_SECURE_NO_WARNINGS")
+    add_definitions("-DUNICODE -D_UNICODE")
+
+    # Always include debug information
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zi /Zo")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /DEBUG")
 else()
     set(use_asan   TRUE  CACHE BOOL "Use address sanitizier")
     set(use_tsan   FALSE CACHE BOOL "Use thread sanitizier")

@@ -10,6 +10,7 @@
 #include <iostream>
 
 #ifdef WIN32
+#include "trust_store_win32.h"
 namespace {
 std::vector<std::string> all_files_in_dir(const std::string& dir)
 {
@@ -105,7 +106,9 @@ void trust_store::add_all_from_file(const std::string& filename)
 void trust_store::add_os_defaults()
 {
 #ifdef WIN32
-    // TODO
+    for (const auto& cert : win32_root_certificates()) {
+        add(cert);
+    }
 #else
     //add_from_directory("/etc/ssl/certs");
     add_all_from_file("/etc/ssl/certs/ca-certificates.crt");
