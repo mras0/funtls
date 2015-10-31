@@ -31,8 +31,8 @@ std::ostream& operator<<(std::ostream& os, const state& s) {
 void tests_aes_internals()
 {
     // Untested:
-    (void) AddRoundKey;
-    (void) initial_y;
+    (void) &AddRoundKey;
+    (void) &initial_y;
 
     //
     // Key expansion
@@ -129,7 +129,7 @@ void tests_aes_internals()
         for (unsigned i = 0; i < 16; ++i) {
             state s{std::vector<uint8_t>(16)};
             for (unsigned j = 0; j < 16; ++j) {
-                s[j] = i*16 + j;
+                s[j] = static_cast<uint8_t>(i*16 + j);
             }
             SubBytes(s);
             InvSubBytes(s);

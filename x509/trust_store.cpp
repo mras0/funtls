@@ -5,13 +5,22 @@
 #include <memory>
 #include <fstream>
 
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <dirent.h>
 #include <string.h>
 
 #include <iostream>
 
+#ifdef WIN32
+namespace {
+std::vector<std::string> all_files_in_dir(const std::string& dir)
+{
+	(void)dir;
+	throw std::runtime_error(std::string(__func__) + " not implemented.");
+}
+} // unnamed namespace
+#else
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <dirent.h>
 namespace {
 
 std::vector<std::string> all_files_in_dir(const std::string& dir)
@@ -38,8 +47,9 @@ std::vector<std::string> all_files_in_dir(const std::string& dir)
     }
     return files;
 }
-
 } // unnamed namespace
+#endif
+
 namespace funtls { namespace x509 {
 
 void trust_store::add(const x509::certificate& cert)
@@ -90,6 +100,16 @@ void trust_store::add_all_from_file(const std::string& filename)
     }
 
     if (!in) throw std::runtime_error("Error reading from " + filename);
+}
+
+void trust_store::add_os_defaults()
+{
+#ifdef WIN32
+    // TODO
+#else
+    //add_from_directory("/etc/ssl/certs");
+    add_all_from_file("/etc/ssl/certs/ca-certificates.crt");
+#endif
 }
 
 void trust_store::verify_cert_chain(const std::vector<x509::certificate>& certlist) const

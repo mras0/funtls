@@ -7,36 +7,55 @@ enable_testing()
 # http://stackoverflow.com/questions/16158091/cmake-setting-an-environmental-variable-for-ctest-or-otherwise-getting-failed
 add_custom_target(check COMMAND ${CMAKE_CTEST_COMMAND} --force-new-ctest-process --output-on-failure)
 
-set(use_asan   TRUE  CACHE BOOL "Use address sanitizier")
-set(use_tsan   FALSE CACHE BOOL "Use thread sanitizier")
-set(use_ubsan  TRUE  CACHE BOOL "Use undefined behavior sanitizier")
-set(use_bigint FALSE CACHE BOOL "Use funtls bigint implmentation")
+if (MSVC)
+    set(CMAKE_CONFIGURATION_TYPES "Debug;Release" CACHE STRING "Supported build configurations" FORCE)
 
-set(common_flags "-Wall -Wextra -pthread -g -fno-omit-frame-pointer")
-if (use_asan)
-    message("Using address sanitizer")
-    set(common_flags "${common_flags} -fsanitize=address")
+    add_definitions("/W4")
+    add_definitions("/wd4127") # C4127: conditional expression is constant
+
+    add_definitions("-D__PRETTY_FUNCTION__=__func__")
+    add_definitions("-D_SCL_SECURE_NO_WARNINGS")
+else()
+    set(use_asan   TRUE  CACHE BOOL "Use address sanitizier")
+    set(use_tsan   FALSE CACHE BOOL "Use thread sanitizier")
+    set(use_ubsan  TRUE  CACHE BOOL "Use undefined behavior sanitizier")
+
+    set(common_flags "-Wall -Wextra -pthread -g -fno-omit-frame-pointer")
+    if (use_asan)
+        message("Using address sanitizer")
+        set(common_flags "${common_flags} -fsanitize=address")
+    endif()
+    if (use_tsan)
+        message("Using thread sanitizer")
+        set(common_flags "${common_flags} -fsanitize=thread")
+    endif()
+    if (use_ubsan)
+        message("Using undefined behavior sanitizer")
+        set(common_flags "${common_flags} -fsanitize=undefined")
+    endif()
+
+    if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 4.9)
+        set(common_flags "${common_flags} -Wno-deprecated-declarations")
+    endif()
+
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c99 ${common_flags}")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 ${common_flags}")
 endif()
-if (use_tsan)
-    message("Using thread sanitizer")
-    set(common_flags "${common_flags} -fsanitize=thread")
-endif()
-if (use_ubsan)
-    message("Using undefined behavior sanitizer")
-    set(common_flags "${common_flags} -fsanitize=undefined")
-endif()
+
+set(use_bigint FALSE CACHE BOOL "Use funtls bigint implmentation")
 if (use_bigint)
     message("Using funtls bigint - EXPERIMENTAL")
-    set(common_flags "${common_flags} -DUSE_FUNTLS_BIGINT")
+    add_definitions("-DUSE_FUNTLS_BIGINT")
 endif()
 
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c99 ${common_flags}")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 ${common_flags}")
 
 # Ugly handling of boost stuff
-set(boost_dir "${CMAKE_CURRENT_SOURCE_DIR}/../boost_1_57_0/" CACHE PATH "Root of boost installation")
+set(boost_dir "${CMAKE_CURRENT_SOURCE_DIR}/../boost_1_59_0/" CACHE PATH "Root of boost installation")
 include_directories(${boost_dir})
 add_definitions("-DBOOST_ALL_NO_LIB -DBOOST_SYSTEM_NO_DEPRECATED -DBOOST_ERROR_CODE_HEADER_ONLY")
+if (WIN32)
+    add_definitions("-D_WIN32_WINNT=0x0501")
+endif()
 
 add_subdirectory(util)
 add_subdirectory(bigint)
@@ -54,20 +73,27 @@ add_subdirectory(tls)
 add_subdirectory(ssh)
 
 include_directories(${funtls_SOURCE_DIR})
-add_executable(funtls client.cpp)
+
+add_executable(funtls client.cpp tls_fetch.cpp)
 target_link_libraries(funtls tls)
 
-include_directories(${funtls_SOURCE_DIR})
 add_executable(test_server test_server.cpp)
 target_link_libraries(test_server tls)
 
-find_program(HAS_CTAGS ctags)
-if (HAS_CTAGS)
-    message("ctags found")
+add_executable(self_test test_server.cpp tls_fetch.cpp)
+target_link_libraries(self_test tls)
+set_target_properties(self_test PROPERTIES COMPILE_FLAGS "-DSELF_TEST")
+add_test(self_test self_test)
 
-    set_source_files_properties(tags PROPERTIES GENERATED true)
-    add_custom_target(tags
-        COMMAND ctags -R --c++-kinds=+p --fields=+iaS --extra=+q --exclude=build* .
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-    add_dependencies(funtls tags)
+if (NOT WIN32)
+    find_program(HAS_CTAGS ctags)
+    if (HAS_CTAGS)
+        message("ctags found")
+
+        set_source_files_properties(tags PROPERTIES GENERATED true)
+        add_custom_target(tags
+            COMMAND ctags -R --c++-kinds=+p --fields=+iaS --extra=+q --exclude=build* .
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+        add_dependencies(funtls tags)
+    endif()
 endif()

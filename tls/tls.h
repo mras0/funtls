@@ -24,19 +24,21 @@ struct uint {
 
     static constexpr Underlying max_size = Underlying{1} << BitCount;
 
-    uint(Underlying value = 0) : value(value) {
+    using underlying_type = Underlying;
+
+    uint(underlying_type value = 0) : value(value) {
         if (value >> BitCount) {
             throw std::logic_error(std::to_string(value) + " is out of range for uint<" + std::to_string(BitCount) + ">");
         }
     }
 
-    operator Underlying() const {
+    operator underlying_type() const {
         assert(value < max_size);
         return value;
     }
 
 private:
-    Underlying value;
+    underlying_type value;
 };
 
 using uint8  = uint8_t;
@@ -48,11 +50,11 @@ using uint64 = uint64_t;
 template<unsigned BitCount>
 struct smallest_possible_uint;
 
-template<> struct smallest_possible_uint<8> { using type = uint8; };
-template<> struct smallest_possible_uint<16> { using type = uint16; };
-template<> struct smallest_possible_uint<24> { using type = uint24; };
-template<> struct smallest_possible_uint<32> { using type = uint32; };
-template<> struct smallest_possible_uint<64> { using type = uint64; };
+template<> struct smallest_possible_uint<8> { using type = uint8; using underlying_type = type; };
+template<> struct smallest_possible_uint<16> { using type = uint16; using underlying_type = type; };
+template<> struct smallest_possible_uint<24> { using type = uint24; using underlying_type = uint32_t; };
+template<> struct smallest_possible_uint<32> { using type = uint32; using underlying_type = type; };
+template<> struct smallest_possible_uint<64> { using type = uint64; using underlying_type = type; };
 
 enum class content_type : uint8_t {
     change_cipher_spec = 20,
@@ -175,7 +177,8 @@ struct vector {
     }
 
     serialized_size_type byte_count() const {
-        return data.size() * sizeof(T);
+        using underlying_serialized_size_type = typename smallest_possible_uint<8*log256(UpperBoundInBytes)>::underlying_type;
+        return static_cast<underlying_serialized_size_type>(data.size() * sizeof(T));
     }
 
     size_t size() const {

@@ -97,7 +97,7 @@ void put(buffer_builder& b, const std::vector<uint8_t>& v) {
 
 void put_string(buffer_builder& b, const std::vector<uint8_t>& v) {
     assert(v.size() < (1ULL<<32));
-    b.put_u32(v.size());
+    b.put_u32(static_cast<uint32_t>(v.size()));
     put(b, v);
 }
 
@@ -114,7 +114,7 @@ std::vector<uint8_t> make_ssh_packet(const std::vector<uint8_t>& payload, const 
     buffer_builder packet;
     uint8_t padding = padwidth - (payload.size() + 4 + 1) % padwidth;
     if (padding < 4) padding += padwidth;
-    packet.put_u32(payload.size() + 1 + padding);
+    packet.put_u32(static_cast<uint32_t>(payload.size() + 1 + padding));
     packet.put_u8(padding);
     put(packet, payload);
     put(packet, std::vector<uint8_t>(padding));
@@ -185,7 +185,7 @@ std::vector<uint8_t> u32buf(const uint32_t x) {
 
 std::vector<uint8_t> generate_key(const std::vector<uint8_t>& K, const std::vector<uint8_t>& H, char letter, const std::vector<uint8_t>& session_id, size_t needed)
 {
-    auto key = hash::sha1{}.input(u32buf(K.size())).input(K).input(H).input(&letter, 1).input(session_id).result();
+    auto key = hash::sha1{}.input(u32buf(static_cast<uint32_t>(K.size()))).input(K).input(H).input(&letter, 1).input(session_id).result();
     std::cout << "key " << letter << std::endl;
     hexdump(std::cout, key);
     // key expansion not implemented
@@ -572,7 +572,7 @@ void ssh_client::do_user_auth(const std::string& service, const std::string& use
         put_string(b, pk_blob);
 
         if (include_sig) {
-            std::vector<uint8_t> verbuf = u32buf(session_id.size());
+            std::vector<uint8_t> verbuf = u32buf(static_cast<uint32_t>(session_id.size()));
             verbuf.insert(verbuf.end(), session_id.begin(), session_id.end());
             verbuf.insert(verbuf.end(), b.as_vector().begin(), b.as_vector().end());
             hexdump(std::cout, verbuf);

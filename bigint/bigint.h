@@ -49,10 +49,10 @@ using dlimb_type_t = typename dlimb_type<IntType>::type;
 
 class biguint {
 public:
-#if 1
+#ifdef __SIZEOF_INT128__
     using limb_type = uint64_t;
 #else
-    using limb_type = uint8_t;
+	using limb_type = uint32_t;
 #endif
     using dlimb_type = detail::dlimb_type_t<limb_type>;
     using size_type = uint16_t;
@@ -187,7 +187,7 @@ class bin_expr : public detail::expr {
 public:
     bin_expr(const L& l, const R& r) : l_(l), r_(r) {}
     void eval(biguint& res) const {
-        biguint& (*op)(biguint&, const biguint&, const biguint&);
+        biguint& (*op)(biguint&, const biguint&, const biguint&) = nullptr;
         switch (tag) {
         case bin_expr_tag::add: op = &biguint::add; break;
         case bin_expr_tag::sub: op = &biguint::sub; break;

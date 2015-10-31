@@ -47,7 +47,6 @@
 /*
  * add "length" to the length
  */
-static uint32_t addTemp;
 #define SHA1AddLength(context, length)                     \
     (addTemp = (context)->Length_Low,                      \
      (context)->Corrupted =                                \
@@ -137,6 +136,7 @@ int SHA1Input(SHA1Context *context,
     context->Message_Block[context->Message_Block_Index++] =
       (*message_array & 0xFF);
 
+    uint32_t addTemp = 0;
     if (!SHA1AddLength(context, 8) &&
       (context->Message_Block_Index == SHA1_Message_Block_Size))
       SHA1ProcessMessageBlock(context);
@@ -196,6 +196,7 @@ int SHA1FinalBits(SHA1Context *context, const uint8_t message_bits,
   if (context->Corrupted)
      return context->Corrupted;
 
+  uint32_t addTemp = 0;
   SHA1AddLength(context, length);
   SHA1Finalize(context,
     (uint8_t) ((message_bits & masks[length]) | markbit[length]));

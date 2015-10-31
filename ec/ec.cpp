@@ -61,9 +61,9 @@ point point_from_bytes(const std::vector<uint8_t>& in) {
         return ec::infinity;
     } else if (type == 4) {
         FUNTLS_CHECK_BINARY((in.size()-1) & 1, ==, 0, "Illegal elliptic curve point");
-        const auto beg = &in[1];
-        const auto mid = &in[1+(in.size()-1)/2];
-        const auto end = &in[in.size()];
+        const auto beg = in.begin() + 1;
+        const auto mid = in.begin() + 1+(in.size()-1)/2;
+        const auto end = in.end();
         const std::vector<uint8_t> x(beg, mid);
         const std::vector<uint8_t> y(mid, end);
         assert(x.size() == y.size());
@@ -173,7 +173,7 @@ point curve::mul(field_elem m, point point) const {
     assert(m > 0);
 
     ec::point res = infinity;
-    while (m) {
+    while (m != 0) {
         if (m & 1) res = add(res, point);
         point = sqr(point);
         m >>= 1;

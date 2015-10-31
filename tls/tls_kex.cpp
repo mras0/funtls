@@ -231,7 +231,7 @@ ecdhe_client_kex_protocol::result_type ecdhe_client_kex_protocol::do_result() co
     if (!params_) FUNTLS_CHECK_FAILURE("");
     const auto& curve = curve_from_name(params_->curve_name);
 
-    const size_t size = ilog256(curve.n);
+    const auto size = static_cast<uint32_t>(ilog256(curve.n));
     std::cout << "size = " << size << std::endl;
     assert(size == ilog256(curve.p));
 

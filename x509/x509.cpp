@@ -438,14 +438,15 @@ asn1::object_id public_key_algo_from_signature_algo(const algorithm_id& sig_algo
     FUNTLS_CHECK_FAILURE(oss.str());
 }
 
+void verify_x509_signature_rsa(const certificate& subject_cert, const certificate& issuer_cert);
+void verify_x509_signature_ec(const certificate& subject_cert, const certificate& issuer_cert);
+
 void verify_x509_signature(const certificate& subject_cert, const certificate& issuer_cert)
 {
     const auto pk_algo = public_key_algo_from_signature_algo(subject_cert.signature_algorithm());
     if (pk_algo == id_rsaEncryption) {
-        void verify_x509_signature_rsa(const certificate& subject_cert, const certificate& issuer_cert);
         verify_x509_signature_rsa(subject_cert, issuer_cert);
     } else if (pk_algo == id_ecPublicKey) {
-        void verify_x509_signature_ec(const certificate& subject_cert, const certificate& issuer_cert);
         verify_x509_signature_ec(subject_cert, issuer_cert);
     } else {
         std::ostringstream oss;

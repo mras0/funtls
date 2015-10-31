@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <numeric>
 #include <math.h>
 #include <util/test.h>
 #include <int_util/int_util.h>
@@ -56,7 +57,7 @@ I rand_int_non_zero(size_t max_bits = ::test_max_bits)
     I x;
     do {
         x = rand_int<I>(max_bits);
-    } while (!x);
+    } while (x == 0);
     return x;
 }
 
@@ -218,6 +219,9 @@ void report(const results_t& results)
     }
 }
 
+#ifdef _MSC_VER
+#pragma warning(disable: 4319) // C4319: '~': zero extending 'const unsigned long' to 'boost::multiprecision::double_limb_type' of greater size
+#endif
 #include <bigint/bigint.h>
 #include <boost/multiprecision/cpp_int.hpp>
 int main()

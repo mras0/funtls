@@ -82,7 +82,7 @@ biguint biguint::from_be_bytes(const uint8_t* bytes, size_t size)
 {
     FUNTLS_CHECK_BINARY(size, <=, sizeof(v_), "Out of representable range");
     biguint x;
-    x.size_ = (size+sizeof(limb_type)-1)/sizeof(limb_type);
+    x.size_ = static_cast<size_type>((size+sizeof(limb_type)-1)/sizeof(limb_type));
     if (x.size_) x.v_[x.size_-1] = 0; // Final limb might be partial
     std::reverse_copy(bytes, bytes+size, reinterpret_cast<uint8_t*>(x.v_));
     x.trim();
@@ -358,7 +358,7 @@ void biguint::divmod(biguint& quot, biguint& rem, const biguint& lhs, const bigu
             r <<= limb_bits;
             r |= lhs.v_[i];
             if (r >= rhs.v_[0]) {
-                quot.v_[i] = r / rhs.v_[0];
+                quot.v_[i] = static_cast<limb_type>(r / rhs.v_[0]);
                 r -= static_cast<dlimb_type>(quot.v_[i]) * rhs.v_[0];
             } else {
                 quot.v_[i] = 0;
@@ -494,8 +494,8 @@ biguint& biguint::operator>>=(uint32_t shift)
     if (size_ <= shift_limbs) {
         size_ = 0;
     } else {
-        const auto shift_bits  = shift % limb_bits;
-        size_ -= shift_limbs;
+        const auto shift_bits = shift % limb_bits;
+        size_ -= static_cast<size_type>(shift_limbs);
         assert(size_ != 0);
         memmove(v_, v_+shift_limbs, size_*sizeof(limb_type));
         if (shift_bits) {
@@ -519,7 +519,7 @@ biguint& biguint::operator<<=(uint32_t shift)
 
     if (!size_) return *this;
 
-    const auto shift_limbs = shift / limb_bits;
+    const auto shift_limbs = static_cast<size_type>(shift / limb_bits);
     size_ += shift_limbs;
     FUNTLS_CHECK_BINARY(size_, <=, max_size, "Invalid shift amount " + std::to_string(shift));
 
@@ -605,7 +605,7 @@ std::ostream& operator<<(std::ostream& os, const biguint& ui)
             biguint::divmod(n, rem, n, 10);
             assert(rem < 10);
             s += '0' + static_cast<uint8_t>(rem);
-            assert(!ui || n < ui);
+            assert(ui == 0 || n < ui);
         } while (n != 0);
         for (auto it = s.crbegin(), end = s.crend(); it != end; ++it) {
             os << *it;

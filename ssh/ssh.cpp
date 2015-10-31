@@ -108,7 +108,7 @@ name_list name_list::from_string(const std::vector<uint8_t>& s)
 
     auto illegal_char = std::find_if(s.begin(), s.end(), [](char c) { return !legal_us_ascii(c); });
     if (illegal_char != s.end()) {
-        FUNTLS_CHECK_FAILURE("Invalid name list '" + std::string(&s[0], &s[s.size()]) + "'");
+        FUNTLS_CHECK_FAILURE("Invalid name list '" + std::string(s.begin(), s.end()) + "'");
     }
 
     std::vector<std::string> res;
@@ -120,14 +120,14 @@ name_list name_list::from_string(const std::vector<uint8_t>& s)
         }
     }
     if (last_start < s.size()) {
-        res.emplace_back(&s[last_start], &s[s.size()]);
+        res.emplace_back(s.begin() + last_start, s.end());
     } else if (last_start == s.size()) {
-        FUNTLS_CHECK_FAILURE("Invalid name list '" + std::string(&s[0], &s[s.size()]) + "'");
+        FUNTLS_CHECK_FAILURE("Invalid name list '" + std::string(s.begin(), s.end()) + "'");
     }
     assert(!res.empty());
     auto empty_string = std::find_if(res.begin(), res.end(), [](const std::string& s) { return s.empty(); });
     if (empty_string != res.end()) {
-        FUNTLS_CHECK_FAILURE("Invalid name list '" + std::string(&s[0], &s[s.size()]) + "'");
+        FUNTLS_CHECK_FAILURE("Invalid name list '" + std::string(s.begin(), s.end()) + "'");
     }
     return name_list{res};
 }

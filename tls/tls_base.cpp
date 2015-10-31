@@ -41,7 +41,7 @@ void tls_base::send_record(tls::content_type content_type, const std::vector<uin
         // Compression would happen here
 
         // Do encryption
-        const auto ver_buffer = verification_buffer(encrypt_sequence_number_++, content_type, current_protocol_version_, plaintext.size());
+        const auto ver_buffer = verification_buffer(encrypt_sequence_number_++, content_type, current_protocol_version_, static_cast<uint16_t>(plaintext.size()));
         const auto fragment  = encrypt_cipher_->process(plaintext, ver_buffer);
         FUNTLS_CHECK_BINARY(fragment.size(), <=, record::max_ciphertext_length, "Illegal fragment size");
 
@@ -105,14 +105,14 @@ void tls_base::set_pending_ciphers(const std::vector<uint8_t>& pre_master_secret
 
     //std::cout << "Keyblock:\n" << util::base16_encode(key_block) << "\n";
 
-    size_t i = 0;
-    auto client_mac_key = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.mac_key_length]};  i += cipher_param.mac_key_length;
-    auto server_mac_key = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.mac_key_length]};  i += cipher_param.mac_key_length;
-    auto client_enc_key = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.key_length]};      i += cipher_param.key_length;
-    auto server_enc_key = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.key_length]};      i += cipher_param.key_length;
-    auto client_iv      = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.fixed_iv_length]}; i += cipher_param.fixed_iv_length;
-    auto server_iv      = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.fixed_iv_length]}; i += cipher_param.fixed_iv_length;
-    assert(i == key_block.size());
+    auto kbi = key_block.begin();
+    auto client_mac_key = std::vector<uint8_t>{kbi, kbi+cipher_param.mac_key_length};  kbi += cipher_param.mac_key_length;
+    auto server_mac_key = std::vector<uint8_t>{kbi, kbi+cipher_param.mac_key_length};  kbi += cipher_param.mac_key_length;
+    auto client_enc_key = std::vector<uint8_t>{kbi, kbi+cipher_param.key_length};      kbi += cipher_param.key_length;
+    auto server_enc_key = std::vector<uint8_t>{kbi, kbi+cipher_param.key_length};      kbi += cipher_param.key_length;
+    auto client_iv      = std::vector<uint8_t>{kbi, kbi+cipher_param.fixed_iv_length}; kbi += cipher_param.fixed_iv_length;
+    auto server_iv      = std::vector<uint8_t>{kbi, kbi+cipher_param.fixed_iv_length}; kbi += cipher_param.fixed_iv_length;
+    assert(kbi == key_block.end());
 
     if (connection_end_ == connection_end::client) {
         pending_encrypt_cipher_ = make_cipher(cipher_parameters{cipher_parameters::encrypt, cipher_param, client_mac_key, client_enc_key, client_iv});

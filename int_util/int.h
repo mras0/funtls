@@ -4,6 +4,9 @@
 #ifdef USE_FUNTLS_BIGINT
 #include <bigint/bigint.h>
 #else
+#ifdef _MSC_VER
+#pragma warning(disable: 4319) // C4319: '~': zero extending 'const unsigned long' to 'boost::multiprecision::double_limb_type' of greater size
+#endif
 #include <boost/multiprecision/cpp_int.hpp>
 #endif
 namespace funtls {

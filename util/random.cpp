@@ -2,10 +2,17 @@
 #include <fstream>
 #include <stdexcept>
 
+#ifdef WIN32
+#include <random>
+#endif
+
 namespace funtls { namespace util {
 
 void get_random_bytes(void* dest, size_t count) {
-#if 1
+#ifdef WIN32
+	auto d = reinterpret_cast<uint8_t*>(dest);
+	while (count--) *d++ = static_cast<uint8_t>(std::random_device()());
+#elif 1
     std::ifstream urandom("/dev/urandom", std::ifstream::binary);
     if (!urandom || !urandom.is_open()) {
         throw std::runtime_error("Could not open /dev/urandom");

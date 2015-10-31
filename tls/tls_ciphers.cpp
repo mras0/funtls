@@ -37,8 +37,8 @@ private:
 
 std::vector<uint8_t> mac_checked_cipher::calc_mac(const std::vector<uint8_t>& content, std::vector<uint8_t> verbuffer) {
     assert(verbuffer.size() == 13);
-    verbuffer[11] = static_cast<uint16_t>(content.size() >> 8);
-    verbuffer[12] = static_cast<uint16_t>(content.size());
+    verbuffer[11] = static_cast<uint8_t>(content.size() >> 8);
+    verbuffer[12] = static_cast<uint8_t>(content.size());
     // The MAC is generated as:
     // MAC(MAC_write_key, seq_num +
     //                  TLSCompressed.type +
@@ -115,9 +115,9 @@ std::vector<uint8_t> mac_checked_cipher::do_process(const std::vector<uint8_t>& 
         }
 
         // Extract MAC + Content
-        const std::vector<uint8_t> mac{&decrypted[mac_index],&decrypted[mac_index+cipher_param.mac_length]};
+        const std::vector<uint8_t> mac{decrypted.begin() + mac_index , decrypted.begin() + mac_index + cipher_param.mac_length};
 
-        const std::vector<uint8_t> content{&decrypted[0],&decrypted[mac_index]};
+        const std::vector<uint8_t> content{decrypted.begin(), decrypted.begin() + mac_index};
 
         // Check MAC -- TODO: Unify with do_send
         const auto calced_mac = calc_mac(content, verbuffer);
@@ -164,8 +164,8 @@ private:
         if (parameters().operation() == tls::cipher_parameters::decrypt) {
             FUNTLS_CHECK_BINARY(data.size(), >=, iv_length, "Message too small");
             // Extract initialization vector
-            const std::vector<uint8_t> iv(&data[0],&data[iv_length]);
-            const std::vector<uint8_t> encrypted(&data[iv_length],&data[data.size()]);
+            const std::vector<uint8_t> iv(data.begin(), data.begin() + iv_length);
+            const std::vector<uint8_t> encrypted(data.begin() + iv_length, data.end());
             return process_function_(parameters().enc_key(), iv, encrypted);
         } else {
             assert(parameters().operation() == tls::cipher_parameters::encrypt);
@@ -210,13 +210,13 @@ std::vector<uint8_t> aes_gcm_cipher::do_process(const std::vector<uint8_t>& data
         std::vector<uint8_t> iv = parameters().fixed_iv();
         tls::append_to_buffer(iv, std::vector<uint8_t>(&data[0],&data[record_iv_length]));
         assert(iv.size() == parameters().suite_parameters().fixed_iv_length + record_iv_length);
-        const std::vector<uint8_t> encrypted(&data[record_iv_length],&data[data.size()-tag_length]);
-        const std::vector<uint8_t> tag(&data[data.size()-tag_length],&data[data.size()]);
+        const std::vector<uint8_t> encrypted(data.begin() + record_iv_length, data.begin() + data.size() - tag_length);
+        const std::vector<uint8_t> tag(data.begin() + data.size() - tag_length, data.begin() + data.size());
 
         auto vbuf = verbuffer;
         assert(vbuf.size()==13);
-        vbuf[11] = static_cast<uint16_t>(encrypted.size()>>8);
-        vbuf[12] = static_cast<uint16_t>(encrypted.size());
+        vbuf[11] = static_cast<uint8_t>(encrypted.size()>>8);
+        vbuf[12] = static_cast<uint8_t>(encrypted.size());
 
         //std::cout << "Calling aes_decrypt_gcm.\n";
         //std::cout << "Key  " << util::base16_encode(key_) << "\n";
@@ -295,8 +295,8 @@ std::vector<uint8_t> chacha20_cipher::do_process(const std::vector<uint8_t>& dat
         const std::vector<uint8_t> message_tag(data.end() - tag_length, data.end());
         auto vbuf = verbuffer;
         assert(vbuf.size()==13);
-        vbuf[11] = static_cast<uint16_t>(cipher_text.size()>>8);
-        vbuf[12] = static_cast<uint16_t>(cipher_text.size());
+        vbuf[11] = static_cast<uint8_t>(cipher_text.size()>>8);
+        vbuf[12] = static_cast<uint8_t>(cipher_text.size());
         //std::cout << "ctext " << util::base16_encode(cipher_text) << std::endl;
         //std::cout << "aad   " << util::base16_encode(vbuf) << std::endl;
         //std::cout << "mtag  " << util::base16_encode(message_tag) << std::endl;
@@ -459,45 +459,47 @@ std::ostream& operator<<(std::ostream& os, mac_algorithm e)
 }
 
 #define ALL_SUPPORTED_SUITES(f) \
-        f(null_with_null_null);\
-        f(rsa_with_rc4_128_md5);\
-        f(rsa_with_rc4_128_sha);\
-        f(rsa_with_3des_ede_cbc_sha);\
-        f(rsa_with_aes_128_cbc_sha);\
-        f(rsa_with_aes_256_cbc_sha);\
-        f(rsa_with_aes_128_cbc_sha256);\
-        f(rsa_with_aes_256_cbc_sha256);\
-        f(dhe_rsa_with_3des_ede_cbc_sha);\
-        f(dhe_rsa_with_aes_128_cbc_sha);\
-        f(dhe_rsa_with_aes_256_cbc_sha);\
-        f(dhe_rsa_with_aes_128_cbc_sha256);\
-        f(dhe_rsa_with_aes_256_cbc_sha256);\
-        f(rsa_with_aes_128_gcm_sha256);\
-        f(rsa_with_aes_256_gcm_sha384);\
-        f(ecdhe_ecdsa_with_aes_128_gcm_sha256);\
-        f(ecdhe_ecdsa_with_aes_256_gcm_sha384);\
-        f(ecdhe_rsa_with_aes_128_gcm_sha256);\
-        f(ecdhe_rsa_with_aes_256_gcm_sha384);\
-        f(ecdhe_rsa_with_chacha20_poly1305_sha256);
+        f(null_with_null_null)\
+        f(rsa_with_rc4_128_md5)\
+        f(rsa_with_rc4_128_sha)\
+        f(rsa_with_3des_ede_cbc_sha)\
+        f(rsa_with_aes_128_cbc_sha)\
+        f(rsa_with_aes_256_cbc_sha)\
+        f(rsa_with_aes_128_cbc_sha256)\
+        f(rsa_with_aes_256_cbc_sha256)\
+        f(dhe_rsa_with_3des_ede_cbc_sha)\
+        f(dhe_rsa_with_aes_128_cbc_sha)\
+        f(dhe_rsa_with_aes_256_cbc_sha)\
+        f(dhe_rsa_with_aes_128_cbc_sha256)\
+        f(dhe_rsa_with_aes_256_cbc_sha256)\
+        f(rsa_with_aes_128_gcm_sha256)\
+        f(rsa_with_aes_256_gcm_sha384)\
+        f(ecdhe_ecdsa_with_aes_128_gcm_sha256)\
+        f(ecdhe_ecdsa_with_aes_256_gcm_sha384)\
+        f(ecdhe_rsa_with_aes_128_gcm_sha256)\
+        f(ecdhe_rsa_with_aes_256_gcm_sha384)\
+        f(ecdhe_rsa_with_chacha20_poly1305_sha256)
 
 bool is_supported(cipher_suite suite)
 {
     switch (suite) {
-#define PARAMETERS_FROM_SUITE_CASE(cs) case cipher_suite::cs: return true
+#define PARAMETERS_FROM_SUITE_CASE(cs) case cipher_suite::cs: return true;
         ALL_SUPPORTED_SUITES(PARAMETERS_FROM_SUITE_CASE);
 #undef PARAMETERS_FROM_SUITE_CASE
-        default: return false;
+        default:
+            break;
     }
+    return false;
 }
 
 cipher_suite_parameters parameters_from_suite(cipher_suite suite)
 {
     switch (suite) {
-#define PARAMETERS_FROM_SUITE_CASE(cs) case cipher_suite::cs: return from_suite_impl<cipher_suite::cs>()
+#define PARAMETERS_FROM_SUITE_CASE(cs) case cipher_suite::cs: return from_suite_impl<cipher_suite::cs>();
         ALL_SUPPORTED_SUITES(PARAMETERS_FROM_SUITE_CASE);
 #undef PARAMETERS_FROM_SUITE_CASE
         default:
-        break;
+            break;
     }
     FUNTLS_CHECK_FAILURE("Unknown TLS cipher suite " + cipher_suite_hex(suite));
 }
@@ -615,14 +617,15 @@ std::istream& operator>>(std::istream& is, cipher_suite& suite)
     if (mac_algo != t::mac_algorithm) break;\
     suite = cipher_suite::cs;\
     return is;\
-} while(0)
+} while(0);
     ALL_SUPPORTED_SUITES(MATCH_SUITE);
 #undef MATCH_SUITE
+
     std::ostringstream oss;
     oss << "KEX=" << kex_algo << " Cipher=" << cipher_algo << " bits=" << bits << " MAC=" << mac_algo;
     FUNTLS_CHECK_FAILURE("Not implemented for " + oss.str());
-    suite = cipher_suite::null_with_null_null;
-    return is;
+    //suite = cipher_suite::null_with_null_null;
+    //return is;
 }
 
 std::ostream& operator<<(std::ostream& os, const cipher_suite_parameters& csp)

@@ -11,9 +11,9 @@ rc4::rc4(const std::vector<uint8_t>& key)
 {
     FUNTLS_CHECK_BINARY(key.size(), !=, 0, "Empty key not allowed");
     for (unsigned n = 0; n < 256; ++n) {
-        S[n] = n;
+        S[n] = static_cast<uint8_t>(n);
     }
-    uint8_t j = 0;
+    j = 0;
     do {
         j = j + S[i] + key[i % key.size()];
         std::swap(S[i], S[j]);

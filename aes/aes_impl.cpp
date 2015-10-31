@@ -47,7 +47,7 @@ constexpr unsigned Nr_from_Nk(unsigned Nk) {
 uint8_t xtime(uint8_t a)
 {
     static constexpr uint16_t mx = 0x11b;
-    return a & 0x80 ? (a<<1) ^ mx : (a<<1);
+    return static_cast<uint8_t>(a & 0x80 ? (a<<1) ^ mx : (a<<1));
 }
 
 uint8_t multiply(uint8_t a, uint8_t b) {
@@ -150,7 +150,7 @@ private:
 // Round Key equals the size of the State (i.e., for Nb = 4, the Round
 // Key length equals 128 bits/16 bytes)
 void AddRoundKey(state& s, const uint8_t* round_key) {
-    for (size_t i = 0; i < 4*Nb; ++i) {
+    for (unsigned i = 0; i < 4*Nb; ++i) {
         s[i] ^= round_key[i];
     }
 }
@@ -278,7 +278,7 @@ void SubWord(uint8_t* word) {
 
 std::vector<uint8_t> KeyExpansion(const std::vector<uint8_t>& key) // KeyExpansion(byte key[4*Nk], word w[Nb*(Nr+1)], Nk)
 {
-    const unsigned Nk = Nk_from_size(key.size());
+    const unsigned Nk = Nk_from_size(static_cast<unsigned>(key.size()));
     const unsigned Nr = Nr_from_Nk(Nk);
     std::vector<uint8_t> w(Nb*(Nr+1)*4); // out
 
@@ -311,7 +311,7 @@ std::vector<uint8_t> KeyExpansion(const std::vector<uint8_t>& key) // KeyExpansi
             assert(i/Nk < 32);
             assert(x <= 0xff);
             uint8_t rcon[4] = { static_cast<uint8_t>(x), 0x00, 0x00, 0x00 }; // Rcon[i/Nk]
-            x = multiply(x, 2);
+            x = multiply(static_cast<uint8_t>(x), 2);
             P("Rcon[i/Nk]", rcon);
             for (int j=0;j<4;++j) temp[j] = temp[j] ^ rcon[j];
             P("After XOR", temp);
@@ -399,7 +399,7 @@ std::vector<uint8_t> aes_gcm_inner(E_K_type E_K, state& Y, const std::vector<uin
 {
     std::vector<uint8_t> C(P.size());
     for (unsigned i = 0; i < P.size(); i += funtls::aes::block_size_bytes) {
-        unsigned remaining = P.size() - i;
+        unsigned remaining = static_cast<unsigned>(P.size()) - i;
         state c;
         if (remaining >= funtls::aes::block_size_bytes) {
             remaining = funtls::aes::block_size_bytes;
