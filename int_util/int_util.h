@@ -7,6 +7,10 @@
 #include <stdint.h>
 
 #ifndef USE_FUNTLS_BIGINT
+#ifdef _MSC_VER
+#pragma warning(disable: 4319) // C4319: '~': zero extending 'const unsigned long' to 'boost::multiprecision::double_limb_type' of greater size
+#pragma warning(disable: 4193) // C4193 : #pragma warning(pop) : no matching '#pragma warning(push)'
+#endif
 #include <boost/multiprecision/miller_rabin.hpp>
 #endif
 
@@ -73,7 +77,7 @@ std::vector<uint8_t> be_uint_to_bytes(IntType i, size_t byte_count)
         result[byte_count] = static_cast<uint8_t>(i);
         i >>= 8;
     }
-    assert(!i);
+    assert(i == 0);
     return result;
 }
 

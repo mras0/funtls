@@ -173,7 +173,7 @@ point curve::mul(field_elem m, point point) const {
     assert(m > 0);
 
     ec::point res = infinity;
-    while (m) {
+    while (m != 0) {
         if (m & 1) res = add(res, point);
         point = sqr(point);
         m >>= 1;

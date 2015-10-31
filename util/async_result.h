@@ -67,10 +67,17 @@ private:
 
     enum { has_result, has_exception } state_;
 
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable: 4624) // warning C4624: 'X': destructor was implicitly defined as deleted because a base class destructor is inaccessible or deleted
+#endif
     union {
         T                  result_;
         std::exception_ptr exception_;
     };
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
 
     void construct(T&& result) {
         state_ = has_result;

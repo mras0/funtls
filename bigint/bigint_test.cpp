@@ -765,6 +765,9 @@ bigint::biguint from_be_bytes<bigint::biguint>(const std::vector<uint8_t>& b) {
     return bigint::biguint::from_be_bytes(b.data(), b.size());
 }
 
+#ifdef _MSC_VER
+#pragma warning(disable: 4319) // C4319: '~': zero extending 'const unsigned long' to 'boost::multiprecision::double_limb_type' of greater size
+#endif
 #include <boost/multiprecision/cpp_int.hpp>
 #include <boost/multiprecision/miller_rabin.hpp>
 using boost_int = boost::multiprecision::cpp_int;

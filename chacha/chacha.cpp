@@ -28,10 +28,10 @@ inline uint32_t get_le_uint32(const uint8_t* b) {
 }
 
 inline void put_le_uint32(uint8_t* b, uint32_t n) {
-    b[0] = n;
-    b[1] = n>>8;
-    b[2] = n>>16;
-    b[3] = n>>24;
+    b[0] = static_cast<uint8_t>(n);
+    b[1] = static_cast<uint8_t>(n>>8);
+    b[2] = static_cast<uint8_t>(n>>16);
+    b[3] = static_cast<uint8_t>(n>>24);
 }
 
 void initial_state(state& s, const uint8_t* key, const uint8_t* nonce, uint32_t block_count)

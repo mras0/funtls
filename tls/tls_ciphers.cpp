@@ -37,8 +37,8 @@ private:
 
 std::vector<uint8_t> mac_checked_cipher::calc_mac(const std::vector<uint8_t>& content, std::vector<uint8_t> verbuffer) {
     assert(verbuffer.size() == 13);
-    verbuffer[11] = static_cast<uint16_t>(content.size() >> 8);
-    verbuffer[12] = static_cast<uint16_t>(content.size());
+    verbuffer[11] = static_cast<uint8_t>(content.size() >> 8);
+    verbuffer[12] = static_cast<uint8_t>(content.size());
     // The MAC is generated as:
     // MAC(MAC_write_key, seq_num +
     //                  TLSCompressed.type +
@@ -215,8 +215,8 @@ std::vector<uint8_t> aes_gcm_cipher::do_process(const std::vector<uint8_t>& data
 
         auto vbuf = verbuffer;
         assert(vbuf.size()==13);
-        vbuf[11] = static_cast<uint16_t>(encrypted.size()>>8);
-        vbuf[12] = static_cast<uint16_t>(encrypted.size());
+        vbuf[11] = static_cast<uint8_t>(encrypted.size()>>8);
+        vbuf[12] = static_cast<uint8_t>(encrypted.size());
 
         //std::cout << "Calling aes_decrypt_gcm.\n";
         //std::cout << "Key  " << util::base16_encode(key_) << "\n";
@@ -295,8 +295,8 @@ std::vector<uint8_t> chacha20_cipher::do_process(const std::vector<uint8_t>& dat
         const std::vector<uint8_t> message_tag(data.end() - tag_length, data.end());
         auto vbuf = verbuffer;
         assert(vbuf.size()==13);
-        vbuf[11] = static_cast<uint16_t>(cipher_text.size()>>8);
-        vbuf[12] = static_cast<uint16_t>(cipher_text.size());
+        vbuf[11] = static_cast<uint8_t>(cipher_text.size()>>8);
+        vbuf[12] = static_cast<uint8_t>(cipher_text.size());
         //std::cout << "ctext " << util::base16_encode(cipher_text) << std::endl;
         //std::cout << "aad   " << util::base16_encode(vbuf) << std::endl;
         //std::cout << "mtag  " << util::base16_encode(message_tag) << std::endl;
@@ -618,11 +618,12 @@ std::istream& operator>>(std::istream& is, cipher_suite& suite)
 } while(0)
     ALL_SUPPORTED_SUITES(MATCH_SUITE);
 #undef MATCH_SUITE
+
     std::ostringstream oss;
     oss << "KEX=" << kex_algo << " Cipher=" << cipher_algo << " bits=" << bits << " MAC=" << mac_algo;
     FUNTLS_CHECK_FAILURE("Not implemented for " + oss.str());
-    suite = cipher_suite::null_with_null_null;
-    return is;
+    //suite = cipher_suite::null_with_null_null;
+    //return is;
 }
 
 std::ostream& operator<<(std::ostream& os, const cipher_suite_parameters& csp)

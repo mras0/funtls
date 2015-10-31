@@ -7,17 +7,18 @@ enable_testing()
 # http://stackoverflow.com/questions/16158091/cmake-setting-an-environmental-variable-for-ctest-or-otherwise-getting-failed
 add_custom_target(check COMMAND ${CMAKE_CTEST_COMMAND} --force-new-ctest-process --output-on-failure)
 
-set(use_bigint FALSE CACHE BOOL "Use funtls bigint implmentation")
-
 if (MSVC)
     set(CMAKE_CONFIGURATION_TYPES "Debug;Release" CACHE STRING "Supported build configurations" FORCE)
 
+    add_definitions("/W4")
     add_definitions("-D__PRETTY_FUNCTION__=__func__")
     # For now ignore the following warnings:
-    add_definitions("/wd4267") # C4267: 'argument': conversion from 'X' to 'Y', possible loss of data
-    add_definitions("/wd4244") # C4244: 'initializing': conversion from 'X' to 'Y', possible loss of data
-    add_definitions("/wd4319") # C4319: '~': zero extending 'X' to 'Y' of greater size
-    add_definitions("/wd4193") # C4193: #pragma warning(pop): no matching '#pragma warning(push)'
+    # add_definitions("/wd4267") # C4267: 'argument': conversion from 'X' to 'Y', possible loss of data
+    # add_definitions("/wd4244") # C4244: 'initializing': conversion from 'X' to 'Y', possible loss of data
+    # add_definitions("/wd4319") # C4319: '~': zero extending 'X' to 'Y' of greater size
+    # add_definitions("/wd4193") # C4193: #pragma warning(pop): no matching '#pragma warning(push)'
+
+    add_definitions("/wd4127") # C4127: conditional expression is constant
 
     add_definitions("-D_SCL_SECURE_NO_WARNINGS")
 else()
@@ -38,17 +39,19 @@ else()
         message("Using undefined behavior sanitizer")
         set(common_flags "${common_flags} -fsanitize=undefined")
     endif()
-    if (use_bigint)
-        message("Using funtls bigint - EXPERIMENTAL")
-        set(common_flags "${common_flags} -DUSE_FUNTLS_BIGINT")
-    endif()
-
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c99 ${common_flags}")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 ${common_flags}")
 endif()
 
+set(use_bigint FALSE CACHE BOOL "Use funtls bigint implmentation")
+if (use_bigint)
+    message("Using funtls bigint - EXPERIMENTAL")
+    add_definitions("-DUSE_FUNTLS_BIGINT")
+endif()
+
+
 # Ugly handling of boost stuff
-set(boost_dir "${CMAKE_CURRENT_SOURCE_DIR}/../boost_1_58_0/" CACHE PATH "Root of boost installation")
+set(boost_dir "${CMAKE_CURRENT_SOURCE_DIR}/../boost_1_59_0/" CACHE PATH "Root of boost installation")
 include_directories(${boost_dir})
 add_definitions("-DBOOST_ALL_NO_LIB -DBOOST_SYSTEM_NO_DEPRECATED -DBOOST_ERROR_CODE_HEADER_ONLY")
 if (WIN32)

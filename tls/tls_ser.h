@@ -7,26 +7,26 @@ inline void append_to_buffer(std::vector<uint8_t>& buffer, uint8 item) {
 }
 
 inline void append_to_buffer(std::vector<uint8_t>& buffer, uint16 item) {
-    buffer.push_back(item>>8);
-    buffer.push_back(item);
+    buffer.push_back(static_cast<uint8_t>(item>>8));
+    buffer.push_back(static_cast<uint8_t>(item));
 }
 
 inline void append_to_buffer(std::vector<uint8_t>& buffer, uint32 item) {
-    buffer.push_back(item>>24);
-    buffer.push_back(item>>16);
-    buffer.push_back(item>>8);
-    buffer.push_back(item);
+    buffer.push_back(static_cast<uint8_t>(item>>24));
+    buffer.push_back(static_cast<uint8_t>(item>>16));
+    buffer.push_back(static_cast<uint8_t>(item>>8));
+    buffer.push_back(static_cast<uint8_t>(item));
 }
 
 inline void append_to_buffer(std::vector<uint8_t>& buffer, uint64 item) {
-    buffer.push_back(item>>56);
-    buffer.push_back(item>>48);
-    buffer.push_back(item>>40);
-    buffer.push_back(item>>32);
-    buffer.push_back(item>>24);
-    buffer.push_back(item>>16);
-    buffer.push_back(item>>8);
-    buffer.push_back(item);
+    buffer.push_back(static_cast<uint8_t>(item>>56));
+    buffer.push_back(static_cast<uint8_t>(item>>48));
+    buffer.push_back(static_cast<uint8_t>(item>>40));
+    buffer.push_back(static_cast<uint8_t>(item>>32));
+    buffer.push_back(static_cast<uint8_t>(item>>24));
+    buffer.push_back(static_cast<uint8_t>(item>>16));
+    buffer.push_back(static_cast<uint8_t>(item>>8));
+    buffer.push_back(static_cast<uint8_t>(item));
 }
 
 template<typename EnumType, typename=typename std::enable_if<std::is_enum<EnumType>::value>::type>
@@ -39,7 +39,7 @@ template<unsigned BitCount, typename Underlying>
 inline void append_to_buffer(std::vector<uint8_t>& buffer, const uint<BitCount, Underlying>& item) {
     const auto x = static_cast<Underlying>(item);
     for (unsigned i = 0; i < BitCount/8; ++i) {
-        buffer.push_back(x >> ((BitCount/8-1-i)*8));
+        buffer.push_back(static_cast<uint8_t>(x >> ((BitCount/8-1-i)*8)));
     }
 }
 
@@ -151,7 +151,7 @@ inline void append_to_buffer(std::vector<uint8_t>& buffer, const server_dh_param
 
 inline void append_to_buffer(std::vector<uint8_t>& buffer, const handshake& item) {
     append_to_buffer(buffer, item.type);
-    append_to_buffer(buffer, handshake::body_length_type(item.body.size()));
+    append_to_buffer(buffer, handshake::body_length_type(static_cast<uint32_t>(item.body.size())));
     append_to_buffer(buffer, item.body);
 }
 

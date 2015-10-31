@@ -74,11 +74,11 @@ void base64_block(uint8_t* out, const char* in)
         assert(in[3] == base64_pad_char);
     }
     assert(val < 0x1000000);
-    out[0] = val>>16;
+    out[0] = static_cast<uint8_t>(val>>16);
     if (in_size > 2) {
-        out[1] = val>>8;
+        out[1] = static_cast<uint8_t>(val>>8);
         if (in_size > 3) {
-            out[2] = val;
+            out[2] = static_cast<uint8_t>(val);
         } else {
             assert((val & 0xff) == 0);
         }

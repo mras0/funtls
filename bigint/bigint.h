@@ -187,7 +187,7 @@ class bin_expr : public detail::expr {
 public:
     bin_expr(const L& l, const R& r) : l_(l), r_(r) {}
     void eval(biguint& res) const {
-        biguint& (*op)(biguint&, const biguint&, const biguint&);
+        biguint& (*op)(biguint&, const biguint&, const biguint&) = nullptr;
         switch (tag) {
         case bin_expr_tag::add: op = &biguint::add; break;
         case bin_expr_tag::sub: op = &biguint::sub; break;

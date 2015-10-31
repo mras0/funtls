@@ -132,7 +132,7 @@ IntType string_to_int(const std::vector<uint8_t>& s) {
         res <<= 8;
         res |= s[i];
     }
-    if (!res) {
+    if (res == 0) {
         // Zero MUST be represented as the empty string
         throw std::runtime_error("Illegal representation of zero");
     }

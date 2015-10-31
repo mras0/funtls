@@ -38,7 +38,7 @@ namespace funtls { namespace aes {
 std::vector<uint8_t> aes_encrypt_ecb(const std::vector<uint8_t>& K, const std::vector<uint8_t>& input)
 {
     FUNTLS_CHECK_BINARY(K.size() % 4, ==, 0, "Unexpected key size " + std::to_string(K.size()));
-    const unsigned Nk = Nk_from_size(K.size());
+    const unsigned Nk = Nk_from_size(static_cast<unsigned>(K.size()));
     FUNTLS_CHECK_BINARY(valid_Nk(Nk), ==, true, "Unexpected key size " + std::to_string(K.size()));
     FUNTLS_CHECK_BINARY(input.size(), ==, 16, "Input must be 128-bit");
     const unsigned Nr = Nr_from_Nk(Nk);
@@ -112,7 +112,7 @@ std::vector<uint8_t> aes_encrypt_cbc(const std::vector<uint8_t>& key, const std:
 std::vector<uint8_t> aes_decrypt_ecb(const std::vector<uint8_t>& K, const std::vector<uint8_t>& input)
 {
     FUNTLS_CHECK_BINARY(K.size() % 4, ==, 0, "Unexpected key size " + std::to_string(K.size()));
-    const unsigned Nk = Nk_from_size(K.size());
+    const unsigned Nk = Nk_from_size(static_cast<unsigned>(K.size()));
     FUNTLS_CHECK_BINARY(valid_Nk(Nk), ==, true, "Unexpected key size " + std::to_string(K.size()));
     FUNTLS_CHECK_BINARY(input.size(), ==, 16, "Input must be 128-bit");
     const unsigned Nr = Nr_from_Nk(Nk);

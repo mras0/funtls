@@ -311,7 +311,7 @@ int main(int argc, char* argv[])
         }
     }
     boost::asio::io_service        io_service;
-    boost::asio::ip::tcp::acceptor acceptor(io_service, boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), wanted_port));
+    boost::asio::ip::tcp::acceptor acceptor(io_service, boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), static_cast<uint16_t>(wanted_port)));
 
     struct accept_state {
         accept_state(boost::asio::io_service& io_service) : socket(io_service) {

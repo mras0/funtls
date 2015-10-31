@@ -24,7 +24,7 @@ std::vector<uint8_t> make_vec(asn1::identifier id, const std::vector<uint8_t>& d
     assert(data.size() < 0x80);
     std::vector<uint8_t> res;
     res.push_back(static_cast<uint8_t>(id));
-    res.push_back(data.size());
+    res.push_back(static_cast<uint8_t>(data.size()));
     res.insert(res.end(), data.begin(), data.end());
     return res;
 }

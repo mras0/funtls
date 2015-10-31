@@ -14,7 +14,7 @@ public:
         MD5Init(&context_);
     }
     virtual void input(const void* data, size_t length) override {
-        MD5Update(&context_, reinterpret_cast<const uint8_t*>(data), length);
+        MD5Update(&context_, reinterpret_cast<const uint8_t*>(data), static_cast<unsigned>(length));
     }
     virtual std::vector<uint8_t> result() const override {
         std::vector<uint8_t> result(hash_size);
@@ -90,7 +90,7 @@ public:
         USHAReset(&context_, static_cast<SHAversion>(sha_type));
     }
     virtual void input(const void* data, size_t length) override {
-        USHAInput(&context_, reinterpret_cast<const uint8_t*>(data), length);
+        USHAInput(&context_, reinterpret_cast<const uint8_t*>(data), static_cast<unsigned>(length));
     }
     virtual std::vector<uint8_t> result() const override {
         std::vector<uint8_t> result(USHAHashSize(static_cast<SHAversion>(context_.whichSha)));
@@ -105,10 +105,10 @@ private:
 class hmac_sha_impl : public funtls::hash::detail::algorithm_impl {
 public:
     hmac_sha_impl(SHAversion sha_type, const void* secret, size_t secret_length) {
-        hmacReset(&context_, static_cast<SHAversion>(sha_type), reinterpret_cast<const uint8_t*>(secret), secret_length);
+        hmacReset(&context_, static_cast<SHAversion>(sha_type), reinterpret_cast<const uint8_t*>(secret), static_cast<int>(secret_length));
     }
     virtual void input(const void* data, size_t length) override {
-        hmacInput(&context_, reinterpret_cast<const uint8_t*>(data), length);
+        hmacInput(&context_, reinterpret_cast<const uint8_t*>(data), static_cast<int>(length));
     }
     virtual std::vector<uint8_t> result() const override {
         std::vector<uint8_t> result(USHAHashSize(static_cast<SHAversion>(context_.whichSha)));

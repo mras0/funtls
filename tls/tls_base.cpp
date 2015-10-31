@@ -41,7 +41,7 @@ void tls_base::send_record(tls::content_type content_type, const std::vector<uin
         // Compression would happen here
 
         // Do encryption
-        const auto ver_buffer = verification_buffer(encrypt_sequence_number_++, content_type, current_protocol_version_, plaintext.size());
+        const auto ver_buffer = verification_buffer(encrypt_sequence_number_++, content_type, current_protocol_version_, static_cast<uint16_t>(plaintext.size()));
         const auto fragment  = encrypt_cipher_->process(plaintext, ver_buffer);
         FUNTLS_CHECK_BINARY(fragment.size(), <=, record::max_ciphertext_length, "Illegal fragment size");
 

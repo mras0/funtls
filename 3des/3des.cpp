@@ -210,7 +210,7 @@ uint32_t feistel(uint32_t r, uint64_t key)
     // Stage 4. Permutation — finally, the 32 outputs from the S-boxes are rearranged according to a fixed 
     //          permutation, the P-box. This is designed so that, after permutation, each S-box's output bits
     //          are spread across 4 different S boxes in the next round.
-    const uint32_t p = permute_bits(s, 32, p_box);
+    const uint32_t p = static_cast<uint32_t>(permute_bits(s, 32, p_box));
     //std::cout << "p = " << bin(p, 4) << std::endl;
     return p;
 }
@@ -256,8 +256,8 @@ void key_schedule(uint64_t (&ks)[num_des_rounds], uint64_t key)
     static const uint8_t num_left_shifts[num_des_rounds] = {
         1, 1, 2, 2, 2, 2, 2, 2, 1, 2, 2, 2, 2, 2, 2, 1
     };
-    uint32_t c = permute_bits(key, 64, permuted_choice_1_c_bits);
-    uint32_t d = permute_bits(key, 64, permuted_choice_1_d_bits);
+    uint32_t c = static_cast<uint32_t>(permute_bits(key, 64, permuted_choice_1_c_bits));
+    uint32_t d = static_cast<uint32_t>(permute_bits(key, 64, permuted_choice_1_d_bits));
     //std::cout << "K  " << bin(key, 8) << "\n";
     //std::cout << "K+ " << bin((static_cast<uint64_t>(c)<<28)|d, 7, 56) << "\n";
     for (unsigned round = 0; round < num_des_rounds; ++round) {
@@ -290,7 +290,7 @@ uint64_t des(des_op op, uint64_t key, uint64_t input)
     //std::cout << "After intial permute:\n" << bin(input, 4) << std::endl;
     // Divide into 2 32-bit halves
     uint32_t l = input>>32;
-    uint32_t r = input;
+    uint32_t r = static_cast<uint32_t>(input);
 
     // Do 16 rounds of "F" (apply the Feistel function)
     for (unsigned round = 0; round < num_des_rounds; ++round) {

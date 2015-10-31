@@ -263,7 +263,7 @@ std::vector<uint8_t> base256_encode(IntType i, size_t byte_count)
         result[byte_count] = static_cast<uint8_t>(i);
         i >>= 8;
     }
-    assert(!i);
+    assert(i == 0);
     return result;
 }
 

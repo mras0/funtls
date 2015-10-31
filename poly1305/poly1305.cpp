@@ -1,8 +1,9 @@
 #include "poly1305.h"
-#include <util/test.h>
+#include <algorithm>
 #include <string.h>
 
 #include <int_util/int.h>
+#include <util/test.h>
 
 using namespace funtls;
 
