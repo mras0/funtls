@@ -29,6 +29,7 @@ constexpr size_t result_size(algorithm algo) {
 namespace detail {
 class algorithm_impl {
 public:
+    virtual                      ~algorithm_impl() {}
     virtual void                 input(const void* data, size_t length) = 0;
     virtual std::vector<uint8_t> result() const = 0;
 };

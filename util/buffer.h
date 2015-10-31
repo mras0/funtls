@@ -5,6 +5,7 @@
 #include <cassert>
 #include <stdexcept>
 #include <cstring>
+#include <string>
 
 namespace funtls { namespace util {
 
