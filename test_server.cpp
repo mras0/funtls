@@ -92,7 +92,7 @@ void connection::read_client_hello() {
                 std::cout << self->name_ << ": Got client hello\n";
                 std::cout << self->name_ << ": version " << client_hello.client_version << "\n";
                 std::cout << self->name_ << ": session " << util::base16_encode(client_hello.session_id.as_vector()) << "\n";
-                std::cout << self->name_ << ": cipher_suits:\n";
+                std::cout << self->name_ << ": cipher_suites:\n";
                 auto cipher = cipher_suite::null_with_null_null;
                 // Find the first supported cipher
                 for (auto cs : client_hello.cipher_suites.as_vector()) {

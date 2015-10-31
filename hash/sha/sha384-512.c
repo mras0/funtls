@@ -236,7 +236,6 @@ static uint32_t Maj_temp1[2], Maj_temp2[2],
 /*
  * add "length" to the length
  */
-static uint32_t addTemp[4] = { 0, 0, 0, 0 };
 #define SHA384_512AddLength(context, length) (                        \
     addTemp[3] = (length), SHA512_ADDTO4((context)->Length, addTemp), \
     (context)->Corrupted = (((context)->Length[3] == 0) &&            \
@@ -288,7 +287,6 @@ static uint32_t SHA512_H0[SHA512HashSize/4] = {
 /*
  * add "length" to the length
  */
-static uint64_t addTemp;
 #define SHA384_512AddLength(context, length)                   \
    (addTemp = context->Length_Low, context->Corrupted =        \
     ((context->Length_Low += length) < addTemp) &&             \
@@ -477,6 +475,11 @@ int SHA512Input(SHA512Context *context,
     context->Message_Block[context->Message_Block_Index++] =
             (*message_array & 0xFF);
 
+#ifdef USE_32BIT_ONLY
+    uint32_t addTemp[4] = { 0, 0, 0, 0 };
+#else
+    uint64_t addTemp = 0;
+#endif
     if (!SHA384_512AddLength(context, 8) &&
       (context->Message_Block_Index == SHA512_Message_Block_Size))
       SHA384_512ProcessMessageBlock(context);
@@ -537,6 +540,11 @@ int SHA512FinalBits(SHA512Context *context,
   if (context->Corrupted)
      return context->Corrupted;
 
+#ifdef USE_32BIT_ONLY
+    uint32_t addTemp[4] = { 0, 0, 0, 0 };
+#else
+    uint64_t addTemp = 0;
+#endif
   SHA384_512AddLength(context, length);
   SHA384_512Finalize(context, (uint8_t)
     ((message_bits & masks[length]) | markbit[length]));

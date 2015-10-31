@@ -107,8 +107,8 @@ void trust_store::add_os_defaults()
 #ifdef WIN32
     // TODO
 #else
-    //ts.add_from_directory("/etc/ssl/certs");
-    ts.add_all_from_file("/etc/ssl/certs/ca-certificates.crt");
+    //add_from_directory("/etc/ssl/certs");
+    add_all_from_file("/etc/ssl/certs/ca-certificates.crt");
 #endif
 }
 

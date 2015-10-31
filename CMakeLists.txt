@@ -11,15 +11,9 @@ if (MSVC)
     set(CMAKE_CONFIGURATION_TYPES "Debug;Release" CACHE STRING "Supported build configurations" FORCE)
 
     add_definitions("/W4")
-    add_definitions("-D__PRETTY_FUNCTION__=__func__")
-    # For now ignore the following warnings:
-    # add_definitions("/wd4267") # C4267: 'argument': conversion from 'X' to 'Y', possible loss of data
-    # add_definitions("/wd4244") # C4244: 'initializing': conversion from 'X' to 'Y', possible loss of data
-    # add_definitions("/wd4319") # C4319: '~': zero extending 'X' to 'Y' of greater size
-    # add_definitions("/wd4193") # C4193: #pragma warning(pop): no matching '#pragma warning(push)'
-
     add_definitions("/wd4127") # C4127: conditional expression is constant
 
+    add_definitions("-D__PRETTY_FUNCTION__=__func__")
     add_definitions("-D_SCL_SECURE_NO_WARNINGS")
 else()
     set(use_asan   TRUE  CACHE BOOL "Use address sanitizier")
@@ -39,6 +33,11 @@ else()
         message("Using undefined behavior sanitizer")
         set(common_flags "${common_flags} -fsanitize=undefined")
     endif()
+
+    if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 4.9)
+        set(common_flags "${common_flags} -Wno-deprecated-declarations")
+    endif()
+
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c99 ${common_flags}")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 ${common_flags}")
 endif()

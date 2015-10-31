@@ -486,8 +486,9 @@ bool is_supported(cipher_suite suite)
 #define PARAMETERS_FROM_SUITE_CASE(cs) case cipher_suite::cs: return true;
         ALL_SUPPORTED_SUITES(PARAMETERS_FROM_SUITE_CASE);
 #undef PARAMETERS_FROM_SUITE_CASE
+        default:
+            break;
     }
-    assert(false);
     return false;
 }
 
@@ -497,6 +498,8 @@ cipher_suite_parameters parameters_from_suite(cipher_suite suite)
 #define PARAMETERS_FROM_SUITE_CASE(cs) case cipher_suite::cs: return from_suite_impl<cipher_suite::cs>();
         ALL_SUPPORTED_SUITES(PARAMETERS_FROM_SUITE_CASE);
 #undef PARAMETERS_FROM_SUITE_CASE
+        default:
+            break;
     }
     FUNTLS_CHECK_FAILURE("Unknown TLS cipher suite " + cipher_suite_hex(suite));
 }
