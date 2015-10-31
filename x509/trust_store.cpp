@@ -102,6 +102,16 @@ void trust_store::add_all_from_file(const std::string& filename)
     if (!in) throw std::runtime_error("Error reading from " + filename);
 }
 
+void trust_store::add_os_defaults()
+{
+#ifdef WIN32
+    // TODO
+#else
+    //ts.add_from_directory("/etc/ssl/certs");
+    ts.add_all_from_file("/etc/ssl/certs/ca-certificates.crt");
+#endif
+}
+
 void trust_store::verify_cert_chain(const std::vector<x509::certificate>& certlist) const
 {
     FUNTLS_CHECK_BINARY(certlist.size(), >, 0, "Empty certificate chain not allowed");

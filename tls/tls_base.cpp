@@ -105,14 +105,14 @@ void tls_base::set_pending_ciphers(const std::vector<uint8_t>& pre_master_secret
 
     //std::cout << "Keyblock:\n" << util::base16_encode(key_block) << "\n";
 
-    size_t i = 0;
-    auto client_mac_key = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.mac_key_length]};  i += cipher_param.mac_key_length;
-    auto server_mac_key = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.mac_key_length]};  i += cipher_param.mac_key_length;
-    auto client_enc_key = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.key_length]};      i += cipher_param.key_length;
-    auto server_enc_key = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.key_length]};      i += cipher_param.key_length;
-    auto client_iv      = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.fixed_iv_length]}; i += cipher_param.fixed_iv_length;
-    auto server_iv      = std::vector<uint8_t>{&key_block[i], &key_block[i+cipher_param.fixed_iv_length]}; i += cipher_param.fixed_iv_length;
-    assert(i == key_block.size());
+    auto kbi = key_block.begin();
+    auto client_mac_key = std::vector<uint8_t>{kbi, kbi+cipher_param.mac_key_length};  kbi += cipher_param.mac_key_length;
+    auto server_mac_key = std::vector<uint8_t>{kbi, kbi+cipher_param.mac_key_length};  kbi += cipher_param.mac_key_length;
+    auto client_enc_key = std::vector<uint8_t>{kbi, kbi+cipher_param.key_length};      kbi += cipher_param.key_length;
+    auto server_enc_key = std::vector<uint8_t>{kbi, kbi+cipher_param.key_length};      kbi += cipher_param.key_length;
+    auto client_iv      = std::vector<uint8_t>{kbi, kbi+cipher_param.fixed_iv_length}; kbi += cipher_param.fixed_iv_length;
+    auto server_iv      = std::vector<uint8_t>{kbi, kbi+cipher_param.fixed_iv_length}; kbi += cipher_param.fixed_iv_length;
+    assert(kbi == key_block.end());
 
     if (connection_end_ == connection_end::client) {
         pending_encrypt_cipher_ = make_cipher(cipher_parameters{cipher_parameters::encrypt, cipher_param, client_mac_key, client_enc_key, client_iv});

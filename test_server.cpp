@@ -201,7 +201,11 @@ void connection::main_loop()
     recv_app_data(wrapped(
         [self] (std::vector<uint8_t>&& data) {
             std::cout << "Got app data: " << std::string(data.begin(), data.end());
-        //    self->main_loop();
+            std::string text("Hello world!");
+            self->send_app_data(std::vector<uint8_t>(text.begin(), text.end()), [self] (util::async_result<void> res) {
+                res.get();
+                // self->main_loop();
+            });
         },
         std::bind(&connection::handle_error, self, std::placeholders::_1)));
 }
@@ -294,10 +298,13 @@ AZokDceX95yJnwKqa6SzgQ==
     return rsa_server_id{{util::base64_decode(certificate, sizeof(certificate)-1)}, x509::rsa_private_key_from_pki(pki)};
 }
 
-// #define OPENSSL_TEST
-
-#ifdef OPENSSL_TEST
+#if defined(OPENSSL_TEST) || defined(SELF_TEST)
+#define TESTING
 #include <thread>
+#endif
+
+#ifdef SELF_TEST
+#include "tls_fetch.h"
 #endif
 
 int main(int argc, char* argv[])
@@ -341,10 +348,12 @@ int main(int argc, char* argv[])
     start_accept();
     std::cout << "Server running: " << acceptor.local_endpoint() << std::endl;
 
-#ifdef OPENSSL_TEST
+#ifdef TESTING
     unsigned short port = acceptor.local_endpoint().port();
     std::thread client_thread([port, &io_service] {
             boost::asio::io_service::work work(io_service); // keep the io_service running as long as the thread does
+
+#ifdef OPENSSL_TEST
             std::ostringstream cmd;
             cmd << "echo HELLO WORLD | openssl s_client -debug -msg -connect localhost:" << port << " 2>&1";
             io_service.post([&] {
@@ -360,11 +369,48 @@ int main(int argc, char* argv[])
                         std::cout << "[openssh] " << s;
                         });
             }
+#elif defined(SELF_TEST)
+            x509::trust_store ts;
+
+
+            const std::vector<tls::cipher_suite> cipher_suites{
+                //tls::cipher_suite::ecdhe_ecdsa_with_aes_256_gcm_sha384,
+                //tls::cipher_suite::ecdhe_ecdsa_with_aes_128_gcm_sha256,
+                //tls::cipher_suite::ecdhe_rsa_with_aes_256_gcm_sha384,
+                //tls::cipher_suite::ecdhe_rsa_with_aes_128_gcm_sha256,
+                //tls::cipher_suite::dhe_rsa_with_aes_256_cbc_sha256,
+                //tls::cipher_suite::dhe_rsa_with_aes_128_cbc_sha256,
+                //tls::cipher_suite::dhe_rsa_with_aes_256_cbc_sha,
+                //tls::cipher_suite::dhe_rsa_with_aes_128_cbc_sha,
+                //tls::cipher_suite::dhe_rsa_with_3des_ede_cbc_sha,
+                tls::cipher_suite::rsa_with_aes_256_gcm_sha384,
+                tls::cipher_suite::rsa_with_aes_128_gcm_sha256,
+                tls::cipher_suite::rsa_with_aes_256_cbc_sha256,
+                tls::cipher_suite::rsa_with_aes_128_cbc_sha256,
+                tls::cipher_suite::rsa_with_aes_256_cbc_sha,
+                tls::cipher_suite::rsa_with_aes_128_cbc_sha,
+                tls::cipher_suite::rsa_with_3des_ede_cbc_sha,
+                tls::cipher_suite::rsa_with_rc4_128_sha,
+                tls::cipher_suite::rsa_with_rc4_128_md5,
+            };
+            for (const auto& cs: cipher_suites) {
+                std::cout << "=== Testing " << cs << " ===" << std::endl;
+                std::string res;
+                tls_fetch("localhost", std::to_string(port), "/", {cs}, ts, [&res](const std::vector<uint8_t>& data) {
+                    res.insert(res.end(), data.begin(), data.end());
+                });
+                std::cout << "Got result: \"" << res << "\"" << std::endl;
+                FUNTLS_ASSERT_EQUAL("Hello world!", res);
+            }
+            io_service.stop();
+#else
+#error What are we testing???
+#endif
         });
 #endif
 
     io_service.run();
-#ifdef OPENSSL_TEST
+#ifdef TESTING
     client_thread.join();
 #endif
     return 0;

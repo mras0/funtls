@@ -74,12 +74,17 @@ add_subdirectory(tls)
 add_subdirectory(ssh)
 
 include_directories(${funtls_SOURCE_DIR})
-add_executable(funtls client.cpp)
+
+add_executable(funtls client.cpp tls_fetch.cpp)
 target_link_libraries(funtls tls)
 
-include_directories(${funtls_SOURCE_DIR})
 add_executable(test_server test_server.cpp)
 target_link_libraries(test_server tls)
+
+add_executable(self_test test_server.cpp tls_fetch.cpp)
+target_link_libraries(self_test tls)
+set_target_properties(self_test PROPERTIES COMPILE_FLAGS "-DSELF_TEST")
+add_test(self_test self_test)
 
 if (NOT WIN32)
     find_program(HAS_CTAGS ctags)
