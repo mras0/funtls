@@ -220,6 +220,35 @@ object_id::object_id(const der_encoded_value& repr)
     assert(oid_buf.remaining() == 0);
 }
 
+void object_id::serialize(std::vector<uint8_t>& buf) const
+{
+    buf.push_back(static_cast<uint8_t>(id));
+    const auto size_index = buf.size();
+    buf.push_back(0); // size, will be set later
+    buf.push_back(static_cast<uint8_t>(components_[0] * 40 + components_[1]));
+    for (size_t i = 2; i < components_.size(); ++i) {
+        auto n = components_[i];
+        if (n >= 1<<21) {
+            buf.push_back(static_cast<uint8_t>(0x80 | ((n >> 21) & 0x7f)));
+            buf.push_back(static_cast<uint8_t>(0x80 | ((n >> 14) & 0x7f)));
+            buf.push_back(static_cast<uint8_t>(0x80 | ((n >> 7) & 0x7f)));
+            buf.push_back(static_cast<uint8_t>(n & 0x7f));
+        } else if (n >= 1<<14) {
+            buf.push_back(static_cast<uint8_t>(0x80 | ((n >> 14) & 0x7f)));
+            buf.push_back(static_cast<uint8_t>(0x80 | ((n >> 7) & 0x7f)));
+            buf.push_back(static_cast<uint8_t>(n & 0x7f));
+        } else if (n >= 1<<7) {
+            buf.push_back(static_cast<uint8_t>(0x80 | ((n >> 7) & 0x7f)));
+            buf.push_back(static_cast<uint8_t>(n & 0x7f));
+        } else {
+            buf.push_back(static_cast<uint8_t>(n));
+        }
+    }
+    const auto num_bytes = buf.size() - size_index - 1;
+    assert(num_bytes < 20);
+    buf[size_index] = static_cast<uint8_t>(num_bytes);
+}
+
 std::string object_id::as_string() const
 {
     std::ostringstream oss;
@@ -316,6 +345,17 @@ std::ostream& operator<<(std::ostream& os, const raw_string& s)
 {
     os << s.as_string();
     return os;
+}
+
+void raw_string::do_serialize(identifier::tag id, std::vector<uint8_t>& buf) const
+{
+    buf.push_back(static_cast<uint8_t>(id));
+    if (repr_.size() < 0x80) {
+        buf.push_back(static_cast<uint8_t>(repr_.size()));
+    } else {
+        FUNTLS_CHECK_FAILURE("Not implemented");
+    }
+    buf.insert(buf.end(), repr_.begin(), repr_.end());
 }
 
 } } // namespace funtls::asn1

@@ -293,6 +293,8 @@ public:
 
     std::string as_string() const;
 
+    void serialize(std::vector<uint8_t>& buf) const;
+
 private:
     std::vector<uint32_t> components_;
 };
@@ -344,6 +346,8 @@ protected:
         : repr_(repr) {
     }
 
+    void do_serialize(identifier::tag id, std::vector<uint8_t>& buf) const;
+
 private:
     std::string repr_;
 };
@@ -364,6 +368,10 @@ public:
     }
     string_base(const std::string& repr)
         : raw_string(repr) {
+    }
+
+    void serialize(std::vector<uint8_t>& buf) const {
+        do_serialize(tag, buf);
     }
 };
 
@@ -403,6 +411,52 @@ using utf8_string = string_base<identifier::utf8_string>;
 using printable_string = string_base<identifier::printable_string>;
 using t61_string = string_base<identifier::t61_string>;
 using ia5_string = string_base<identifier::ia5_string>;
+
+namespace detail {
+
+inline void serialize(std::vector<uint8_t>& buf, const std::vector<uint8_t>& buf2)
+{
+    buf.insert(buf.end(), buf2.begin(), buf2.end());
+}
+
+template<typename Obj>
+inline void serialize(std::vector<uint8_t>& buf, const Obj& o)
+{
+    o.serialize(buf);
+}
+
+inline void serialize_all(std::vector<uint8_t>&)
+{
+}
+
+template<typename Obj, typename... Objs>
+inline void serialize_all(std::vector<uint8_t>& buf, const Obj& obj, const Objs&... objs)
+{
+    serialize(buf, obj);
+    serialize_all(buf, objs...);
+}
+
+} // namespace detail
+
+template<typename Obj>
+std::vector<uint8_t> serialized(const Obj& o) {
+    std::vector<uint8_t> buf;
+    detail::serialize(buf, o);
+    return buf;
+}
+
+template<typename... Objs>
+inline std::vector<uint8_t> serialized_sequence(identifier id, const Objs&... objs) {
+    std::vector<uint8_t> buf;
+    buf.push_back(static_cast<uint8_t>(id));
+    buf.push_back(0); // size, expand later on
+    const auto content_begin_index = buf.size();
+    detail::serialize_all(buf, objs...);
+    const auto content_size = buf.size() - content_begin_index;
+    assert(content_size < 0x80);
+    buf[1] = static_cast<uint8_t>(content_size);
+    return buf;
+}
 
 } } // namespace funtls::asn1
 

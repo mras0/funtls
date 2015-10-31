@@ -5,6 +5,8 @@
 #include <util/base_conversion.h>
 #include <tls/tls_base.h>
 #include <tls/tls_ser.h>
+#include <int_util/int.h>
+#include <int_util/int_util.h>
 #include <x509/x509_rsa.h>
 #include <asio_stream_adapter.h>
 
@@ -25,8 +27,8 @@ public:
     }
 
     // returns nullptr if no ServerKexEchange message should be sent, the appropriate handshake otherwise
-    std::unique_ptr<handshake> server_key_exchange() const {
-        return do_server_key_exchange();
+    std::unique_ptr<handshake> server_key_exchange(const random& client_random, const random& server_random) const {
+        return do_server_key_exchange(client_random, server_random);
     }
 
     // returns the master secret, the handshake is the ClientKeyExchange message received from the client
@@ -36,7 +38,7 @@ public:
 
 private:
     virtual const std::vector<asn1cert>* do_certificate_chain() const = 0;
-    virtual std::unique_ptr<handshake> do_server_key_exchange() const = 0;
+    virtual std::unique_ptr<handshake> do_server_key_exchange(const random& client_random, const random& server_random) const = 0;
     virtual std::vector<uint8_t> do_client_key_exchange(const handshake&) const = 0;
 };
 
@@ -192,11 +194,11 @@ void connection::send_server_certificate()
 
 void connection::send_server_key_exchange()
 {
-    if (auto handshake = server_kex_->server_key_exchange()) {
+    if (auto handshake = server_kex_->server_key_exchange(client_random(), server_random())) {
         std::cout << name_ << ": Sending ServerKeyExchange\n";
         auto self = shared_from_this();
         send_handshake(*handshake, wrapped([self]() {
-            self->read_client_key_exchange();
+            self->send_server_hello_done();
         }, std::bind(&connection::handle_error, self, std::placeholders::_1)));
     } else {
         send_server_hello_done();
@@ -284,14 +286,14 @@ public:
     explicit rsa_server_key_exchange_protocol(const rsa_server_id& server_id) : server_id_(server_id) {
     }
 
-protected:
+private:
     const rsa_server_id& server_id_;
 
     const std::vector<asn1cert>* do_certificate_chain() const override {
         return &server_id_.certificate_chain();
     }
 
-    virtual std::unique_ptr<handshake> do_server_key_exchange() const override {
+    virtual std::unique_ptr<handshake> do_server_key_exchange(const random&, const random&) const override {
         return nullptr;
     }
 
@@ -304,14 +306,94 @@ protected:
     }
 };
 
-class dhe_rsa_server_key_exchange_protocol : public rsa_server_key_exchange_protocol {
+class dhe_rsa_server_key_exchange_protocol : public server_key_exchange_protocol {
 public:
-    explicit dhe_rsa_server_key_exchange_protocol(const rsa_server_id& server_id) : rsa_server_key_exchange_protocol(server_id) {
+    explicit dhe_rsa_server_key_exchange_protocol(const rsa_server_id& server_id) : server_id_(server_id) {
+        // 2048-bit MODP Group with 256-bit Prime Order Subgroup from RFC5114 section 2.3
+        p_  = large_uint{"0x"
+            "87A8E61DB4B6663CFFBBD19C651959998CEEF608660DD0F2"
+            "5D2CEED4435E3B00E00DF8F1D61957D4FAF7DF4561B2AA30"
+            "16C3D91134096FAA3BF4296D830E9A7C209E0C6497517ABD"
+            "5A8A9D306BCF67ED91F9E6725B4758C022E0B1EF4275BF7B"
+            "6C5BFC11D45F9088B941F54EB1E59BB8BC39A0BF12307F5C"
+            "4FDB70C581B23F76B63ACAE1CAA6B7902D52526735488A0E"
+            "F13C6D9A51BFA4AB3AD8347796524D8EF6A167B5A41825D9"
+            "67E144E5140564251CCACB83E6B486F6B3CA3F7971506026"
+            "C0B857F689962856DED4010ABD0BE621C3A3960A54E710C3"
+            "75F26375D7014103A4B54330C198AF126116D2276E11715F"
+            "693877FAD7EF09CADB094AE91E1A1597"};
+        g_ = large_uint{"0x"
+            "3FB32C9B73134D0B2E77506660EDBD484CA7B18F21EF2054"
+            "07F4793A1A0BA12510DBC15077BE463FFF4FED4AAC0BB555"
+            "BE3A6C1B0C6B47B1BC3773BF7E8C6F62901228F8C28CBB18"
+            "A55AE31341000A650196F931C77A57F2DDF463E5E9EC144B"
+            "777DE62AAAB8A8628AC376D282D6ED3864E67982428EBC83"
+            "1D14348F6F2F9193B5045AF2767164E1DFC967C1FB3F2E55"
+            "A4BD1BFFE83B9C80D052B985D182EA0ADB2A3B7313D3FE14"
+            "C8484B1E052588B9B7D2BBD2DF016199ECD06E1557CD0915"
+            "B3353BBB64E0EC377FD028370DF92B52C7891428CDC67EB6"
+            "184B523D1DB246C32F63078490F00EF8"};
+        private_key_ = rand_positive_int_less(p_);
     }
 
 private:
-    virtual std::unique_ptr<handshake> do_server_key_exchange() const override {
-        FUNTLS_CHECK_FAILURE("Not implemented");
+    const rsa_server_id& server_id_;
+    static constexpr size_t key_size = 2048 / 8;
+    large_uint           p_;
+    large_uint           g_;
+    large_uint           private_key_;
+
+    const std::vector<asn1cert>* do_certificate_chain() const override {
+        return &server_id_.certificate_chain();
+    }
+
+    virtual std::unique_ptr<handshake> do_server_key_exchange(const random& client_random, const random& server_random) const override {
+        server_dh_params params;
+
+        const large_uint Ys = powm(g_, private_key_, p_);
+
+        std::cout << "DHE server private key: " << std::hex << private_key_ << std::dec << std::endl;
+        std::cout << "Ys: " << std::hex << Ys << std::dec << std::endl;
+
+        params.dh_p = x509::base256_encode(p_, key_size);   // The prime modulus used for the Diffie-Hellman operation.
+        params.dh_g = x509::base256_encode(g_, key_size);   // The generator used for the Diffie-Hellman operation.
+        params.dh_Ys = x509::base256_encode(Ys, key_size); // The server's Diffie-Hellman public value (g^X mod p).
+
+
+        std::vector<uint8_t> digest_buf;
+        append_to_buffer(digest_buf, client_random);
+        append_to_buffer(digest_buf, server_random);
+        append_to_buffer(digest_buf, params);
+
+        const auto& algo_oid = x509::id_sha256;
+        const auto digest = hash::sha256{}.input(digest_buf).result();
+
+        // DigestInfo ::= SEQUENCE {
+        //   digestAlgorithm AlgorithmIdentifier,
+        //   digest OCTET STRING }
+
+        const auto seq_buf = serialized_sequence(asn1::identifier::constructed_sequence,
+            serialized_sequence(asn1::identifier::constructed_sequence, algo_oid),
+            asn1::octet_string{digest});
+
+        signed_signature signature;
+        signature.hash_algorithm      = hash_algorithm::sha256;
+        signature.signature_algorithm = signature_algorithm::rsa;
+        signature.value               = x509::pkcs1_encode(server_id_.private_key(), seq_buf);
+
+        return std::make_unique<handshake>(make_handshake(server_key_exchange_dhe{params, signature}));
+    }
+
+    virtual std::vector<uint8_t> do_client_key_exchange(const handshake& handshake) const override {
+        auto kex_rsa = get_as<client_key_exchange_dhe_rsa>(handshake);
+        std::cout << "dh_Yc = " << util::base16_encode(kex_rsa.dh_Yc.as_vector()) << std::endl;
+
+        const large_uint Yc = x509::base256_decode<large_uint>(kex_rsa.dh_Yc.as_vector());
+        const large_uint Z  = powm(Yc, private_key_, p_);
+        auto dh_Z  = x509::base256_encode(Z, key_size);
+        std::cout << "Negotaited key = " << util::base16_encode(dh_Z) << std::endl;
+
+        return dh_Z;
     }
 };
 
@@ -468,11 +550,11 @@ int main(int argc, char* argv[])
                     //tls::cipher_suite::ecdhe_rsa_with_aes_256_gcm_sha384,
                     //tls::cipher_suite::ecdhe_rsa_with_aes_128_gcm_sha256,
                     
-                    //tls::cipher_suite::dhe_rsa_with_aes_256_cbc_sha256,
-                    //tls::cipher_suite::dhe_rsa_with_aes_128_cbc_sha256,
-                    //tls::cipher_suite::dhe_rsa_with_aes_256_cbc_sha,
-                    //tls::cipher_suite::dhe_rsa_with_aes_128_cbc_sha,
-                    //tls::cipher_suite::dhe_rsa_with_3des_ede_cbc_sha,
+                    tls::cipher_suite::dhe_rsa_with_aes_256_cbc_sha256,
+                    tls::cipher_suite::dhe_rsa_with_aes_128_cbc_sha256,
+                    tls::cipher_suite::dhe_rsa_with_aes_256_cbc_sha,
+                    tls::cipher_suite::dhe_rsa_with_aes_128_cbc_sha,
+                    tls::cipher_suite::dhe_rsa_with_3des_ede_cbc_sha,
 
                     tls::cipher_suite::rsa_with_aes_256_gcm_sha384,
                     tls::cipher_suite::rsa_with_aes_128_gcm_sha256,

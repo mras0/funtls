@@ -124,6 +124,17 @@ int main()
     FUNTLS_ASSERT_EQUAL(113549, oid_1[3]);
     FUNTLS_ASSERT_EQUAL((asn1::object_id{1,2,840,113549}), oid_1);
 
+    // Check serialization
+    std::vector<uint8_t> oid_1_ser;
+    oid_1.serialize(oid_1_ser);
+    FUNTLS_ASSERT_EQUAL((std::vector<uint8_t>{6, 6, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d}), oid_1_ser);
+    
+    std::vector<uint8_t> oid_2_ser;
+    const object_id id_sha1{1,3,14,3,2,26};
+    id_sha1.serialize(oid_2_ser);
+    FUNTLS_ASSERT_EQUAL((std::vector<uint8_t>{0x06, 0x05, 0x2b, 0x0e, 0x03, 0x02, 0x1a}), oid_2_ser);
+    FUNTLS_ASSERT_EQUAL((std::vector<uint8_t>{0x06, 0x05, 0x2b, 0x0e, 0x03, 0x02, 0x1a}), serialized(id_sha1));
+
     // Check some illegal oids
     FUNTLS_ASSERT_THROWS(from_bytes<object_id>({}), std::runtime_error);
     FUNTLS_ASSERT_THROWS(from_bytes<object_id>({3*40}), std::runtime_error);
@@ -140,6 +151,12 @@ int main()
         FUNTLS_ASSERT_EQUAL(false, s.has_next());
         FUNTLS_ASSERT_EQUAL(identifier::null, x.id());
         FUNTLS_ASSERT_EQUAL(0, x.content_view().size());
+
+        // Serialization
+        auto ss = serialized_sequence(identifier::constructed_sequence, id_sha1, from_bytes<octet_string>({1,2,3}));
+        FUNTLS_ASSERT_EQUAL((std::vector<uint8_t>{0x30, 0x0C, 0x06, 0x05, 0x2b, 0x0e, 0x03, 0x02, 0x1a, 0x04, 0x03, 0x01, 0x02, 0x03}), ss);
+        auto ss2 = serialized_sequence(identifier::constructed_sequence, serialized_sequence(identifier::sequence, id_sha1), from_bytes<octet_string>({1,2,3}));
+        FUNTLS_ASSERT_EQUAL((std::vector<uint8_t>{0x30, 0x0E, 0x10, 0x07, 0x06, 0x05, 0x2b, 0x0e, 0x03, 0x02, 0x1a, 0x04, 0x03, 0x01, 0x02, 0x03}), ss2);
     }
 
     //
@@ -166,6 +183,10 @@ int main()
         FUNTLS_ASSERT_EQUAL(1, vec[0]);
         FUNTLS_ASSERT_EQUAL(2, vec[1]);
         FUNTLS_ASSERT_EQUAL(3, vec[2]);
+
+        // Check serialization
+        FUNTLS_ASSERT_EQUAL((std::vector<uint8_t>{0x04, 0x02, 0x01, 0x02}), serialized(from_bytes<octet_string>({1,2})));
+        FUNTLS_ASSERT_EQUAL((std::vector<uint8_t>{0x0C, 0x03, 'A', 'B', 'z'}), serialized(from_bytes<utf8_string>({'A','B','z'})));
     }
 
     //

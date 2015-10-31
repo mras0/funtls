@@ -149,6 +149,17 @@ inline void append_to_buffer(std::vector<uint8_t>& buffer, const server_dh_param
     append_to_buffer(buffer, params.dh_Ys);
 }
 
+inline void append_to_buffer(std::vector<uint8_t>& buffer, const signed_signature& item) {
+    append_to_buffer(buffer, item.hash_algorithm);
+    append_to_buffer(buffer, item.signature_algorithm);
+    append_to_buffer(buffer, item.value);
+}
+
+inline void append_to_buffer(std::vector<uint8_t>& buffer, const server_key_exchange_dhe& item) {
+    append_to_buffer(buffer, item.params);
+    append_to_buffer(buffer, item.signature);
+}
+
 inline void append_to_buffer(std::vector<uint8_t>& buffer, const handshake& item) {
     append_to_buffer(buffer, item.type);
     append_to_buffer(buffer, handshake::body_length_type(static_cast<uint32_t>(item.body.size())));
@@ -240,8 +251,6 @@ inline void from_bytes(client_hello& item, util::buffer_view& buffer) {
     from_bytes(item.compression_methods, buffer);
     if (buffer.remaining()) {
         // Extensions
-        assert(item.client_version == protocol_version_tls_1_2);
-
         uint16 bytes;
         from_bytes(bytes, buffer);
         // TODO: Better length validation
@@ -320,6 +329,10 @@ inline void from_bytes(server_hello_done&, util::buffer_view& buffer) {
 
 inline void from_bytes(client_key_exchange_rsa& item, util::buffer_view& buffer) {
     from_bytes(item.encrypted_pre_master_secret, buffer);
+}
+
+inline void from_bytes(client_key_exchange_dhe_rsa& item, util::buffer_view& buffer) {
+    from_bytes(item.dh_Yc, buffer);
 }
 
 inline void from_bytes(server_key_exchange_dhe& item, util::buffer_view& buffer) {

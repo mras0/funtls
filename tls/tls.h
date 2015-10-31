@@ -282,7 +282,6 @@ struct signed_signature {
     tls::hash_algorithm              hash_algorithm;
     tls::signature_algorithm         signature_algorithm;
     tls::vector<uint8, 1, (1<<16)-1> value;
-
 };
 
 struct signature_and_hash_algorithm {
