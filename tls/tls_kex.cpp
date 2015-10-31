@@ -174,7 +174,7 @@ void dhe_rsa_client_kex_protocol::do_server_key_exchange(const handshake& ske)
 
 dhe_rsa_client_kex_protocol::result_type dhe_rsa_client_kex_protocol::do_result() const
 {
-    if (!server_dh_params_) FUNTLS_CHECK_FAILURE("");
+    if (!server_dh_params_) FUNTLS_CHECK_FAILURE("No Diffie-Hellman parameters received from server");
     const large_uint p  = x509::base256_decode<large_uint>(server_dh_params_->dh_p.as_vector());
     const large_uint g  = x509::base256_decode<large_uint>(server_dh_params_->dh_g.as_vector());
     const large_uint Ys = x509::base256_decode<large_uint>(server_dh_params_->dh_Ys.as_vector());

@@ -15,11 +15,36 @@ using util::do_wrapped;
 
 namespace funtls { namespace tls {
 
+class server_key_exchange_protocol {
+public:
+    virtual ~server_key_exchange_protocol() {}
+
+    // returns nullptr if no ServerCertificate message should be sent, a list of certificates to send otherwise
+    const std::vector<asn1cert>* certificate_chain() const {
+        return do_certificate_chain();
+    }
+
+    // returns nullptr if no ServerKexEchange message should be sent, the appropriate handshake otherwise
+    std::unique_ptr<handshake> server_key_exchange() const {
+        return do_server_key_exchange();
+    }
+
+    // returns the master secret, the handshake is the ClientKeyExchange message received from the client
+    std::vector<uint8_t> client_key_exchange(const handshake& handshake) const {
+        return do_client_key_exchange(handshake);
+    }
+
+private:
+    virtual const std::vector<asn1cert>* do_certificate_chain() const = 0;
+    virtual std::unique_ptr<handshake> do_server_key_exchange() const = 0;
+    virtual std::vector<uint8_t> do_client_key_exchange(const handshake&) const = 0;
+};
+
+
 class server_id {
 public:
     virtual bool supports(key_exchange_algorithm) const = 0;
-    virtual std::vector<uint8_t> client_key_exchange(const handshake&) const = 0;
-    virtual std::vector<asn1cert> certificate_chain() const = 0;
+    virtual std::unique_ptr<server_key_exchange_protocol> key_exchange_protocol(key_exchange_algorithm) const = 0;
 };
 
 class connection : private tls_base, public std::enable_shared_from_this<connection> {
@@ -34,15 +59,16 @@ public:
 
     ~connection();
 private:
-    std::string                   name_;
-    std::vector<const server_id*> server_ids_;
-    const server_id*              server_id_;
+    std::string                                     name_;
+    std::vector<const server_id*>                   server_ids_;
+    std::unique_ptr<server_key_exchange_protocol>   server_kex_;
 
     connection(const std::string& name, std::unique_ptr<stream> stream, const std::vector<const server_id*> server_ids);
 
     void read_client_hello();
     void send_server_hello();
     void send_server_certificate();
+    void send_server_key_exchange();
     void send_server_hello_done();
     void read_client_key_exchange();
     void main_loop();
@@ -54,7 +80,7 @@ connection::connection(const std::string& name, std::unique_ptr<stream> stream, 
     : tls_base(std::move(stream), tls_base::connection_end::server)
     , name_(name)
     , server_ids_(server_ids)
-    , server_id_(nullptr)
+    , server_kex_(nullptr)
 {
     std::cout << name_ << ": Connected\n";
     assert(!server_ids_.empty());
@@ -100,13 +126,13 @@ void connection::read_client_hello() {
                         const auto kex = parameters_from_suite(cs).key_exchange_algorithm;
                         for (auto id : self->server_ids_) {
                             if (id->supports(kex)) {
-                                cipher           = cs;
-                                self->server_id_ = id;
+                                assert(self->server_kex_ == nullptr);
+                                cipher            = cs;
+                                self->server_kex_ = id->key_exchange_protocol(kex);
                                 break;
                             }
                         }
                     }
-                    std::cout << cs << "\n";
                 }
                 std::cout << self->name_ << ": compression_methods:\n";
                 for (auto cm : client_hello.compression_methods.as_vector()) {
@@ -124,8 +150,8 @@ void connection::read_client_hello() {
                 self->client_random(client_hello.random);
                 self->negotiated_cipher(cipher);
                 // TODO: Check that "No compression" is supported
-                std::cout << "Negotatiated cipher: " << cipher << std::endl;
-                assert(self->server_id_);
+                std::cout << self->name_ << ": Negotatiated cipher: " << cipher << std::endl;
+                assert(self->server_kex_);
 
                 self->send_server_hello();
             },
@@ -151,15 +177,31 @@ void connection::send_server_hello()
 
 void connection::send_server_certificate()
 {
-    assert(server_id_);
-    std::cout << name_ << ": Sending ServerCertificate\n";
-    auto self = shared_from_this();
-    send_handshake(make_handshake(
-        certificate{ server_id_->certificate_chain() }), wrapped([self] () {
-            self->send_server_hello_done();
-        }, std::bind(&connection::handle_error, self, std::placeholders::_1)));
+    const auto chain = server_kex_->certificate_chain();
+    if (chain) {
+        std::cout << name_ << ": Sending ServerCertificate\n";
+        auto self = shared_from_this();
+        send_handshake(make_handshake(
+            certificate{ *chain }), wrapped([self] () {
+                self->send_server_key_exchange();
+            }, std::bind(&connection::handle_error, self, std::placeholders::_1)));
+    } else {
+        send_server_key_exchange();
+    }
 }
 
+void connection::send_server_key_exchange()
+{
+    if (auto handshake = server_kex_->server_key_exchange()) {
+        std::cout << name_ << ": Sending ServerKeyExchange\n";
+        auto self = shared_from_this();
+        send_handshake(*handshake, wrapped([self]() {
+            self->read_client_key_exchange();
+        }, std::bind(&connection::handle_error, self, std::placeholders::_1)));
+    } else {
+        send_server_hello_done();
+    }
+}
 
 void connection::send_server_hello_done()
 {
@@ -176,16 +218,16 @@ void connection::read_client_key_exchange() {
     auto self = shared_from_this();
     read_handshake(wrapped(
             [self] (tls::handshake&& handshake) {
-                auto pre_master_secret = self->server_id_->client_key_exchange(handshake);
-                std::cout << "Premaster secret: " << util::base16_encode(pre_master_secret) << std::endl;
+                auto pre_master_secret = self->server_kex_->client_key_exchange(handshake);
+                std::cout << self->name_ << ": Premaster secret: " << util::base16_encode(pre_master_secret) << std::endl;
                 self->set_pending_ciphers(pre_master_secret);
-                std::cout << "Reading ChangeCipherSpec\n";
+                std::cout << self->name_ << ": Reading ChangeCipherSpec\n";
                 self->read_change_cipher_spec(wrapped(
                             [self] () {
-                                std::cout << "Sending ChangeCipherSpec\n";
+                                std::cout << self->name_ << ": Sending ChangeCipherSpec\n";
                                 self->send_change_cipher_spec(wrapped(
                                     [self] () {
-                                        std::cout << "Handshake done. Session id " << util::base16_encode(self->session_id().as_vector()) << std::endl;
+                                        std::cout << self->name_ << ": Handshake done. Session id " << util::base16_encode(self->session_id().as_vector()) << std::endl;
                                         self->main_loop();
                                     },
                                     std::bind(&connection::handle_error, self, std::placeholders::_1)));
@@ -195,12 +237,13 @@ void connection::read_client_key_exchange() {
             std::bind(&connection::handle_error, self, std::placeholders::_1)));
 }
 
+// TODO: Allow user to specificy what happens in this function
 void connection::main_loop()
 {
     auto self = shared_from_this();
     recv_app_data(wrapped(
         [self] (std::vector<uint8_t>&& data) {
-            std::cout << "Got app data: " << std::string(data.begin(), data.end());
+            std::cout << self->name_ << ": Got app data: " << std::string(data.begin(), data.end());
             std::string text("Hello world!");
             self->send_app_data(std::vector<uint8_t>(text.begin(), text.end()), [self] (util::async_result<void> res) {
                 res.get();
@@ -210,38 +253,83 @@ void connection::main_loop()
         std::bind(&connection::handle_error, self, std::placeholders::_1)));
 }
 
-} } // namespace funtls::tls
-
-#include <x509/x509_io.h>
-
-class rsa_server_id : public tls::server_id {
+class rsa_server_id : public server_id {
 public:
-    rsa_server_id(const std::vector<tls::asn1cert>& certificate_chain, x509::rsa_private_key&& private_key)
+    rsa_server_id(const std::vector<asn1cert>& certificate_chain, x509::rsa_private_key&& private_key)
         : certificate_chain_(certificate_chain)
         , private_key_(std::move(private_key)) {
     }
-private:
-    std::vector<tls::asn1cert> certificate_chain_;
-    x509::rsa_private_key             private_key_;
 
-    virtual bool supports(tls::key_exchange_algorithm kex) const override {
-        return kex == tls::key_exchange_algorithm::rsa;
+    const std::vector<asn1cert>& certificate_chain() const {
+        return certificate_chain_;
     }
 
-    virtual std::vector<uint8_t> client_key_exchange(const tls::handshake& handshake) const override {
-        auto kex_rsa = tls::get_as<tls::client_key_exchange_rsa>(handshake);
-        auto pre_master_secret = x509::pkcs1_decode(private_key_, kex_rsa.encrypted_pre_master_secret.as_vector());
+    x509::rsa_private_key private_key() const {
+        return private_key_;
+    }
+
+private:
+    std::vector<asn1cert> certificate_chain_;
+    x509::rsa_private_key      private_key_;
+
+    virtual bool supports(key_exchange_algorithm kex) const override {
+        return kex == key_exchange_algorithm::rsa || kex == key_exchange_algorithm::dhe_rsa;
+    }
+
+    virtual std::unique_ptr<server_key_exchange_protocol> key_exchange_protocol(key_exchange_algorithm kex) const override;
+};
+
+class rsa_server_key_exchange_protocol : public server_key_exchange_protocol  {
+public:
+    explicit rsa_server_key_exchange_protocol(const rsa_server_id& server_id) : server_id_(server_id) {
+    }
+
+protected:
+    const rsa_server_id& server_id_;
+
+    const std::vector<asn1cert>* do_certificate_chain() const override {
+        return &server_id_.certificate_chain();
+    }
+
+    virtual std::unique_ptr<handshake> do_server_key_exchange() const override {
+        return nullptr;
+    }
+
+    virtual std::vector<uint8_t> do_client_key_exchange(const handshake& handshake) const override {
+        auto kex_rsa = get_as<client_key_exchange_rsa>(handshake);
+        auto pre_master_secret = x509::pkcs1_decode(server_id_.private_key(), kex_rsa.encrypted_pre_master_secret.as_vector());
         FUNTLS_CHECK_BINARY((unsigned)pre_master_secret[0], ==, 0x03, "Invalid version in premaster secret");
         FUNTLS_CHECK_BINARY((unsigned)pre_master_secret[1], ==, 0x03, "Invalid version in premaster secret");
         return pre_master_secret;
     }
+};
 
-    virtual std::vector<tls::asn1cert> certificate_chain() const override {
-        return certificate_chain_;
+class dhe_rsa_server_key_exchange_protocol : public rsa_server_key_exchange_protocol {
+public:
+    explicit dhe_rsa_server_key_exchange_protocol(const rsa_server_id& server_id) : rsa_server_key_exchange_protocol(server_id) {
+    }
+
+private:
+    virtual std::unique_ptr<handshake> do_server_key_exchange() const override {
+        FUNTLS_CHECK_FAILURE("Not implemented");
     }
 };
 
-rsa_server_id get_server_id()
+std::unique_ptr<server_key_exchange_protocol> rsa_server_id::key_exchange_protocol(key_exchange_algorithm kex) const {
+    switch (kex) {
+    case key_exchange_algorithm::rsa:
+        return std::unique_ptr<server_key_exchange_protocol>{new rsa_server_key_exchange_protocol{*this}};
+    case key_exchange_algorithm::dhe_rsa:
+        return std::unique_ptr<server_key_exchange_protocol>{new dhe_rsa_server_key_exchange_protocol{*this}};
+    default:
+        FUNTLS_CHECK_FAILURE("Usupported key exchange algorithm " + std::to_string(static_cast<int>(kex)));
+    }
+}
+
+} } // namespace funtls::tls
+
+#include <x509/x509_io.h>
+tls::rsa_server_id get_server_id()
 {
     static const char private_key[] = R"(
 -----BEGIN PRIVATE KEY-----
@@ -295,7 +383,7 @@ AZokDceX95yJnwKqa6SzgQ==
     assert(pki.version.as<int>() == 0);
     assert(pki.algorithm == x509::id_rsaEncryption);
 
-    return rsa_server_id{{util::base64_decode(certificate, sizeof(certificate)-1)}, x509::rsa_private_key_from_pki(pki)};
+    return tls::rsa_server_id{{util::base64_decode(certificate, sizeof(certificate)-1)}, x509::rsa_private_key_from_pki(pki)};
 }
 
 #if defined(OPENSSL_TEST) || defined(SELF_TEST)
@@ -350,69 +438,87 @@ int main(int argc, char* argv[])
 
 #ifdef TESTING
     unsigned short port = acceptor.local_endpoint().port();
-    std::thread client_thread([port, &io_service] {
+    std::exception_ptr eptr = nullptr;
+    std::thread client_thread([port, &io_service, &eptr] {
             boost::asio::io_service::work work(io_service); // keep the io_service running as long as the thread does
 
+            try {
 #ifdef OPENSSL_TEST
-            std::ostringstream cmd;
-            cmd << "echo HELLO WORLD | openssl s_client -debug -msg -connect localhost:" << port << " 2>&1";
-            io_service.post([&] {
-                    std::cout << "Running command: " << cmd.str() << std::endl;
-                    });
-            std::unique_ptr<FILE, decltype(&::fclose)> f{popen(cmd.str().c_str(), "r"), &::fclose};
-            assert(f);
-
-            char buffer[1024];
-            while (fgets(buffer, sizeof(buffer), f.get())) {
-                std::string s=buffer;
-                io_service.post([s] {
-                        std::cout << "[openssh] " << s;
+                std::ostringstream cmd;
+                cmd << "echo HELLO WORLD | openssl s_client -debug -msg -connect localhost:" << port << " 2>&1";
+                io_service.post([&] {
+                        std::cout << "Running command: " << cmd.str() << std::endl;
                         });
-            }
+                std::unique_ptr<FILE, decltype(&::fclose)> f{popen(cmd.str().c_str(), "r"), &::fclose};
+                assert(f);
+
+                char buffer[1024];
+                while (fgets(buffer, sizeof(buffer), f.get())) {
+                    std::string s=buffer;
+                    io_service.post([s] {
+                            std::cout << "[openssh] " << s;
+                            });
+                }
 #elif defined(SELF_TEST)
-            x509::trust_store ts;
+                x509::trust_store ts;
 
+                const std::vector<tls::cipher_suite> cipher_suites{
+                    //tls::cipher_suite::ecdhe_ecdsa_with_aes_256_gcm_sha384,
+                    //tls::cipher_suite::ecdhe_ecdsa_with_aes_128_gcm_sha256,
+                    //tls::cipher_suite::ecdhe_rsa_with_aes_256_gcm_sha384,
+                    //tls::cipher_suite::ecdhe_rsa_with_aes_128_gcm_sha256,
+                    
+                    //tls::cipher_suite::dhe_rsa_with_aes_256_cbc_sha256,
+                    //tls::cipher_suite::dhe_rsa_with_aes_128_cbc_sha256,
+                    //tls::cipher_suite::dhe_rsa_with_aes_256_cbc_sha,
+                    //tls::cipher_suite::dhe_rsa_with_aes_128_cbc_sha,
+                    //tls::cipher_suite::dhe_rsa_with_3des_ede_cbc_sha,
 
-            const std::vector<tls::cipher_suite> cipher_suites{
-                //tls::cipher_suite::ecdhe_ecdsa_with_aes_256_gcm_sha384,
-                //tls::cipher_suite::ecdhe_ecdsa_with_aes_128_gcm_sha256,
-                //tls::cipher_suite::ecdhe_rsa_with_aes_256_gcm_sha384,
-                //tls::cipher_suite::ecdhe_rsa_with_aes_128_gcm_sha256,
-                //tls::cipher_suite::dhe_rsa_with_aes_256_cbc_sha256,
-                //tls::cipher_suite::dhe_rsa_with_aes_128_cbc_sha256,
-                //tls::cipher_suite::dhe_rsa_with_aes_256_cbc_sha,
-                //tls::cipher_suite::dhe_rsa_with_aes_128_cbc_sha,
-                //tls::cipher_suite::dhe_rsa_with_3des_ede_cbc_sha,
-                tls::cipher_suite::rsa_with_aes_256_gcm_sha384,
-                tls::cipher_suite::rsa_with_aes_128_gcm_sha256,
-                tls::cipher_suite::rsa_with_aes_256_cbc_sha256,
-                tls::cipher_suite::rsa_with_aes_128_cbc_sha256,
-                tls::cipher_suite::rsa_with_aes_256_cbc_sha,
-                tls::cipher_suite::rsa_with_aes_128_cbc_sha,
-                tls::cipher_suite::rsa_with_3des_ede_cbc_sha,
-                tls::cipher_suite::rsa_with_rc4_128_sha,
-                tls::cipher_suite::rsa_with_rc4_128_md5,
-            };
-            for (const auto& cs: cipher_suites) {
-                std::cout << "=== Testing " << cs << " ===" << std::endl;
-                std::string res;
-                tls_fetch("localhost", std::to_string(port), "/", {cs}, ts, [&res](const std::vector<uint8_t>& data) {
-                    res.insert(res.end(), data.begin(), data.end());
-                });
-                std::cout << "Got result: \"" << res << "\"" << std::endl;
-                FUNTLS_ASSERT_EQUAL("Hello world!", res);
-            }
-            io_service.stop();
+                    tls::cipher_suite::rsa_with_aes_256_gcm_sha384,
+                    tls::cipher_suite::rsa_with_aes_128_gcm_sha256,
+                    tls::cipher_suite::rsa_with_aes_256_cbc_sha256,
+                    tls::cipher_suite::rsa_with_aes_128_cbc_sha256,
+                    tls::cipher_suite::rsa_with_aes_256_cbc_sha,
+                    tls::cipher_suite::rsa_with_aes_128_cbc_sha,
+                    tls::cipher_suite::rsa_with_3des_ede_cbc_sha,
+                    tls::cipher_suite::rsa_with_rc4_128_sha,
+                    tls::cipher_suite::rsa_with_rc4_128_md5,
+                };
+
+                for (const auto& cs: cipher_suites) {
+                    std::cout << "=== Testing " << cs << " ===" << std::endl;
+                    std::string res;
+                    tls_fetch("localhost", std::to_string(port), "/", {cs}, ts, [&res](const std::vector<uint8_t>& data) {
+                        res.insert(res.end(), data.begin(), data.end());
+                    });
+                    std::cout << "Got result: \"" << res << "\"" << std::endl;
+                    FUNTLS_ASSERT_EQUAL("Hello world!", res);
+                }
 #else
 #error What are we testing???
 #endif
-        });
+            } catch (...) {
+                eptr = std::current_exception();
+            }
+            io_service.stop();
+    });
 #endif
 
-    io_service.run();
+    int retval = 1;
+    try {
+        io_service.run();
+#ifdef TESTING
+        if (eptr) std::rethrow_exception(eptr);
+#endif
+        retval = 0;
+    } catch (const std::exception& e) {
+        std::cerr << e.what() << std::endl;
+    } catch (...) {
+        std::cerr << "Unknown exception caught" << std::endl;
+    }
 #ifdef TESTING
     client_thread.join();
 #endif
-    return 0;
+    return retval;
 }
 

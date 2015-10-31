@@ -18,7 +18,7 @@ void assert_failed(const char* func, const char* file, int line, const std::stri
 void check_failed(const char* func, const char* file, int line, const std::string& message)
 {
     std::ostringstream oss;
-    oss << "Checked failed in " << func << " " << file << " line " << line << std::endl;
+    oss << "Check failed in " << func << " " << file << " line " << line << std::endl;
     oss << message;
     throw std::runtime_error(oss.str());
 }

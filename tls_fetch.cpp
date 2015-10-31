@@ -39,17 +39,22 @@ void tls_fetch(const std::string& host, const std::string& port, const std::stri
         }
     };
 
-    client.perform_handshake([&] (util::async_result<void> res) {
-            res.get();
-            std::cout << "Handshake done!\n";
-            const auto data = "GET "+path+" HTTP/1.1\r\nHost: "+host+"\r\nConnection: close\r\n\r\n";
-            client.send_app_data(std::vector<uint8_t>(data.begin(), data.end()), [&] (util::async_result<void> res) {
-                    res.get();
-                    client.recv_app_data(got_app_data);
-                });
-        });
+
+    util::async_result<void> result;
+    tls::done_handler handler = [&](util::async_result<void> res) {
+        result = std::move(res);
+    };
+
+    client.perform_handshake(util::wrapped([&] {
+        std::cout << "Handshake done!\n";
+        const auto data = "GET "+path+" HTTP/1.1\r\nHost: "+host+"\r\nConnection: close\r\n\r\n";
+        client.send_app_data(std::vector<uint8_t>(data.begin(), data.end()), util::wrapped([&](){
+            client.recv_app_data(got_app_data);
+        }, handler));
+    }, handler));
     io_service.run();
     std::cout << "io service exiting\n";
+    result.get();
 }
 
 } // namespace funtls
