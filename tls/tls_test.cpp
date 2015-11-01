@@ -196,6 +196,14 @@ void test_cipher_parsing()
 #undef TEST_IN
 }
 
+void test_protocol_version()
+{
+    FUNTLS_ASSERT_NOT_EQUAL(tls::protocol_version_tls_1_0, tls::protocol_version_tls_1_1);
+    FUNTLS_ASSERT_EQUAL(tls::protocol_version_tls_1_2, tls::protocol_version_tls_1_2);
+    FUNTLS_ASSERT_BINARY_MESSAGE(tls::protocol_version_tls_1_2, >=, tls::protocol_version_tls_1_2, "");
+    FUNTLS_ASSERT_BINARY_MESSAGE(tls::protocol_version_tls_1_2, >=, tls::protocol_version_tls_1_1, "");
+}
+
 int main()
 {
     //const auto secret = util::base16_decode("01234567");
@@ -208,6 +216,7 @@ int main()
 
     test_cipher_traits();
     test_cipher_parsing();
+    test_protocol_version();
 
     // TODO: Test tls::tls_base and tls::client
 }

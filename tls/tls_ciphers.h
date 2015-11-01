@@ -7,6 +7,10 @@
 #include <memory>
 #include <hash/hash.h>
 
+namespace funtls { namespace asn1 {
+    class object_id;
+} } // namespace funtls::asn1
+
 namespace funtls { namespace tls {
 
 enum class cipher_suite : uint16_t {
@@ -339,6 +343,8 @@ struct cipher_suite_parameters {
 };
 
 enum class hash_algorithm : uint8_t;
+hash_algorithm hash_algorithm_from_oid(const asn1::object_id& oid);
+asn1::object_id oid_from_hash_algorithm(hash_algorithm hash_algo);
 hash::hash_algorithm get_hash(hash_algorithm algo);
 hash::hash_algorithm get_hmac(mac_algorithm algo, const std::vector<uint8_t>& key);
 bool is_supported(cipher_suite suite);

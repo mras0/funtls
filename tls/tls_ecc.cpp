@@ -38,12 +38,6 @@ std::ostream& operator<<(std::ostream& os, ec_curve_type ct)
     return os << "<ec_curve_type " << (unsigned)ct << ">";
 }
 
-void from_bytes(ec_parameters& item, util::buffer_view& buffer) {
-    from_bytes(item.curve_type, buffer);
-    FUNTLS_CHECK_BINARY(item.curve_type, ==, ec_curve_type::named_curve, "Unsupported curve type");
-    from_bytes(item.named_curve, buffer);
-}
-
 void append_to_buffer(std::vector<uint8_t>& buffer, const ec_parameters& item) {
     FUNTLS_CHECK_BINARY(item.curve_type, ==, ec_curve_type::named_curve, "Unsupported curve type");
     append_to_buffer(buffer, item.curve_type);
@@ -53,6 +47,21 @@ void append_to_buffer(std::vector<uint8_t>& buffer, const ec_parameters& item) {
 void append_to_buffer(std::vector<uint8_t>& buffer, const server_ec_dh_params& item) {
     append_to_buffer(buffer, item.curve_params);
     append_to_buffer(buffer, item.public_key);
+}
+
+void append_to_buffer(std::vector<uint8_t>& buffer, const server_key_exchange_ec_dhe& item) {
+    append_to_buffer(buffer, item.params);
+    append_to_buffer(buffer, item.signature);
+}
+
+void append_to_buffer(std::vector<uint8_t>& buffer, const client_key_exchange_ecdhe_ecdsa& item) {
+    append_to_buffer(buffer, item.ecdh_Yc);
+}
+
+void from_bytes(ec_parameters& item, util::buffer_view& buffer) {
+    from_bytes(item.curve_type, buffer);
+    FUNTLS_CHECK_BINARY(item.curve_type, ==, ec_curve_type::named_curve, "Unsupported curve type");
+    from_bytes(item.named_curve, buffer);
 }
 
 void from_bytes(server_ec_dh_params& item, util::buffer_view& buffer) {
@@ -65,8 +74,8 @@ void from_bytes(server_key_exchange_ec_dhe& item, util::buffer_view& buffer) {
     from_bytes(item.signature, buffer);
 }
 
-void append_to_buffer(std::vector<uint8_t>& buffer, const client_key_exchange_ecdhe_ecdsa& item) {
-    append_to_buffer(buffer, item.ecdh_Yc);
+void from_bytes(client_key_exchange_ecdhe_ecdsa& item, util::buffer_view& buffer) {
+    from_bytes(item.ecdh_Yc, buffer);
 }
 
 extension make_named_curves(const named_curves_list& named_curves) {

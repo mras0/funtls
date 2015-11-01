@@ -89,9 +89,10 @@ std::ostream& operator<<(std::ostream& os, const name& n);
 
 class algorithm_id {
 public:
-    algorithm_id(const asn1::object_id& id, const std::vector<uint8_t>& parameters = {})
+    algorithm_id(const asn1::object_id& id, const std::vector<uint8_t>& parameters = {static_cast<uint8_t>(asn1::identifier::null), 0x00})
         : id_(id)
         , parameters_(parameters) {
+        assert(null_parameters());
     }
     algorithm_id(const asn1::der_encoded_value& repr);
 
@@ -104,6 +105,8 @@ public:
     const std::vector<uint8_t>& parameters() const {
         return parameters_;
     }
+
+    void serialize(std::vector<uint8_t>& buf) const;
 private:
     asn1::object_id id_;
     std::vector<uint8_t> parameters_;

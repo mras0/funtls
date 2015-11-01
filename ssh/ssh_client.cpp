@@ -420,12 +420,12 @@ ssh_client::ssh_client(const char* host, const char* port, const char* user_name
 
         const auto calced_hash = hash::sha1{}.input(H).result();
         auto di = x509::pkcs1_decode(parse_rsa_key(K_S), parse_rsa_sig(sig_H));
-        FUNTLS_CHECK_BINARY(di.digest_algorithm, ==, x509::id_sha1, "Invalid hash algorithm");
-        std::cout << "H received " << util::base16_encode(di.digest) << std::endl;
+        FUNTLS_CHECK_BINARY(di.digest_algorithm(), ==, x509::id_sha1, "Invalid hash algorithm");
+        std::cout << "H received " << util::base16_encode(di.digest()) << std::endl;
         std::cout << "H calced   " << util::base16_encode(calced_hash) << std::endl;
-        if (calced_hash != di.digest) {
+        if (calced_hash != di.digest()) {
             std::ostringstream msg;
-            msg << "Key exchange failed. Invalid signature " << util::base16_encode(di.digest) << " expected " << util::base16_encode(calced_hash);
+            msg << "Key exchange failed. Invalid signature " << util::base16_encode(di.digest()) << " expected " << util::base16_encode(calced_hash);
             FUNTLS_CHECK_FAILURE(msg.str());
         }
     }
@@ -578,12 +578,13 @@ void ssh_client::do_user_auth(const std::string& service, const std::string& use
             hexdump(std::cout, verbuf);
             auto digest_info = hash::sha1{}.input(verbuf).result();
             std::cout << "Calced " << util::base16_encode(digest_info) << std::endl;
+            // TODO: Use digest helper/serialization stuff in x509_rsa
             digest_info.insert(digest_info.begin(), {0x30, 0x21, 0x30, 0x09, 0x06, 0x05, 0x2b, 0x0e, 0x03, 0x02, 0x1a, 0x05, 0x00, 0x04, 0x14});
             std::vector<uint8_t> sig_blob = x509::pkcs1_encode(key, digest_info);
             put_string(b, make_rsa_sig(sig_blob));
             // Check that we can decode the message we produced
             auto di = x509::pkcs1_decode(x509::rsa_public_key{key.modulus, key.public_exponent}, sig_blob);
-            FUNTLS_CHECK_BINARY(di.digest_algorithm.id(), ==, x509::id_sha1, "");
+            FUNTLS_CHECK_BINARY(di.digest_algorithm().id(), ==, x509::id_sha1, "");
         }
 
         send_encrypted(b.as_vector());

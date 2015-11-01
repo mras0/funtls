@@ -135,6 +135,10 @@ constexpr bool operator!=(const protocol_version& a, const protocol_version& b) 
     return !(a == b);
 }
 
+constexpr bool operator>=(const protocol_version& a, const protocol_version& b) {
+    return a.major > b.major ? true : (a.major == b.major ? a.minor >= b.minor : false);
+}
+
 std::ostream& operator<<(std::ostream& os, const protocol_version& version);
 
 static constexpr protocol_version protocol_version_tls_1_0{3, 1};

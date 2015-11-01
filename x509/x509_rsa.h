@@ -42,13 +42,26 @@ struct rsa_private_key {
     static rsa_private_key parse(const asn1::der_encoded_value& repr);
 };
 
-struct digest_info {
-    x509::algorithm_id      digest_algorithm;
-    std::vector<uint8_t>    digest;
+class digest_info {
+public:
+    digest_info(const x509::algorithm_id& digest_algorithm, std::vector<uint8_t> digest) : digest_algorithm_(digest_algorithm), digest_(digest) {
+    }
+
+    const x509::algorithm_id& digest_algorithm() const { return digest_algorithm_; }
+    const std::vector<uint8_t>& digest() const { return digest_; }
+
+    void serialize(std::vector<uint8_t>& buf) const;
+
+    static digest_info parse(const asn1::der_encoded_value& repr);
+
+private:
+    x509::algorithm_id      digest_algorithm_;
+    std::vector<uint8_t>    digest_;
 };
 
 std::vector<uint8_t> pkcs1_decode(const rsa_private_key& key, const std::vector<uint8_t>& message);
 digest_info pkcs1_decode(const rsa_public_key& pk, const std::vector<uint8_t>& data);
+
 std::vector<uint8_t> pkcs1_encode(const rsa_private_key& key, const std::vector<uint8_t>& message);
 std::vector<uint8_t> pkcs1_encode(const rsa_public_key& key, const std::vector<uint8_t>& message);
 
