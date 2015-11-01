@@ -136,9 +136,7 @@ constexpr bool operator!=(const protocol_version& a, const protocol_version& b) 
 }
 
 constexpr bool operator>=(const protocol_version& a, const protocol_version& b) {
-    if (a.major > b.major) return true;
-    else if (a.major == b.major) return a.minor >= b.minor;
-    return false;
+    return a.major > b.major ? true : (a.major == b.major ? a.minor >= b.minor : false);
 }
 
 std::ostream& operator<<(std::ostream& os, const protocol_version& version);
