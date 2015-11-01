@@ -1,5 +1,6 @@
 #include <tls/tls_kex.h>
 #include <tls/tls_ecc.h>
+#include <tls/tls_ciphers.h>
 #include <tls/tls_ser.h>
 #include <x509/x509_rsa.h>
 #include <x509/x509_ec.h>
@@ -16,17 +17,6 @@ using namespace funtls;
 
 namespace {
 
-tls::hash_algorithm hash_algorithm_from_oid(const asn1::object_id& oid) {
-    if (oid == x509::id_md5) return tls::hash_algorithm::md5;
-    if (oid == x509::id_sha1) return tls::hash_algorithm::sha1;
-    if (oid == x509::id_sha256) return tls::hash_algorithm::sha256;
-    if (oid == x509::id_sha384) return tls::hash_algorithm::sha384;
-    if (oid == x509::id_sha512) return tls::hash_algorithm::sha512;
-    std::ostringstream msg;
-    msg << "Unknown hash algorithm " << oid;
-    FUNTLS_CHECK_FAILURE(msg.str());
-}
-
 void verify_signature_rsa(const x509::certificate& cert, const tls::signed_signature& sig, const std::vector<uint8_t>& digest_buf)
 {
     std::cout << "Verify RSA " << sig.hash_algorithm << " signature" << std::endl;
@@ -34,7 +24,7 @@ void verify_signature_rsa(const x509::certificate& cert, const tls::signed_signa
     FUNTLS_CHECK_BINARY(sig.signature_algorithm, ==, tls::signature_algorithm::rsa, "");
     const auto digest = x509::pkcs1_decode(public_key, sig.value.as_vector());
     FUNTLS_CHECK_BINARY(digest.digest_algorithm.null_parameters(), ==, true, "Invalid algorithm parameters");
-    FUNTLS_CHECK_BINARY(hash_algorithm_from_oid(digest.digest_algorithm.id()), ==, sig.hash_algorithm, "");
+    FUNTLS_CHECK_BINARY(tls::hash_algorithm_from_oid(digest.digest_algorithm.id()), ==, sig.hash_algorithm, "");
 
     const auto calced_digest = get_hash(sig.hash_algorithm).input(digest_buf).result();
     FUNTLS_CHECK_BINARY(calced_digest.size(), ==, digest.digest.size(), "Wrong digest size");

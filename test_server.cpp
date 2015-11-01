@@ -120,11 +120,25 @@ void connection::read_client_hello() {
                 std::cout << self->name_ << ": Got client hello\n";
                 std::cout << self->name_ << ": version " << client_hello.client_version << "\n";
                 std::cout << self->name_ << ": session " << util::base16_encode(client_hello.session_id.as_vector()) << "\n";
-                std::cout << self->name_ << ": cipher_suites:\n";
+                std::cout << self->name_ << ": cipher_suites:";
+                for (auto cs : client_hello.cipher_suites.as_vector()) {
+                    std::cout << " " << cs;
+                }
+                std::cout << "\n";
+                std::cout << self->name_ << ": compression_methods:";
+                for (auto cm : client_hello.compression_methods.as_vector()) {
+                    std::cout << " " << (int)cm;
+                }
+                std::cout << "\n";
+                std::cout << self->name_ << ": extensions:\n";
+                for (const auto& ext : client_hello.extensions) {
+                    std::cout << ext.type << " " << util::base16_encode(ext.data.as_vector())  << "\n";
+                }
+
                 auto cipher = cipher_suite::null_with_null_null;
                 // Find the first supported cipher
                 for (auto cs : client_hello.cipher_suites.as_vector()) {
-                    if (cipher == cipher_suite::null_with_null_null && is_supported(cs)) {
+                    if (is_supported(cs)) {
                         const auto kex = parameters_from_suite(cs).key_exchange_algorithm;
                         for (auto id : self->server_ids_) {
                             if (id->supports(kex)) {
@@ -135,18 +149,11 @@ void connection::read_client_hello() {
                             }
                         }
                     }
+                    if (cipher != cipher_suite::null_with_null_null) {
+                        break;
+                    }
                 }
-                std::cout << self->name_ << ": compression_methods:\n";
-                for (auto cm : client_hello.compression_methods.as_vector()) {
-                    std::cout << (int)cm << "\n";
-                }
-                std::cout << self->name_ << ": extensions:\n";
-                for (const auto& ext : client_hello.extensions) {
-                    std::cout << ext.type << " " << util::base16_encode(ext.data.as_vector())  << "\n";
-                }
-
-                FUNTLS_CHECK_BINARY(client_hello.client_version.major, ==, tls::protocol_version_tls_1_2.major, "Invalid protocol version");
-                FUNTLS_CHECK_BINARY(client_hello.client_version.minor, >=, tls::protocol_version_tls_1_2.minor, "Invalid protocol version");
+                FUNTLS_CHECK_BINARY(client_hello.client_version, >=, tls::protocol_version_tls_1_2, "Invalid protocol version");
                 FUNTLS_CHECK_BINARY(cipher, !=, cipher_suite::null_with_null_null, "No common cipher found");
                 self->current_protocol_version(tls::protocol_version_tls_1_2);
                 self->client_random(client_hello.random);

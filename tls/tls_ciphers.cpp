@@ -4,6 +4,7 @@
 #include <util/base_conversion.h>
 #include <util/test.h>
 #include <util/random.h>
+#include <x509/x509.h>
 #include <rc4/rc4.h>
 #include <3des/3des.h>
 #include <aes/aes.h>
@@ -356,9 +357,46 @@ bool try_consume(std::string& in, const std::string& t)
     return false;
 }
 
+const struct hash_algorithm_info_t {
+    tls::hash_algorithm id;
+    asn1::object_id     oid;
+} hash_algorithm_info[] = {
+    // none
+    { tls::hash_algorithm::md5    , x509::id_md5 },
+    { tls::hash_algorithm::sha1   , x509::id_sha1 },
+    //{ tls::hash_algorithm::sha224 , x509::id_sha224 },
+    { tls::hash_algorithm::sha256 , x509::id_sha256 },
+    { tls::hash_algorithm::sha384 , x509::id_sha384 },
+    { tls::hash_algorithm::sha512 , x509::id_sha512 },
+};
+
 } // unnamed namespace
 
 namespace funtls { namespace tls {
+
+hash_algorithm hash_algorithm_from_oid(const asn1::object_id& oid)
+{
+    for (const auto& i : hash_algorithm_info) {
+        if (oid == i.oid) {
+            return i.id;
+        }
+    }
+    std::ostringstream msg;
+    msg << "Unknown hash algorithm " << oid;
+    FUNTLS_CHECK_FAILURE(msg.str());
+}
+
+asn1::object_id oid_from_hash_algorithm(hash_algorithm hash_algo)
+{
+    for (const auto& i : hash_algorithm_info) {
+        if (hash_algo == i.id) {
+            return i.oid;
+        }
+    }
+    std::ostringstream msg;
+    msg << "Unknown hash algorithm " << hash_algo;
+    FUNTLS_CHECK_FAILURE(msg.str());
+}
 
 hash::hash_algorithm get_hash(hash_algorithm algo)
 {
