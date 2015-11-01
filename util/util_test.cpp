@@ -1,3 +1,4 @@
+#include "ostream_adapter.h"
 #include "async_result.h"
 #include "base_conversion.h"
 #include "buffer.h"
@@ -233,6 +234,20 @@ void test_async_result()
     }
 }
 
+void test_ostream_adapter()
+{
+    using namespace funtls::util;
+
+    std::string res;
+    ostream_adapter o{[&res] (const std::string& s) { res = s; }};
+    o << "123";
+    FUNTLS_ASSERT_EQUAL("", res);
+    o << std::flush;
+    FUNTLS_ASSERT_EQUAL("123", res);
+    o << "BLAH" << std::endl;
+    FUNTLS_ASSERT_EQUAL("BLAH\n", res);
+}
+
 int main()
 {
     base16_test();
@@ -240,4 +255,5 @@ int main()
     buffer_test();
     test_buffer_getters();
     test_async_result();
+    test_ostream_adapter();
 }
