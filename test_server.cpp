@@ -380,7 +380,7 @@ private:
         //   digest OCTET STRING }
 
         const auto seq_buf = serialized_sequence(asn1::identifier::constructed_sequence,
-            serialized_sequence(asn1::identifier::constructed_sequence, algo_oid),
+            serialized_sequence(asn1::identifier::constructed_sequence, algo_oid, std::vector<uint8_t>{static_cast<uint8_t>(asn1::identifier::null), 0}),
             asn1::octet_string{digest});
 
         signed_signature signature;
