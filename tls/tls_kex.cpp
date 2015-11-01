@@ -23,15 +23,15 @@ void verify_signature_rsa(const x509::certificate& cert, const tls::signed_signa
     auto public_key = x509::rsa_public_key_from_certificate(cert);
     FUNTLS_CHECK_BINARY(sig.signature_algorithm, ==, tls::signature_algorithm::rsa, "");
     const auto digest = x509::pkcs1_decode(public_key, sig.value.as_vector());
-    FUNTLS_CHECK_BINARY(digest.digest_algorithm.null_parameters(), ==, true, "Invalid algorithm parameters");
-    FUNTLS_CHECK_BINARY(tls::hash_algorithm_from_oid(digest.digest_algorithm.id()), ==, sig.hash_algorithm, "");
+    FUNTLS_CHECK_BINARY(digest.digest_algorithm().null_parameters(), ==, true, "Invalid algorithm parameters");
+    FUNTLS_CHECK_BINARY(tls::hash_algorithm_from_oid(digest.digest_algorithm().id()), ==, sig.hash_algorithm, "");
 
     const auto calced_digest = get_hash(sig.hash_algorithm).input(digest_buf).result();
-    FUNTLS_CHECK_BINARY(calced_digest.size(), ==, digest.digest.size(), "Wrong digest size");
-    if (!std::equal(calced_digest.begin(), calced_digest.end(), digest.digest.begin())) {
+    FUNTLS_CHECK_BINARY(calced_digest.size(), ==, digest.digest().size(), "Wrong digest size");
+    if (!std::equal(calced_digest.begin(), calced_digest.end(), digest.digest().begin())) {
         throw std::runtime_error("Digest mismatch in " + std::string(__PRETTY_FUNCTION__) + " Calculated: " +
                 util::base16_encode(calced_digest) + " Expected: " +
-                util::base16_encode(digest.digest));
+                util::base16_encode(digest.digest()));
     }
 }
 

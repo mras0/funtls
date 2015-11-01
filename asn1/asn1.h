@@ -438,6 +438,18 @@ inline void serialize_all(std::vector<uint8_t>& buf, const Obj& obj, const Objs&
 
 } // namespace detail
 
+template<typename... Objs>
+inline void serialize_sequence(std::vector<uint8_t>& buf, identifier id, const Objs&... objs) {
+
+    buf.push_back(static_cast<uint8_t>(id));
+    buf.push_back(0); // size, expand later on
+    const auto content_begin_index = buf.size();
+    detail::serialize_all(buf, objs...);
+    const auto content_size = buf.size() - content_begin_index;
+    assert(content_size < 0x80);
+    buf[content_begin_index-1] = static_cast<uint8_t>(content_size);
+}
+
 template<typename Obj>
 std::vector<uint8_t> serialized(const Obj& o) {
     std::vector<uint8_t> buf;
@@ -448,15 +460,11 @@ std::vector<uint8_t> serialized(const Obj& o) {
 template<typename... Objs>
 inline std::vector<uint8_t> serialized_sequence(identifier id, const Objs&... objs) {
     std::vector<uint8_t> buf;
-    buf.push_back(static_cast<uint8_t>(id));
-    buf.push_back(0); // size, expand later on
-    const auto content_begin_index = buf.size();
-    detail::serialize_all(buf, objs...);
-    const auto content_size = buf.size() - content_begin_index;
-    assert(content_size < 0x80);
-    buf[1] = static_cast<uint8_t>(content_size);
+    serialize_sequence(buf, id, objs...);
     return buf;
 }
+
+
 
 } } // namespace funtls::asn1
 

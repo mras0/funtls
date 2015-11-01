@@ -366,22 +366,13 @@ private:
         params.dh_g = x509::base256_encode(g_, key_size);   // The generator used for the Diffie-Hellman operation.
         params.dh_Ys = x509::base256_encode(Ys, key_size); // The server's Diffie-Hellman public value (g^X mod p).
 
-
+        // Digitally sign client random, server random and the DHE parameters
         std::vector<uint8_t> digest_buf;
         append_to_buffer(digest_buf, client_random);
         append_to_buffer(digest_buf, server_random);
         append_to_buffer(digest_buf, params);
 
-        const auto& algo_oid = x509::id_sha256;
-        const auto digest = hash::sha256{}.input(digest_buf).result();
-
-        // DigestInfo ::= SEQUENCE {
-        //   digestAlgorithm AlgorithmIdentifier,
-        //   digest OCTET STRING }
-
-        const auto seq_buf = serialized_sequence(asn1::identifier::constructed_sequence,
-            serialized_sequence(asn1::identifier::constructed_sequence, algo_oid, std::vector<uint8_t>{static_cast<uint8_t>(asn1::identifier::null), 0}),
-            asn1::octet_string{digest});
+        const auto seq_buf = asn1::serialized(x509::digest_info{x509::id_sha256, hash::sha256{}.input(digest_buf).result()});
 
         signed_signature signature;
         signature.hash_algorithm      = hash_algorithm::sha256;

@@ -240,11 +240,56 @@ void test_pkey()
         0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14 };
     const auto e1_msg = x509::pkcs1_encode(pkey, msg);
     auto di = x509::pkcs1_decode(pub, e1_msg);
-    FUNTLS_ASSERT_EQUAL(x509::id_sha1, di.digest_algorithm);
-    FUNTLS_ASSERT_EQUAL((std::vector<uint8_t>{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14}), di.digest);
+    FUNTLS_ASSERT_EQUAL(x509::id_sha1, di.digest_algorithm());
+    FUNTLS_ASSERT_EQUAL((std::vector<uint8_t>{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14}), di.digest());
 
     const auto e2_msg = x509::pkcs1_encode(pub, msg);
     FUNTLS_ASSERT_EQUAL(msg, x509::pkcs1_decode(pkey, e2_msg));
+}
+
+void test_serialization()
+{
+    //digest_info.insert(digest_info.begin(), {0x30, 0x21, 0x30, 0x09, 0x06, 0x05, 0x2b, 0x0e, 0x03, 0x02, 0x1a, 0x05, 0x00, 0x04, 0x14});
+    // SHA1 algo info
+
+    // AlgorithmIdentifier
+    const std::vector<uint8_t> sha1_algo_id_no_params_bytes{0x30, 0x07, 0x06, 0x05, 0x2b, 0x0e, 0x03, 0x02, 0x1a};
+    util::buffer_view sha1_algo_id_buf{sha1_algo_id_no_params_bytes.data(), sha1_algo_id_no_params_bytes.size()};
+    x509::algorithm_id sha1_algo_id_no_param{asn1::read_der_encoded_value(sha1_algo_id_buf)};
+    FUNTLS_ASSERT_EQUAL(x509::id_sha1, sha1_algo_id_no_param.id());
+    FUNTLS_ASSERT_EQUAL(true, sha1_algo_id_no_param.null_parameters());
+    FUNTLS_ASSERT_EQUAL(0, sha1_algo_id_no_param.parameters().size());
+    std::vector<uint8_t> sha1_algo_id_no_param_serialized;
+    sha1_algo_id_no_param.serialize(sha1_algo_id_no_param_serialized);
+    FUNTLS_ASSERT_EQUAL(sha1_algo_id_no_params_bytes, sha1_algo_id_no_param_serialized);
+
+    const std::vector<uint8_t> sha1_algo_id_null_params_bytes{0x30, 0x09, 0x06, 0x05, 0x2b, 0x0e, 0x03, 0x02, 0x1a, 0x05, 0x00};
+    util::buffer_view sha1_algo_id_buf2{sha1_algo_id_null_params_bytes.data(), sha1_algo_id_null_params_bytes.size()};
+    x509::algorithm_id sha1_algo_id_null_param{asn1::read_der_encoded_value(sha1_algo_id_buf2)};
+    FUNTLS_ASSERT_EQUAL(x509::id_sha1, sha1_algo_id_null_param.id());
+    FUNTLS_ASSERT_EQUAL(true, sha1_algo_id_null_param.null_parameters());
+    FUNTLS_ASSERT_EQUAL((std::vector<uint8_t>{0x05, 0x00}), sha1_algo_id_null_param.parameters());
+    std::vector<uint8_t> sha1_algo_id_null_param_serialized;
+    sha1_algo_id_null_param.serialize(sha1_algo_id_null_param_serialized);
+    FUNTLS_ASSERT_EQUAL(sha1_algo_id_null_params_bytes, sha1_algo_id_null_param_serialized);
+
+
+    const std::vector<uint8_t> digest_info_bytes{
+        0x30, 0x11,     // constructed sequence (DigestInfo)
+            0x30, 0x09, // constructed sequence (digestAlgorithm)
+                0x06, 0x05, // oid
+                    0x2b, 0x0e, 0x03, 0x02, 0x1a, // 1.3.14.3.2.26
+                0x05, 0x00, // null
+                    // no data
+            0x04, 0x4, // octet_string digest)
+                1,2,3,4
+    };
+    util::buffer_view digest_info_buf{digest_info_bytes.data(), digest_info_bytes.size()};
+    auto digest_info = x509::digest_info::parse(asn1::read_der_encoded_value(digest_info_buf));
+    FUNTLS_ASSERT_EQUAL(x509::id_sha1, digest_info.digest_algorithm().id());
+    FUNTLS_ASSERT_EQUAL((std::vector<uint8_t>{0x05, 0x00}), digest_info.digest_algorithm().parameters());
+    FUNTLS_ASSERT_EQUAL((std::vector<uint8_t>{0x01, 0x02, 0x03, 0x04}), digest_info.digest());
+    FUNTLS_ASSERT_EQUAL(digest_info_bytes, asn1::serialized(digest_info));
 }
 
 int main()
@@ -252,4 +297,5 @@ int main()
     // TODO: Check x509::name equals operations. Only exact matches should be allowed (with order being important) etc.
     test_cert();
     test_pkey();
+    test_serialization();
 }

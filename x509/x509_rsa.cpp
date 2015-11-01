@@ -64,6 +64,24 @@ rsa_public_key rsa_public_key::parse(const asn1::der_encoded_value& repr)
     return rsa_public_key{modolus, public_exponent};
 }
 
+void digest_info::serialize(std::vector<uint8_t>& buf) const
+{
+    asn1::serialize_sequence(buf, asn1::identifier::constructed_sequence, digest_algorithm_, asn1::octet_string{digest_});
+}
+
+digest_info digest_info::parse(const asn1::der_encoded_value& repr)
+{
+    // DigestInfo ::= SEQUENCE {
+    //   digestAlgorithm AlgorithmIdentifier,
+    //   digest OCTET STRING }
+
+    auto digest_info = asn1::sequence_view{repr};
+    auto digest_algo = x509::algorithm_id(digest_info.next());
+    auto digest = asn1::octet_string{digest_info.next()}.as_vector();
+    FUNTLS_CHECK_BINARY(digest_info.has_next(), ==, false, "Invalid DigestInfo structure");
+    return {digest_algo, digest};
+}
+
 digest_info pkcs1_decode(const rsa_public_key& pk, const std::vector<uint8_t>& data)
 {
     FUNTLS_CHECK_BINARY(pk.key_length() & (pk.key_length()-1), ==, 0, "Non pow2 key length? " + std::to_string(pk.key_length()));
@@ -97,18 +115,8 @@ digest_info pkcs1_decode(const rsa_public_key& pk, const std::vector<uint8_t>& d
             FUNTLS_CHECK_FAILURE("Invalid byte in PKCS#1 1.5 padding: 0x" + util::base16_encode(&b, 1));
         }
     }
-    // DigestInfo ::= SEQUENCE {
-    //   digestAlgorithm AlgorithmIdentifier,
-    //   digest OCTET STRING }
 
-    auto digest_info = asn1::sequence_view{asn1::read_der_encoded_value(digest_buf)};
-    FUNTLS_CHECK_BINARY(digest_buf.remaining(), ==, 0, "Invalid PKCS#1 1.5 signature");
-
-    auto digest_algo = x509::algorithm_id(digest_info.next());
-    auto digest = asn1::octet_string{digest_info.next()}.as_vector();
-    FUNTLS_CHECK_BINARY(digest_info.has_next(), ==, false, "Invalid PKCS#1 1.5 signature");
-
-    return x509::digest_info{digest_algo, digest};
+    return digest_info::parse(asn1::read_der_encoded_value(digest_buf));
 }
 
 std::vector<uint8_t> pkcs1_decode(const rsa_private_key& pk, const std::vector<uint8_t>& data)
@@ -253,15 +261,15 @@ void verify_x509_signature_rsa(const certificate& subject_cert, const certificat
 
     // Decode the signature using the issuers public key
     auto digest = x509::pkcs1_decode(rsa_public_key_from_certificate(issuer_cert), subject_cert.signature().as_vector());
-    FUNTLS_CHECK_BINARY(digest.digest_algorithm.null_parameters(), ==, true, "Invalid digest algorithm parameters");
-    FUNTLS_CHECK_BINARY(digest.digest_algorithm.id(), ==, digest_algo, "Digest algorithm mismatch");
+    FUNTLS_CHECK_BINARY(digest.digest_algorithm().null_parameters(), ==, true, "Invalid digest algorithm parameters");
+    FUNTLS_CHECK_BINARY(digest.digest_algorithm().id(), ==, digest_algo, "Digest algorithm mismatch");
 
     const auto computed_sig = get_hash(digest_algo).input(subject_cert.certificate_der_encoded()).result();
-    if (digest.digest != computed_sig) {
+    if (digest.digest() != computed_sig) {
         std::ostringstream oss;
         oss << "Invalid certificate signature (algorithm = " << subject_cert.signature_algorithm() << ")\n";
         oss << "Computed:  " << util::base16_encode(computed_sig) << "\n";
-        oss << "Signature: " << util::base16_encode(digest.digest);
+        oss << "Signature: " << util::base16_encode(digest.digest());
         FUNTLS_CHECK_FAILURE(oss.str());
     }
 }

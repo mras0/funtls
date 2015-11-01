@@ -170,6 +170,10 @@ bool algorithm_id::null_parameters() const {
     return false;
 }
 
+void algorithm_id::serialize(std::vector<uint8_t>& buf) const {
+    serialize_sequence(buf, asn1::identifier::constructed_sequence, id_, parameters_);
+}
+
 std::ostream& operator<<(std::ostream& os, const algorithm_id& aid)
 {
     const auto& id = aid.id();
