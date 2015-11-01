@@ -100,6 +100,7 @@ struct server_key_exchange_ec_dhe {
     // signature
 };
 
+void append_to_buffer(std::vector<uint8_t>& buffer, const server_key_exchange_ec_dhe& item);
 void from_bytes(server_key_exchange_ec_dhe& item, util::buffer_view& buffer);
 
 struct client_key_exchange_ecdhe_ecdsa {

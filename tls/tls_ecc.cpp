@@ -55,6 +55,11 @@ void append_to_buffer(std::vector<uint8_t>& buffer, const server_ec_dh_params& i
     append_to_buffer(buffer, item.public_key);
 }
 
+void append_to_buffer(std::vector<uint8_t>& buffer, const server_key_exchange_ec_dhe& item) {
+    append_to_buffer(buffer, item.params);
+    append_to_buffer(buffer, item.signature);
+}
+
 void from_bytes(server_ec_dh_params& item, util::buffer_view& buffer) {
     from_bytes(item.curve_params, buffer);
     from_bytes(item.public_key, buffer);

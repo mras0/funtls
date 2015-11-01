@@ -1,13 +1,14 @@
 #include <iostream>
-#include <stdio.h> // popen
 
 #include <util/test.h>
 #include <util/base_conversion.h>
+#include <x509/x509_rsa.h>
+#include <x509/x509_ec.h>
 #include <tls/tls_base.h>
 #include <tls/tls_ser.h>
+#include <tls/tls_ecc.h>
 #include <int_util/int.h>
 #include <int_util/int_util.h>
-#include <x509/x509_rsa.h>
 #include <asio_stream_adapter.h>
 
 using namespace funtls;
@@ -41,7 +42,6 @@ private:
     virtual std::unique_ptr<handshake> do_server_key_exchange(const random& client_random, const random& server_random) const = 0;
     virtual std::vector<uint8_t> do_client_key_exchange(const handshake&) const = 0;
 };
-
 
 class server_id {
 public:
@@ -281,10 +281,7 @@ private:
     std::vector<asn1cert> certificate_chain_;
     x509::rsa_private_key      private_key_;
 
-    virtual bool supports(key_exchange_algorithm kex) const override {
-        return kex == key_exchange_algorithm::rsa || kex == key_exchange_algorithm::dhe_rsa;
-    }
-
+    virtual bool supports(key_exchange_algorithm kex) const override;
     virtual std::unique_ptr<server_key_exchange_protocol> key_exchange_protocol(key_exchange_algorithm kex) const override;
 };
 
@@ -395,12 +392,49 @@ private:
     }
 };
 
+class ecdhe_rsa_server_key_exchange_protocol : public server_key_exchange_protocol {
+public:
+    ecdhe_rsa_server_key_exchange_protocol(const rsa_server_id& server_id) : server_id_(server_id) {
+    }
+
+private:
+    const rsa_server_id& server_id_;
+
+    const std::vector<asn1cert>* do_certificate_chain() const override {
+        return &server_id_.certificate_chain();
+    }
+
+    virtual std::unique_ptr<handshake> do_server_key_exchange(const random& client_random, const random& server_random) const {
+        (void) client_random; (void) server_random;
+        
+        server_ec_dh_params params;
+        
+        signed_signature signature;
+        signature.hash_algorithm      = hash_algorithm::sha256;
+        signature.signature_algorithm = signature_algorithm::rsa;
+        //signature.value               = x509::pkcs1_encode(server_id_.private_key(), seq_buf);
+
+        return std::make_unique<handshake>(make_handshake(server_key_exchange_ec_dhe{params, signature}));
+    }
+
+    virtual std::vector<uint8_t> do_client_key_exchange(const handshake&) const {
+        FUNTLS_CHECK_FAILURE("Not implemented");
+    }
+};
+
+
+bool rsa_server_id::supports(key_exchange_algorithm kex) const {
+    return kex == key_exchange_algorithm::rsa || kex == key_exchange_algorithm::dhe_rsa || kex == key_exchange_algorithm::ecdhe_rsa;
+}
+
 std::unique_ptr<server_key_exchange_protocol> rsa_server_id::key_exchange_protocol(key_exchange_algorithm kex) const {
     switch (kex) {
     case key_exchange_algorithm::rsa:
         return std::unique_ptr<server_key_exchange_protocol>{new rsa_server_key_exchange_protocol{*this}};
     case key_exchange_algorithm::dhe_rsa:
         return std::unique_ptr<server_key_exchange_protocol>{new dhe_rsa_server_key_exchange_protocol{*this}};
+    case key_exchange_algorithm::ecdhe_rsa:
+        return std::unique_ptr<server_key_exchange_protocol>{new ecdhe_rsa_server_key_exchange_protocol{*this}};
     default:
         FUNTLS_CHECK_FAILURE("Usupported key exchange algorithm " + std::to_string(static_cast<int>(kex)));
     }
@@ -473,6 +507,8 @@ AZokDceX95yJnwKqa6SzgQ==
 
 #ifdef SELF_TEST
 #include "tls_fetch.h"
+#elif defined(OPENSSL_TEST)
+#include <stdio.h> // popen
 #endif
 
 int main(int argc, char* argv[])
@@ -545,9 +581,10 @@ int main(int argc, char* argv[])
                 const std::vector<tls::cipher_suite> cipher_suites{
                     //tls::cipher_suite::ecdhe_ecdsa_with_aes_256_gcm_sha384,
                     //tls::cipher_suite::ecdhe_ecdsa_with_aes_128_gcm_sha256,
+                    
                     //tls::cipher_suite::ecdhe_rsa_with_aes_256_gcm_sha384,
                     //tls::cipher_suite::ecdhe_rsa_with_aes_128_gcm_sha256,
-                    
+
                     tls::cipher_suite::dhe_rsa_with_aes_256_cbc_sha256,
                     tls::cipher_suite::dhe_rsa_with_aes_128_cbc_sha256,
                     tls::cipher_suite::dhe_rsa_with_aes_256_cbc_sha,
