@@ -10,6 +10,7 @@
 #include <int_util/int.h>
 #include <int_util/int_util.h>
 #include <asio_stream_adapter.h>
+#include <util/ostream_adapter.h>
 
 using namespace funtls;
 using util::async_result;
@@ -61,7 +62,7 @@ public:
 
     ~connection();
 private:
-    std::string                                     name_;
+    util::ostream_adapter                           log_;
     std::vector<const server_id*>                   server_ids_;
     std::unique_ptr<server_key_exchange_protocol>   server_kex_;
 
@@ -80,24 +81,23 @@ private:
 
 connection::connection(const std::string& name, std::unique_ptr<stream> stream, const std::vector<const server_id*> server_ids)
     : tls_base(std::move(stream), tls_base::connection_end::server)
-    , name_(name)
+    , log_([name] (const std::string& s) { std::cout << name + ": " + s;} )
     , server_ids_(server_ids)
     , server_kex_(nullptr)
 {
-    std::cout << name_ << ": Connected\n";
+    log_ << "Connected\n";
     assert(!server_ids_.empty());
 }
 
 connection::~connection()
 {
-    std::cout << name_ << ": Conncetion dropped\n";
+    log_ << "Conncetion dropped\n";
 }
 
 void connection::handle_error(std::exception_ptr e) const
 {
     assert(e);
     std::ostringstream msg;
-    msg << name_ << ": ";
     msg << "[!!!] ";
     try {
         std::rethrow_exception(e);
@@ -107,32 +107,32 @@ void connection::handle_error(std::exception_ptr e) const
         msg << "Unknown exception type caught";
     }
     msg << "\n";
-    std::cerr << msg.str();
+    const_cast<util::ostream_adapter&>(log_) << msg.str(); // Meh...
 }
 
 
 void connection::read_client_hello() {
-    std::cout << name_ << ": Reading ClientHello\n";
+    log_ << "Reading ClientHello\n";
     auto self = shared_from_this();
     read_handshake(wrapped(
             [self] (tls::handshake&& handshake) {
                 auto client_hello = get_as<tls::client_hello>(handshake);
-                std::cout << self->name_ << ": Got client hello\n";
-                std::cout << self->name_ << ": version " << client_hello.client_version << "\n";
-                std::cout << self->name_ << ": session " << util::base16_encode(client_hello.session_id.as_vector()) << "\n";
-                std::cout << self->name_ << ": cipher_suites:";
+                self->log_ << "Got client hello\n";
+                self->log_ << "version " << client_hello.client_version << "\n";
+                self->log_ << "session " << util::base16_encode(client_hello.session_id.as_vector()) << "\n";
+                self->log_ << "cipher_suites:";
                 for (auto cs : client_hello.cipher_suites.as_vector()) {
-                    std::cout << " " << cs;
+                    self->log_ << " " << cs;
                 }
-                std::cout << "\n";
-                std::cout << self->name_ << ": compression_methods:";
+                self->log_ << "\n";
+                self->log_ << "compression_methods:";
                 for (auto cm : client_hello.compression_methods.as_vector()) {
-                    std::cout << " " << (int)cm;
+                    self->log_ << " " << (int)cm;
                 }
-                std::cout << "\n";
-                std::cout << self->name_ << ": extensions:\n";
+                self->log_ << "\n";
+                self->log_ << "extensions:\n";
                 for (const auto& ext : client_hello.extensions) {
-                    std::cout << ext.type << " " << util::base16_encode(ext.data.as_vector())  << "\n";
+                    self->log_ << ext.type << " " << util::base16_encode(ext.data.as_vector())  << "\n";
                 }
 
                 auto cipher = cipher_suite::null_with_null_null;
@@ -159,7 +159,7 @@ void connection::read_client_hello() {
                 self->client_random(client_hello.random);
                 self->negotiated_cipher(cipher);
                 // TODO: Check that "No compression" is supported
-                std::cout << self->name_ << ": Negotatiated cipher: " << cipher << std::endl;
+                self->log_ << "Negotatiated cipher: " << cipher << std::endl;
                 assert(self->server_kex_);
 
                 self->send_server_hello();
@@ -169,7 +169,7 @@ void connection::read_client_hello() {
 
 void connection::send_server_hello()
 {
-    std::cout << name_ << ": Sending ServerHello\n";
+    log_ << "Sending ServerHello\n";
     auto self = shared_from_this();
     send_handshake(make_handshake(
         server_hello{
@@ -188,7 +188,7 @@ void connection::send_server_certificate()
 {
     const auto chain = server_kex_->certificate_chain();
     if (chain) {
-        std::cout << name_ << ": Sending ServerCertificate\n";
+        log_ << "Sending ServerCertificate\n";
         auto self = shared_from_this();
         send_handshake(make_handshake(
             certificate{ *chain }), wrapped([self] () {
@@ -202,7 +202,7 @@ void connection::send_server_certificate()
 void connection::send_server_key_exchange()
 {
     if (auto handshake = server_kex_->server_key_exchange(client_random(), server_random())) {
-        std::cout << name_ << ": Sending ServerKeyExchange\n";
+        log_ << "Sending ServerKeyExchange\n";
         auto self = shared_from_this();
         send_handshake(*handshake, wrapped([self]() {
             self->send_server_hello_done();
@@ -214,7 +214,7 @@ void connection::send_server_key_exchange()
 
 void connection::send_server_hello_done()
 {
-    std::cout << name_ << ": Sending ServerHelloDone\n";
+    log_ << "Sending ServerHelloDone\n";
     auto self = shared_from_this();
     send_handshake(make_handshake(
         server_hello_done{}), wrapped([self] () {
@@ -223,20 +223,20 @@ void connection::send_server_hello_done()
 }
 
 void connection::read_client_key_exchange() {
-    std::cout << name_ << ": Reading ClientKeyExchange\n";
+    log_ << "Reading ClientKeyExchange\n";
     auto self = shared_from_this();
     read_handshake(wrapped(
             [self] (tls::handshake&& handshake) {
                 auto pre_master_secret = self->server_kex_->client_key_exchange(handshake);
-                std::cout << self->name_ << ": Premaster secret: " << util::base16_encode(pre_master_secret) << std::endl;
+                self->log_ << "Premaster secret: " << util::base16_encode(pre_master_secret) << std::endl;
                 self->set_pending_ciphers(pre_master_secret);
-                std::cout << self->name_ << ": Reading ChangeCipherSpec\n";
+                self->log_ << "Reading ChangeCipherSpec\n";
                 self->read_change_cipher_spec(wrapped(
                             [self] () {
-                                std::cout << self->name_ << ": Sending ChangeCipherSpec\n";
+                                self->log_ << "Sending ChangeCipherSpec\n";
                                 self->send_change_cipher_spec(wrapped(
                                     [self] () {
-                                        std::cout << self->name_ << ": Handshake done. Session id " << util::base16_encode(self->session_id().as_vector()) << std::endl;
+                                        self->log_ << "Handshake done. Session id " << util::base16_encode(self->session_id().as_vector()) << std::endl;
                                         self->main_loop();
                                     },
                                     std::bind(&connection::handle_error, self, std::placeholders::_1)));
@@ -252,7 +252,7 @@ void connection::main_loop()
     auto self = shared_from_this();
     recv_app_data(wrapped(
         [self] (std::vector<uint8_t>&& data) {
-            std::cout << self->name_ << ": Got app data: " << std::string(data.begin(), data.end());
+            self->log_ << "Got app data: " << std::string(data.begin(), data.end());
             std::string text("Hello world!");
             self->send_app_data(std::vector<uint8_t>(text.begin(), text.end()), [self] (util::async_result<void> res) {
                 res.get();
@@ -356,8 +356,8 @@ private:
 
         const large_uint Ys = powm(g_, private_key_, p_);
 
-        std::cout << "DHE server private key: " << std::hex << private_key_ << std::dec << std::endl;
-        std::cout << "Ys: " << std::hex << Ys << std::dec << std::endl;
+        //std::cout << "DHE server private key: " << std::hex << private_key_ << std::dec << std::endl;
+        //std::cout << "Ys: " << std::hex << Ys << std::dec << std::endl;
 
         params.dh_p = x509::base256_encode(p_, key_size);   // The prime modulus used for the Diffie-Hellman operation.
         params.dh_g = x509::base256_encode(g_, key_size);   // The generator used for the Diffie-Hellman operation.
@@ -381,12 +381,12 @@ private:
 
     virtual std::vector<uint8_t> do_client_key_exchange(const handshake& handshake) const override {
         auto kex_rsa = get_as<client_key_exchange_dhe_rsa>(handshake);
-        std::cout << "dh_Yc = " << util::base16_encode(kex_rsa.dh_Yc.as_vector()) << std::endl;
+        //std::cout << "dh_Yc = " << util::base16_encode(kex_rsa.dh_Yc.as_vector()) << std::endl;
 
         const large_uint Yc = x509::base256_decode<large_uint>(kex_rsa.dh_Yc.as_vector());
         const large_uint Z  = powm(Yc, private_key_, p_);
         auto dh_Z  = x509::base256_encode(Z, key_size);
-        std::cout << "Negotaited key = " << util::base16_encode(dh_Z) << std::endl;
+        //std::cout << "Negotaited key = " << util::base16_encode(dh_Z) << std::endl;
 
         return dh_Z;
     }
