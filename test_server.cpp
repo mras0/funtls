@@ -417,7 +417,7 @@ private:
         return &server_id_.certificate_chain();
     }
 
-    virtual std::unique_ptr<handshake> do_server_key_exchange(const random& client_random, const random& server_random) const {
+    virtual std::unique_ptr<handshake> do_server_key_exchange(const random& client_random, const random& server_random) const override {
         (void) client_random; (void) server_random;
 
         ec::point Ys = curve().mul(d_U_, curve().G); // ephemeral public key
@@ -444,7 +444,7 @@ private:
         return std::make_unique<handshake>(make_handshake(server_key_exchange_ec_dhe{params, signature}));
     }
 
-    virtual std::vector<uint8_t> do_client_key_exchange(const handshake& handshake) const {
+    virtual std::vector<uint8_t> do_client_key_exchange(const handshake& handshake) const override {
         auto kex = get_as<client_key_exchange_ecdhe_ecdsa>(handshake);
         const auto Yc = ec::point_from_bytes(kex.ecdh_Yc.as_vector());
         std::cout << "SERVER: Client public key " << Yc << std::endl;

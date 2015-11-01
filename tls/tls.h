@@ -136,7 +136,9 @@ constexpr bool operator!=(const protocol_version& a, const protocol_version& b) 
 }
 
 constexpr bool operator>=(const protocol_version& a, const protocol_version& b) {
-    return std::tie(a.major, a.minor) >= std::tie(b.major, b.minor);
+    if (a.major > b.major) return true;
+    else if (a.major == b.major) return a.minor >= b.minor;
+    return false;
 }
 
 std::ostream& operator<<(std::ostream& os, const protocol_version& version);
