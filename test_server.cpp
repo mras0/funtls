@@ -85,13 +85,13 @@ connection::connection(const std::string& name, std::unique_ptr<stream> stream, 
     , server_ids_(server_ids)
     , server_kex_(nullptr)
 {
-    log_ << "Connected\n";
+    log_ << "Connected" << std::endl;
     assert(!server_ids_.empty());
 }
 
 connection::~connection()
 {
-    log_ << "Conncetion dropped\n";
+    log_ << "Conncetion dropped" << std::endl;
 }
 
 void connection::handle_error(std::exception_ptr e) const
@@ -106,33 +106,33 @@ void connection::handle_error(std::exception_ptr e) const
     } catch (...) {
         msg << "Unknown exception type caught";
     }
-    msg << "\n";
+    msg << "" << std::endl;
     const_cast<util::ostream_adapter&>(log_) << msg.str(); // Meh...
 }
 
 
 void connection::read_client_hello() {
-    log_ << "Reading ClientHello\n";
+    log_ << "Reading ClientHello" << std::endl;
     auto self = shared_from_this();
     read_handshake(wrapped(
             [self] (tls::handshake&& handshake) {
                 auto client_hello = get_as<tls::client_hello>(handshake);
-                self->log_ << "Got client hello\n";
-                self->log_ << "version " << client_hello.client_version << "\n";
-                self->log_ << "session " << util::base16_encode(client_hello.session_id.as_vector()) << "\n";
+                self->log_ << "Got client hello" << std::endl;
+                self->log_ << "version " << client_hello.client_version << "" << std::endl;
+                self->log_ << "session " << util::base16_encode(client_hello.session_id.as_vector()) << "" << std::endl;
                 self->log_ << "cipher_suites:";
                 for (auto cs : client_hello.cipher_suites.as_vector()) {
                     self->log_ << " " << cs;
                 }
-                self->log_ << "\n";
+                self->log_ << "" << std::endl;
                 self->log_ << "compression_methods:";
                 for (auto cm : client_hello.compression_methods.as_vector()) {
                     self->log_ << " " << (int)cm;
                 }
-                self->log_ << "\n";
-                self->log_ << "extensions:\n";
+                self->log_ << "" << std::endl;
+                self->log_ << "extensions:" << std::endl;
                 for (const auto& ext : client_hello.extensions) {
-                    self->log_ << ext.type << " " << util::base16_encode(ext.data.as_vector())  << "\n";
+                    self->log_ << ext.type << " " << util::base16_encode(ext.data.as_vector())  << "" << std::endl;
                 }
 
                 auto cipher = cipher_suite::null_with_null_null;
@@ -169,7 +169,7 @@ void connection::read_client_hello() {
 
 void connection::send_server_hello()
 {
-    log_ << "Sending ServerHello\n";
+    log_ << "Sending ServerHello" << std::endl;
     auto self = shared_from_this();
     send_handshake(make_handshake(
         server_hello{
@@ -188,7 +188,7 @@ void connection::send_server_certificate()
 {
     const auto chain = server_kex_->certificate_chain();
     if (chain) {
-        log_ << "Sending ServerCertificate\n";
+        log_ << "Sending ServerCertificate" << std::endl;
         auto self = shared_from_this();
         send_handshake(make_handshake(
             certificate{ *chain }), wrapped([self] () {
@@ -202,7 +202,7 @@ void connection::send_server_certificate()
 void connection::send_server_key_exchange()
 {
     if (auto handshake = server_kex_->server_key_exchange(client_random(), server_random())) {
-        log_ << "Sending ServerKeyExchange\n";
+        log_ << "Sending ServerKeyExchange" << std::endl;
         auto self = shared_from_this();
         send_handshake(*handshake, wrapped([self]() {
             self->send_server_hello_done();
@@ -214,7 +214,7 @@ void connection::send_server_key_exchange()
 
 void connection::send_server_hello_done()
 {
-    log_ << "Sending ServerHelloDone\n";
+    log_ << "Sending ServerHelloDone" << std::endl;
     auto self = shared_from_this();
     send_handshake(make_handshake(
         server_hello_done{}), wrapped([self] () {
@@ -223,17 +223,17 @@ void connection::send_server_hello_done()
 }
 
 void connection::read_client_key_exchange() {
-    log_ << "Reading ClientKeyExchange\n";
+    log_ << "Reading ClientKeyExchange" << std::endl;
     auto self = shared_from_this();
     read_handshake(wrapped(
             [self] (tls::handshake&& handshake) {
                 auto pre_master_secret = self->server_kex_->client_key_exchange(handshake);
                 self->log_ << "Premaster secret: " << util::base16_encode(pre_master_secret) << std::endl;
                 self->set_pending_ciphers(pre_master_secret);
-                self->log_ << "Reading ChangeCipherSpec\n";
+                self->log_ << "Reading ChangeCipherSpec" << std::endl;
                 self->read_change_cipher_spec(wrapped(
                             [self] () {
-                                self->log_ << "Sending ChangeCipherSpec\n";
+                                self->log_ << "Sending ChangeCipherSpec" << std::endl;
                                 self->send_change_cipher_spec(wrapped(
                                     [self] () {
                                         self->log_ << "Handshake done. Session id " << util::base16_encode(self->session_id().as_vector()) << std::endl;
@@ -395,10 +395,23 @@ private:
 class ecdhe_rsa_server_key_exchange_protocol : public server_key_exchange_protocol {
 public:
     ecdhe_rsa_server_key_exchange_protocol(const rsa_server_id& server_id) : server_id_(server_id) {
+        d_U_ = rand_positive_int_less(curve().n); // private key
     }
 
 private:
     const rsa_server_id& server_id_;
+    const named_curve    curve_name_ = named_curve::secp256r1;
+    large_uint           d_U_;
+
+    const ec::curve curve() const {
+        return curve_from_name(curve_name_);
+    }
+
+    uint32_t curve_size_bytes() const {
+        const auto size = static_cast<uint32_t>(ilog256(curve().n));
+        assert(size == ilog256(curve().p));
+        return size;
+    }
 
     const std::vector<asn1cert>* do_certificate_chain() const override {
         return &server_id_.certificate_chain();
@@ -406,19 +419,42 @@ private:
 
     virtual std::unique_ptr<handshake> do_server_key_exchange(const random& client_random, const random& server_random) const {
         (void) client_random; (void) server_random;
-        
+
+        ec::point Ys = curve().mul(d_U_, curve().G); // ephemeral public key
+        std::cout << "Server private key: " << d_U_ << std::endl;
+        std::cout << "Server public key: " << Ys << std::endl;
+
         server_ec_dh_params params;
-        
+        params.curve_params.curve_type = ec_curve_type::named_curve;
+        params.curve_params.named_curve = curve_name_;
+        params.public_key = ec::point_to_bytes(Ys, curve_size_bytes());
+
         signed_signature signature;
         signature.hash_algorithm      = hash_algorithm::sha256;
         signature.signature_algorithm = signature_algorithm::rsa;
-        //signature.value               = x509::pkcs1_encode(server_id_.private_key(), seq_buf);
+
+
+        std::vector<uint8_t> digest_buf;
+        append_to_buffer(digest_buf, client_random);
+        append_to_buffer(digest_buf, server_random);
+        append_to_buffer(digest_buf, params);
+        const auto seq_buf = asn1::serialized(x509::digest_info{x509::id_sha256, hash::sha256{}.input(digest_buf).result()});
+        signature.value               = x509::pkcs1_encode(server_id_.private_key(), seq_buf);
 
         return std::make_unique<handshake>(make_handshake(server_key_exchange_ec_dhe{params, signature}));
     }
 
-    virtual std::vector<uint8_t> do_client_key_exchange(const handshake&) const {
-        FUNTLS_CHECK_FAILURE("Not implemented");
+    virtual std::vector<uint8_t> do_client_key_exchange(const handshake& handshake) const {
+        auto kex = get_as<client_key_exchange_ecdhe_ecdsa>(handshake);
+        const auto Yc = ec::point_from_bytes(kex.ecdh_Yc.as_vector());
+        std::cout << "SERVER: Client public key " << Yc << std::endl;
+
+        ec::point P = curve().mul(d_U_, Yc);  // shared secret
+        assert(curve().on_curve(P));
+
+        std::cout << "Shared secret: " << P << std::endl;
+
+        return x509::base256_encode(P.x, curve_size_bytes());
     }
 };
 
@@ -517,7 +553,7 @@ int main(int argc, char* argv[])
     if (argc > 1) {
         std::istringstream iss(argv[1]);
         if (!(iss >> wanted_port) || wanted_port < 0 || wanted_port > 65535) {
-            std::cerr << "Invalid port " << argv[1] << "\n";
+            std::cerr << "Invalid port " << argv[1] << "" << std::endl;
             return 1;
         }
     }
@@ -582,8 +618,8 @@ int main(int argc, char* argv[])
                     //tls::cipher_suite::ecdhe_ecdsa_with_aes_256_gcm_sha384,
                     //tls::cipher_suite::ecdhe_ecdsa_with_aes_128_gcm_sha256,
                     
-                    //tls::cipher_suite::ecdhe_rsa_with_aes_256_gcm_sha384,
-                    //tls::cipher_suite::ecdhe_rsa_with_aes_128_gcm_sha256,
+                    tls::cipher_suite::ecdhe_rsa_with_aes_256_gcm_sha384,
+                    tls::cipher_suite::ecdhe_rsa_with_aes_128_gcm_sha256,
 
                     tls::cipher_suite::dhe_rsa_with_aes_256_cbc_sha256,
                     tls::cipher_suite::dhe_rsa_with_aes_128_cbc_sha256,

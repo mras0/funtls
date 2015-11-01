@@ -109,6 +109,7 @@ struct client_key_exchange_ecdhe_ecdsa {
 };
 
 void append_to_buffer(std::vector<uint8_t>& buffer, const client_key_exchange_ecdhe_ecdsa& item);
+void from_bytes(client_key_exchange_ecdhe_ecdsa& item, util::buffer_view& buffer);
 
 } } // namespace funtls::tls
 
