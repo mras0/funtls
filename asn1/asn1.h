@@ -117,7 +117,7 @@ class container_view {
 public:
     static constexpr auto id = tag;
 
-    container_view(const der_encoded_value& repr)
+    explicit container_view(const der_encoded_value& repr)
         : buffer_(repr.content_view()) {
             detail::type_check(id, repr.id());
     }
@@ -233,6 +233,10 @@ class bit_string {
 public:
     static constexpr auto id = identifier::bit_string;
 
+    explicit bit_string(const std::vector<uint8_t>& repr, uint8_t excess_bits = 0) : repr_(repr), excess_bits_(excess_bits) {
+        assert(excess_bits_ < 8);
+        assert(!repr.empty());
+    }
     explicit bit_string(const der_encoded_value& repr);
 
     uint8_t excess_bits() const {
@@ -264,14 +268,14 @@ class object_id {
 public:
     static constexpr auto id = identifier::object_id;
 
-    object_id(const der_encoded_value& repr);
+    explicit object_id(const der_encoded_value& repr);
 
-    object_id(const std::vector<uint32_t>& components) : components_(components) {
+    explicit object_id(const std::vector<uint32_t>& components) : components_(components) {
         assert(!components_.empty());
         assert(components_[0] == 0 || components_[0] == 1 || components_[0] == 2);
     }
 
-    object_id(std::initializer_list<uint32_t> components) : components_(components) {
+    explicit object_id(std::initializer_list<uint32_t> components) : components_(components) {
         assert(!components_.empty());
         assert(components_[0] == 0 || components_[0] == 1 || components_[0] == 2);
     }
@@ -319,9 +323,9 @@ class utc_time {
 public:
     static constexpr auto id = identifier::utc_time;
 
-    utc_time(const der_encoded_value& repr);
+    explicit utc_time(const der_encoded_value& repr);
 
-    utc_time(const std::string& s) : repr_(s) {
+    explicit utc_time(const std::string& s) : repr_(s) {
         validate(repr_);
     }
 
@@ -352,7 +356,7 @@ public:
     }
 
 protected:
-    raw_string(const std::string& repr)
+    explicit raw_string(const std::string& repr)
         : repr_(repr) {
     }
 
@@ -373,10 +377,11 @@ class string_base : public raw_string {
 public:
     static constexpr auto id = tag;
 
-    string_base(const der_encoded_value& repr)
+    explicit string_base(const der_encoded_value& repr)
         : raw_string(detail::read_string(id, repr)) {
     }
-    string_base(const std::string& repr)
+
+    explicit string_base(const std::string& repr)
         : raw_string(repr) {
     }
 
@@ -387,9 +392,15 @@ public:
 
 class any_string : public raw_string {
 public:
-    any_string(const der_encoded_value& repr)
+    explicit any_string(const der_encoded_value& repr)
         : raw_string(detail::read_string(repr.id(), repr))
         , id_(repr.id()) {
+    }
+
+    template<identifier::tag tag>
+    /*implicit*/ any_string(const string_base<tag>& s)
+        : raw_string(s)
+        , id_(tag) {
     }
 
     identifier id() const {
@@ -410,10 +421,10 @@ inline bool operator!=(const any_string& lhs, const any_string& rhs) {
 
 class octet_string : public string_base<identifier::octet_string> {
 public:
-    octet_string(const der_encoded_value& repr)
+    explicit octet_string(const der_encoded_value& repr)
         : string_base(repr) {
     }
-    octet_string(const std::vector<uint8_t>& repr)
+    explicit octet_string(const std::vector<uint8_t>& repr)
         : string_base(std::string(repr.begin(), repr.end())) {
     }
 };

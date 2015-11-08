@@ -67,9 +67,11 @@ std::ostream& operator<<(std::ostream& os, const version& attr);
 
 class name {
 public:
-    typedef std::vector<std::pair<attribute_type, asn1::any_string>> attr_type;
+    using attribute_pair = std::pair<attribute_type, asn1::any_string>;
+    typedef std::vector<attribute_pair> attr_type;
 
-    name(const asn1::der_encoded_value& repr);
+    explicit name(std::initializer_list<attribute_pair> attributes) : attributes_(attributes) {}
+    explicit name(const asn1::der_encoded_value& repr);
 
     attr_type attributes() const { return attributes_; }
 
@@ -89,7 +91,7 @@ std::ostream& operator<<(std::ostream& os, const name& n);
 
 class algorithm_id {
 public:
-    algorithm_id(const asn1::object_id& id, const std::vector<uint8_t>& parameters = {static_cast<uint8_t>(asn1::identifier::null), 0x00})
+    explicit algorithm_id(const asn1::object_id& id, const std::vector<uint8_t>& parameters = {static_cast<uint8_t>(asn1::identifier::null), 0x00})
         : id_(id)
         , parameters_(parameters) {
         assert(null_parameters());
@@ -146,6 +148,8 @@ struct tbs_certificate {
     asn1::bit_string       subject_public_key;
     std::vector<extension> extensions; // Only present in v3
 };
+std::ostream& operator<<(std::ostream& os, const tbs_certificate& c);
+tbs_certificate parse_tbs_certificate(const asn1::der_encoded_value& repr);
 
 struct certificate {
 public:

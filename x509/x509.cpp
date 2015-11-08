@@ -341,26 +341,28 @@ std::ostream& operator<<(std::ostream& os, const extension& e)
     return os << "<Extension " << e.id << (e.critical ? "! " : "  ") << util::base16_encode(e.value.as_vector()) << ">";
 }
 
-std::ostream& operator<<(std::ostream& os, const certificate& cert)
+std::ostream& operator<<(std::ostream& os, const tbs_certificate& c)
 {
-    auto c = cert.tbs();
     os << "Certificate " << c.version << ":\n";
     os << " Serial number: 0x" << util::base16_encode(c.serial_number.as_vector()) << "\n";
-    assert(c.signature_algorithm == cert.signature_algorithm());
     os << " Signature algorithm: " << c.signature_algorithm << "\n";
     os << " Issuer: " << c.issuer << "\n";
     os << " Validity: Between " << c.validity_not_before << " and " << c.validity_not_after << "\n";
     os << " Subject: " << c.subject << "\n";
     os << " Subject public key algorithm: " << c.subject_public_key_algo << "\n";
-    bool first = true;
-    for (const auto ext : c.extensions) {
-        if (first) {
-            os << "Extensions:\n";
-            first = false;
+    if (!c.extensions.empty()) {
+        os << "Extensions:\n";
+        for (const auto ext : c.extensions) {
+            os << " " << ext << "\n";
         }
-        os << " " << ext << "\n";
     }
     return os;
+}
+
+std::ostream& operator<<(std::ostream& os, const certificate& cert)
+{
+    assert(cert.tbs().signature_algorithm == cert.signature_algorithm());
+    return os << cert.tbs();
 }
 
 tbs_certificate parse_tbs_certificate(const asn1::der_encoded_value& repr)

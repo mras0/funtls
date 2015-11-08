@@ -420,7 +420,8 @@ ssh_client::ssh_client(const char* host, const char* port, const char* user_name
 
         const auto calced_hash = hash::sha1{}.input(H).result();
         auto di = x509::pkcs1_decode(parse_rsa_key(K_S), parse_rsa_sig(sig_H));
-        FUNTLS_CHECK_BINARY(di.digest_algorithm(), ==, x509::id_sha1, "Invalid hash algorithm");
+        FUNTLS_CHECK_BINARY(di.digest_algorithm().id(), ==, x509::id_sha1, "Invalid hash algorithm");
+        FUNTLS_CHECK_BINARY(di.digest_algorithm().null_parameters(), ==, true, "Invalid hash algorithm");
         std::cout << "H received " << util::base16_encode(di.digest()) << std::endl;
         std::cout << "H calced   " << util::base16_encode(calced_hash) << std::endl;
         if (calced_hash != di.digest()) {

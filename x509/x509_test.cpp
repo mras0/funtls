@@ -208,7 +208,8 @@ void test_pkey()
 {
     auto pki = x509::read_pem_private_key_from_string(test_pkey0);
     FUNTLS_ASSERT_EQUAL(0,                      pki.version.as<int>());
-    FUNTLS_ASSERT_EQUAL(x509::id_rsaEncryption, pki.algorithm);
+    FUNTLS_ASSERT_EQUAL(x509::id_rsaEncryption, pki.algorithm.id());
+    FUNTLS_ASSERT_EQUAL(true,                   pki.algorithm.null_parameters());
 
     auto pkey = x509::rsa_private_key_from_pki(pki);
 
@@ -240,7 +241,7 @@ void test_pkey()
         0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14 };
     const auto e1_msg = x509::pkcs1_encode(pkey, msg);
     auto di = x509::pkcs1_decode(pub, e1_msg);
-    FUNTLS_ASSERT_EQUAL(x509::id_sha1, di.digest_algorithm());
+    FUNTLS_ASSERT_EQUAL(x509::id_sha1, di.digest_algorithm().id());
     FUNTLS_ASSERT_EQUAL((std::vector<uint8_t>{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14}), di.digest());
 
     const auto e2_msg = x509::pkcs1_encode(pub, msg);

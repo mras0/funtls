@@ -240,7 +240,8 @@ rsa_private_key rsa_private_key::parse(const asn1::der_encoded_value& repr)
 rsa_private_key rsa_private_key_from_pki(const private_key_info& pki)
 {
     FUNTLS_CHECK_BINARY(pki.version.as<int>(), ==, 0, "Unsupported private key version");
-    FUNTLS_CHECK_BINARY(pki.algorithm, ==, x509::id_rsaEncryption, "Invalid private key algorithm");
+    FUNTLS_CHECK_BINARY(pki.algorithm.id(), ==, x509::id_rsaEncryption, "Invalid private key algorithm");
+    FUNTLS_CHECK_BINARY(pki.algorithm.null_parameters(), ==, true, "Invalid private key algorithm parameters");
 
     auto key_data = pki.key.as_vector();
     util::buffer_view key_buf(key_data.data(), key_data.size());

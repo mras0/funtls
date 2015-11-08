@@ -394,7 +394,7 @@ private:
         append_to_buffer(digest_buf, server_random);
         append_to_buffer(digest_buf, params);
 
-        const auto seq_buf = asn1::serialized(x509::digest_info{x509::id_sha256, hash::sha256{}.input(digest_buf).result()});
+        const auto seq_buf = asn1::serialized(x509::digest_info{x509::algorithm_id{x509::id_sha256}, hash::sha256{}.input(digest_buf).result()});
 
         signed_signature signature;
         signature.hash_algorithm      = hash_algorithm::sha256;
@@ -463,7 +463,7 @@ private:
         append_to_buffer(digest_buf, client_random);
         append_to_buffer(digest_buf, server_random);
         append_to_buffer(digest_buf, params);
-        const auto seq_buf = asn1::serialized(x509::digest_info{x509::id_sha256, hash::sha256{}.input(digest_buf).result()});
+        const auto seq_buf = asn1::serialized(x509::digest_info{x509::algorithm_id{x509::id_sha256}, hash::sha256{}.input(digest_buf).result()});
         signature.value               = x509::pkcs1_encode(server_id_.private_key(), seq_buf);
 
         return std::make_unique<handshake>(make_handshake(server_key_exchange_ec_dhe{params, signature}));
@@ -556,7 +556,7 @@ AZokDceX95yJnwKqa6SzgQ==
 
     auto pki = x509::read_pem_private_key_from_string(private_key);
     assert(pki.version.as<int>() == 0);
-    assert(pki.algorithm == x509::id_rsaEncryption);
+    assert(pki.algorithm.id() == x509::id_rsaEncryption);
 
     return tls::rsa_server_id{{util::base64_decode(certificate, sizeof(certificate)-1)}, x509::rsa_private_key_from_pki(pki)};
 }
