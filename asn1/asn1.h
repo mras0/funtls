@@ -257,6 +257,8 @@ public:
         return repr_;
     }
 
+    void serialize(std::vector<uint8_t>& buf) const;
+
 private:
     std::vector<uint8_t> repr_;
     uint8_t              excess_bits_;
@@ -334,6 +336,8 @@ public:
     std::string as_string() const {
         return repr_;
     }
+
+    void serialize(std::vector<uint8_t>& buf) const;
 private:
     std::string repr_;
 

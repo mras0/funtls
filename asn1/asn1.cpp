@@ -11,6 +11,19 @@
 
 namespace {
 
+template<typename C>
+void serialize_helper(std::vector<uint8_t>& buf, funtls::asn1::identifier id, const C& data)
+{
+    static_assert(sizeof(*data.begin()) == 1, "Invalid container");
+    buf.push_back(static_cast<uint8_t>(id));
+    if (data.size() < 0x80) {
+        buf.push_back(static_cast<uint8_t>(data.size()));
+    } else {
+        FUNTLS_CHECK_FAILURE("Not implemented");
+    }
+    buf.insert(buf.end(), data.begin(), data.end());
+}
+
 static int utc_time_get_digit(char d) {
     if (d < '0' || d > '9') throw std::runtime_error("Invalid digit found in UTC time: " + std::string(1, d));
     return d - '0';
@@ -164,10 +177,7 @@ void integer::do_check_size(size_t int_type_size, size_t octet_count)
 
 void integer::serialize(std::vector<uint8_t>& buf) const
 {
-    FUNTLS_CHECK_BINARY(repr_.size(), <, 0x80, "Not implemented");
-    buf.push_back(static_cast<uint8_t>(id));
-    buf.push_back(static_cast<uint8_t>(repr_.size()));
-    buf.insert(buf.end(), repr_.begin(), repr_.end());
+    serialize_helper(buf, id, repr_);
 }
 
 bit_string::bit_string(const der_encoded_value& repr)
@@ -189,6 +199,13 @@ const std::vector<uint8_t>& bit_string::as_vector() const
 {
     FUNTLS_CHECK_BINARY(excess_bits_, ==, 0, "Bit string has excess bits");
     return repr_;
+}
+
+void bit_string::serialize(std::vector<uint8_t>& buf) const
+{
+    std::vector<uint8_t> temp = repr_;
+    temp.insert(temp.begin(), excess_bits_);
+    serialize_helper(buf, id, temp);
 }
 
 object_id::object_id(const der_encoded_value& repr)
@@ -336,6 +353,11 @@ void utc_time::validate(const std::string& s)
     (void) tz;
 }
 
+void utc_time::serialize(std::vector<uint8_t>& buf) const
+{
+    serialize_helper(buf, id, repr_);
+}
+
 std::ostream& operator<<(std::ostream& os, const utc_time& t) {
 #if 0
         auto fill = os.fill();
@@ -357,13 +379,7 @@ std::ostream& operator<<(std::ostream& os, const raw_string& s)
 
 void raw_string::do_serialize(identifier::tag id, std::vector<uint8_t>& buf) const
 {
-    buf.push_back(static_cast<uint8_t>(id));
-    if (repr_.size() < 0x80) {
-        buf.push_back(static_cast<uint8_t>(repr_.size()));
-    } else {
-        FUNTLS_CHECK_FAILURE("Not implemented");
-    }
-    buf.insert(buf.end(), repr_.begin(), repr_.end());
+    serialize_helper(buf, id, repr_);
 }
 
 } } // namespace funtls::asn1

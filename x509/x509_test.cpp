@@ -317,7 +317,43 @@ void test_serialization()
         FUNTLS_ASSERT_EQUAL(x509::name{asn1::read_der_encoded_value(name_view)} , name);
     }
 
-    // TODO: Test tbs_certificate.serialize()
+    {
+        x509::name subject{{std::make_pair(x509::attr_commonName, asn1::ia5_string{"localhost"})}};
+        x509::name issuer{{std::make_pair(x509::attr_countryName, asn1::ia5_string{"foobar"})}};
+
+        const asn1::utc_time not_before{"1511080000Z"};
+        const asn1::utc_time not_after{"2511080000Z"};
+        const asn1::bit_string subject_public_key{std::vector<uint8_t>{1,2,3}};
+
+        x509::tbs_certificate tbs{
+            x509::version::v3,                                    // version
+            asn1::integer::from_bytes({0x01}),                    // serial_number
+            x509::algorithm_id{x509::id_sha256WithRSAEncryption}, // signature_algorithm
+            issuer,                                               // issuer
+            not_before,                                           // validity_not_before
+            not_after,                                            // validity_not_after
+            subject,                                              // subect
+            x509::algorithm_id{x509::id_rsaEncryption},           // subject_public_key_algo
+            subject_public_key,                                   // subject_public_key
+            {} // extensions
+        };
+
+        const auto tbs_bytes = asn1::serialized(tbs);
+        util::buffer_view view{tbs_bytes.data(), tbs_bytes.size()};
+        auto read_tbs = x509::parse_tbs_certificate(asn1::read_der_encoded_value(view));
+
+        FUNTLS_ASSERT_EQUAL(x509::version::v3, read_tbs.version);
+        FUNTLS_ASSERT_EQUAL(1, read_tbs.serial_number.as<int>());
+        FUNTLS_ASSERT_EQUAL(x509::id_sha256WithRSAEncryption, read_tbs.signature_algorithm.id());
+        FUNTLS_ASSERT_EQUAL(true, read_tbs.signature_algorithm.null_parameters());
+        FUNTLS_ASSERT_EQUAL(subject, read_tbs.subject);
+        FUNTLS_ASSERT_EQUAL(not_before.as_string(), read_tbs.validity_not_before.as_string());
+        FUNTLS_ASSERT_EQUAL(not_after.as_string(), read_tbs.validity_not_after.as_string());
+        FUNTLS_ASSERT_EQUAL(issuer, read_tbs.issuer);
+        FUNTLS_ASSERT_EQUAL(x509::id_rsaEncryption, read_tbs.subject_public_key_algo.id());
+        FUNTLS_ASSERT_EQUAL(true, read_tbs.subject_public_key_algo.null_parameters());
+        FUNTLS_ASSERT_EQUAL(true, read_tbs.extensions.empty());
+    }
 }
 
 #include "test_cert4.h"
@@ -344,10 +380,10 @@ int main()
 {
     // TODO: Check x509::name equals operations. Only exact matches should be allowed (with order being important) etc.
     try {
-        test_serialization(); // TODO: Move down
         test_cert();
         test_cert_extensions();
         test_pkey();
+        test_serialization();
     } catch (const std::exception& e) {
         std::cerr << e.what() << std::endl;
         return 1;

@@ -364,23 +364,21 @@ void tbs_certificate::serialize(std::vector<uint8_t>& buf) const
 {
     std::vector<uint8_t> extensions_buffer;
     assert(extensions.empty());
-    (void)buf;
-    FUNTLS_CHECK_FAILURE("Not implemented");
-    /*
 
     asn1::serialize_sequence(buf, asn1::identifier::constructed_sequence,
         version,
         serial_number,
         signature_algorithm,
         issuer,
-        validity_not_before,
-        validity_not_after,
+        asn1::serialized_sequence(asn1::identifier::constructed_sequence, // Validity
+            validity_not_before,
+            validity_not_after),
         subject,
-        subject_public_key_algo,
-        subject_public_key,
+        asn1::serialized_sequence(asn1::identifier::constructed_sequence, // SubjectPublicKeyInfo
+            subject_public_key_algo,
+            subject_public_key),
         extensions_buffer
         );
-        */
 }
 
 

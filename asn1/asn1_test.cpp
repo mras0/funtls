@@ -36,13 +36,19 @@ T from_bytes(const std::vector<uint8_t>& d)
     return T{value_from_bytes(bytes)};
 }
 
+template<typename T>
+T from_str(const std::string& s)
+{
+    return from_bytes<T>(std::vector<uint8_t>(s.begin(), s.end()));
+}
+
 std::ostream& operator<<(std::ostream& os, const std::vector<uint8_t>& v) {
     return os << util::base16_encode(v);
 }
 
 #include <int_util/int.h>
 
-int main()
+void test_asn1()
 {
     using namespace util;
     using namespace asn1;
@@ -214,5 +220,50 @@ int main()
         FUNTLS_ASSERT_EQUAL(6, from_bytes<bit_string>({0x06, 0x6e, 0x5d, 0xc0}).excess_bits());
         FUNTLS_ASSERT_EQUAL(18, from_bytes<bit_string>({0x06, 0x6e, 0x5d, 0xc0}).bit_count());
         FUNTLS_ASSERT_EQUAL((std::vector<uint8_t>{0x6e, 0x5d, 0xc0}), from_bytes<bit_string>({0x06, 0x6e, 0x5d, 0xc0}).repr());
+
+        FUNTLS_ASSERT_EQUAL((std::vector<uint8_t>{0x03, 0x03, 0x00, 0xff, 0x80}), serialized(bit_string{std::vector<uint8_t>{0xff,0x80}}));
     }
+
+    //
+    // UTC TIME
+    //
+    {
+        // TODO: Improve testing of both valid dates and error cases
+        const char* const bad_dates[] ={
+            "",
+            "151108227Z1",
+            //"1511082227Z1", // Timezone isn't checked yet
+            //"1502290000Z", // Dates aren't validated (No 29th of february in 2015)
+        };
+        for (auto d : bad_dates) {
+            FUNTLS_ASSERT_THROWS_MESSAGE(from_str<utc_time>(d), std::runtime_error, d);
+        }
+        const char* const good_dates[] = {
+            "1511082227Z",
+            "151108222712Z",
+            "1412011211+0500",
+            "1412011211-0400",
+            "141201121100-0015",
+            "141201121100+0500"
+        };
+        for (auto d : good_dates) {
+            FUNTLS_ASSERT_EQUAL(from_str<utc_time>(d).as_string(), d);
+            const auto s = serialized(utc_time{d});
+            const auto dlen = strlen(d);
+            std::vector<uint8_t> expected_serialized{0x17, static_cast<uint8_t>(dlen)};
+            expected_serialized.insert(expected_serialized.end(), d, d+dlen);
+            FUNTLS_ASSERT_EQUAL(s, expected_serialized);
+        }
+    }
+}
+
+int main()
+{
+    try {
+        test_asn1();
+    } catch (const std::runtime_error& e) {
+        std::cerr << e.what() << std::endl;
+        return 1;
+    }
+    return 0;
 }
