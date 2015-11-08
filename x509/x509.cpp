@@ -118,6 +118,14 @@ std::ostream& operator<<(std::ostream& os, const attribute_type& attr)
     return os << "AttributeType<" << static_cast<asn1::object_id>(attr) << ">";
 }
 
+void version::serialize(std::vector<uint8_t>& buf) const
+{
+    asn1::serialize_sequence(buf, x509_version_tag, asn1::integer::from_bytes(std::vector<uint8_t>{static_cast<uint8_t>(tag_)}));
+}
+
+version::version(const asn1::der_encoded_value& repr) : tag_(read_version_tag(repr)) {
+}
+
 std::ostream& operator<<(std::ostream& os, const version& ver)
 {
     switch (ver.tag()) {
@@ -133,6 +141,17 @@ std::ostream& operator<<(std::ostream& os, const version& ver)
 name::name(const asn1::der_encoded_value& repr)
     : attributes_(parse_name_attributes(repr))
 {
+}
+
+void name::serialize(std::vector<uint8_t>& buf) const {
+
+    std::vector<uint8_t> attr_buffer;
+    for (const auto& a : attributes_) {
+        asn1::serialize_sequence(attr_buffer, asn1::identifier::constructed_sequence, a.first, a.second);
+    }
+
+    asn1::serialize_sequence(buf, asn1::identifier::constructed_sequence,
+        asn1::serialized_sequence(asn1::identifier::constructed_set, attr_buffer));
 }
 
 std::ostream& operator<<(std::ostream& os, const name& n)
@@ -341,6 +360,30 @@ std::ostream& operator<<(std::ostream& os, const extension& e)
     return os << "<Extension " << e.id << (e.critical ? "! " : "  ") << util::base16_encode(e.value.as_vector()) << ">";
 }
 
+void tbs_certificate::serialize(std::vector<uint8_t>& buf) const
+{
+    std::vector<uint8_t> extensions_buffer;
+    assert(extensions.empty());
+    (void)buf;
+    FUNTLS_CHECK_FAILURE("Not implemented");
+    /*
+
+    asn1::serialize_sequence(buf, asn1::identifier::constructed_sequence,
+        version,
+        serial_number,
+        signature_algorithm,
+        issuer,
+        validity_not_before,
+        validity_not_after,
+        subject,
+        subject_public_key_algo,
+        subject_public_key,
+        extensions_buffer
+        );
+        */
+}
+
+
 std::ostream& operator<<(std::ostream& os, const tbs_certificate& c)
 {
     os << "Certificate " << c.version << ":\n";
@@ -357,12 +400,6 @@ std::ostream& operator<<(std::ostream& os, const tbs_certificate& c)
         }
     }
     return os;
-}
-
-std::ostream& operator<<(std::ostream& os, const certificate& cert)
-{
-    assert(cert.tbs().signature_algorithm == cert.signature_algorithm());
-    return os << cert.tbs();
 }
 
 tbs_certificate parse_tbs_certificate(const asn1::der_encoded_value& repr)
@@ -466,6 +503,13 @@ certificate certificate::parse(const asn1::der_encoded_value& repr)
     FUNTLS_CHECK_BINARY(cert_seq.has_next(), ==, false, "Extra data found at end of X509 certificate");
     return certificate{std::move(tbs_cert), std::move(tbsCertificate), std::move(sig_algo), std::move(sig_value)};
  }
+
+std::ostream& operator<<(std::ostream& os, const certificate& cert)
+{
+    assert(cert.tbs().signature_algorithm == cert.signature_algorithm());
+    return os << cert.tbs();
+}
+
 
 asn1::object_id public_key_algo_from_signature_algo(const algorithm_id& sig_algo)
 {

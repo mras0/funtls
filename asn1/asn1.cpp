@@ -162,6 +162,14 @@ void integer::do_check_size(size_t int_type_size, size_t octet_count)
     FUNTLS_CHECK_BINARY(int_type_size, >=, octet_count, "Integer out of " + std::to_string(int_type_size*8) + "-bit integer range");
 }
 
+void integer::serialize(std::vector<uint8_t>& buf) const
+{
+    FUNTLS_CHECK_BINARY(repr_.size(), <, 0x80, "Not implemented");
+    buf.push_back(static_cast<uint8_t>(id));
+    buf.push_back(static_cast<uint8_t>(repr_.size()));
+    buf.insert(buf.end(), repr_.begin(), repr_.end());
+}
+
 bit_string::bit_string(const der_encoded_value& repr)
 {
     FUNTLS_CHECK_ID(repr.id());

@@ -291,6 +291,33 @@ void test_serialization()
     FUNTLS_ASSERT_EQUAL((std::vector<uint8_t>{0x05, 0x00}), digest_info.digest_algorithm().parameters());
     FUNTLS_ASSERT_EQUAL((std::vector<uint8_t>{0x01, 0x02, 0x03, 0x04}), digest_info.digest());
     FUNTLS_ASSERT_EQUAL(digest_info_bytes, asn1::serialized(digest_info));
+
+    // version
+    {
+        std::vector<uint8_t> expected_ver_buffer{0xA0, 0x03, 0x02, 0x01, 0x02};
+        FUNTLS_ASSERT_EQUAL(expected_ver_buffer, asn1::serialized(x509::version{x509::version::v3}));
+        util::buffer_view expected_ver_buffer_view(expected_ver_buffer.data(), expected_ver_buffer.size());
+        FUNTLS_ASSERT_EQUAL(x509::version(asn1::read_der_encoded_value(expected_ver_buffer_view)), x509::version::v3);
+    }
+
+    {
+        std::vector<uint8_t> common_name_localhost_bytes = util::base16_decode("30143112301006035504030C096C6F63616C686F7374");
+        util::buffer_view common_name_localhost_view{common_name_localhost_bytes.data(), common_name_localhost_bytes.size()};
+        const x509::name common_name_localhost{asn1::read_der_encoded_value(common_name_localhost_view)};
+        const auto common_name_localhost_attr = common_name_localhost.attributes();
+        FUNTLS_ASSERT_EQUAL(common_name_localhost_attr.size(), 1);
+        FUNTLS_ASSERT_EQUAL(common_name_localhost_attr[0].first, x509::attr_commonName);
+        FUNTLS_ASSERT_EQUAL(common_name_localhost_attr[0].second, asn1::utf8_string{"localhost"});
+        FUNTLS_ASSERT_EQUAL(asn1::serialized(common_name_localhost), common_name_localhost_bytes);
+    
+        x509::name name{{std::make_pair(x509::attr_commonName, asn1::ia5_string{"Hello world"}),std::make_pair(x509::attr_countryName, asn1::ia5_string{"XQ"})}};
+        const std::vector<uint8_t> expeced_name_bytes = util::base16_decode("3021311F30120603550403160B48656C6C6F20776F726C643009060355040616025851");
+        FUNTLS_ASSERT_EQUAL(asn1::serialized(name), expeced_name_bytes);
+        util::buffer_view name_view{expeced_name_bytes.data(), expeced_name_bytes.size()};
+        FUNTLS_ASSERT_EQUAL(x509::name{asn1::read_der_encoded_value(name_view)} , name);
+    }
+
+    // TODO: Test tbs_certificate.serialize()
 }
 
 #include "test_cert4.h"
@@ -317,10 +344,10 @@ int main()
 {
     // TODO: Check x509::name equals operations. Only exact matches should be allowed (with order being important) etc.
     try {
+        test_serialization(); // TODO: Move down
         test_cert();
         test_cert_extensions();
         test_pkey();
-        test_serialization();
     } catch (const std::exception& e) {
         std::cerr << e.what() << std::endl;
         return 1;

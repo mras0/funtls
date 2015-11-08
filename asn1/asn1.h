@@ -198,6 +198,8 @@ public:
         return repr_;
     }
 
+    void serialize(std::vector<uint8_t>& buf) const;
+
     static integer from_bytes(const std::vector<uint8_t>& repr) {
         return integer{repr};
     }
@@ -407,6 +409,9 @@ public:
         return id_;
     }
 
+    void serialize(std::vector<uint8_t>& buf) const {
+        do_serialize(static_cast<identifier::tag>(static_cast<uint8_t>(id_)), buf);
+    }
 private:
     identifier id_;
 };

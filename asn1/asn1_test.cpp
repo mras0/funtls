@@ -105,6 +105,13 @@ int main()
         } else {
             assert(false);
         }
+
+        std::vector<uint8_t> int_serialized;
+        std::vector<uint8_t> expected{2, static_cast<uint8_t>(int_test_case.bytes.size())};
+        expected.insert(expected.end(), int_test_case.bytes.begin(), int_test_case.bytes.end());
+        the_int.serialize(int_serialized);
+        FUNTLS_ASSERT_EQUAL(expected, int_serialized);
+
     }
     auto large_int = from_bytes<integer>({0x7f,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff});
     FUNTLS_ASSERT_EQUAL(10, large_int.octet_count());
@@ -187,6 +194,7 @@ int main()
         // Check serialization
         FUNTLS_ASSERT_EQUAL((std::vector<uint8_t>{0x04, 0x02, 0x01, 0x02}), serialized(from_bytes<octet_string>({1,2})));
         FUNTLS_ASSERT_EQUAL((std::vector<uint8_t>{0x0C, 0x03, 'A', 'B', 'z'}), serialized(from_bytes<utf8_string>({'A','B','z'})));
+        FUNTLS_ASSERT_EQUAL((std::vector<uint8_t>{0x0C, 0x03, 'A', 'B', 'z'}), serialized(any_string{from_bytes<utf8_string>({'A','B','z'})}));
     }
 
     //

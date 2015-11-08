@@ -17,6 +17,10 @@ struct attribute_type {
         return oid_;
     }
 
+    void serialize(std::vector<uint8_t>& buf) const {
+        oid_.serialize(buf);
+    }
+
 private:
     asn1::object_id oid_;
 };
@@ -42,15 +46,19 @@ std::ostream& operator<<(std::ostream& os, const attribute_type& attr);
 
 class version {
 public:
-    enum tag { v1 = 0, v2 = 1, v3 = 2 };
+    enum tag : uint8_t { v1 = 0, v2 = 1, v3 = 2 };
 
     version(tag t = v1) : tag_(t) {
         assert(t == v1 || t == v2 || t == v3);
     }
 
+    explicit version(const asn1::der_encoded_value& repr);
+
     enum tag tag() const {
         return tag_;
     }
+
+    void serialize(std::vector<uint8_t>& buf) const;
 private:
     enum tag tag_;
 };
@@ -75,6 +83,7 @@ public:
 
     attr_type attributes() const { return attributes_; }
 
+    void serialize(std::vector<uint8_t>& buf) const;
 private:
     attr_type attributes_;
 };
@@ -147,6 +156,8 @@ struct tbs_certificate {
     algorithm_id           subject_public_key_algo;
     asn1::bit_string       subject_public_key;
     std::vector<extension> extensions; // Only present in v3
+
+    void serialize(std::vector<uint8_t>& buf) const;
 };
 std::ostream& operator<<(std::ostream& os, const tbs_certificate& c);
 tbs_certificate parse_tbs_certificate(const asn1::der_encoded_value& repr);
