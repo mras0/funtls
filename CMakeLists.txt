@@ -10,16 +10,22 @@ add_custom_target(check COMMAND ${CMAKE_CTEST_COMMAND} --force-new-ctest-process
 if (MSVC)
     set(CMAKE_CONFIGURATION_TYPES "Debug;Release" CACHE STRING "Supported build configurations" FORCE)
 
-    add_definitions("/W4")
-    add_definitions("/wd4127") # C4127: conditional expression is constant
-
-    add_definitions("-D__PRETTY_FUNCTION__=__func__")
-    add_definitions("-D_SCL_SECURE_NO_WARNINGS")
-    add_definitions("-DUNICODE -D_UNICODE")
+    # Reset flags
+    set(CMAKE_CXX_FLAGS "/EHsc")
+    set(CMAKE_CXX_FLAGS_DEBUG "/MTd /Od /D_DEBUG")
+    set(CMAKE_CXX_FLAGS_RELEASE "/MT /O2 /DNDEBUG")
 
     # Always include debug information
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zi /Zo")
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /DEBUG")
+
+    add_definitions("/W4")
+    add_definitions("/wd4127") # C4127: conditional expression is constant
+
+    add_definitions("-DWIN32")
+    add_definitions("-D__PRETTY_FUNCTION__=__func__")
+    add_definitions("-D_SCL_SECURE_NO_WARNINGS")
+    add_definitions("-DUNICODE -D_UNICODE")
 else()
     set(use_asan   TRUE  CACHE BOOL "Use address sanitizier")
     set(use_tsan   FALSE CACHE BOOL "Use thread sanitizier")
@@ -55,9 +61,9 @@ else()
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14 ${common_flags}")
 endif()
 
-set(use_bigint FALSE CACHE BOOL "Use funtls bigint implmentation")
+set(use_bigint TRUE CACHE BOOL "Use funtls bigint implmentation")
 if (use_bigint)
-    message("Using funtls bigint - EXPERIMENTAL")
+    message("Using funtls bigint")
     add_definitions("-DUSE_FUNTLS_BIGINT")
 endif()
 

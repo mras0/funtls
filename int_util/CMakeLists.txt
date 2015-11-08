@@ -1,7 +1,7 @@
 project(int_util)
 
 include_directories(${int_util_SOURCE_DIR})
-add_library(int_util STATIC int_util.cpp)
+add_library(int_util STATIC int.h int_util.cpp int_util.h)
 target_link_libraries(int_util util)
 if (use_bigint)
     target_link_libraries(int_util bigint)

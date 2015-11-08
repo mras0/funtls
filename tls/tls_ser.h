@@ -1,4 +1,5 @@
 #include <util/buffer.h>
+#include <util/test.h>
 
 namespace funtls { namespace tls {
 
@@ -48,12 +49,33 @@ inline void append_to_buffer(std::vector<uint8_t>& buffer, const uint8 (&item)[B
     buffer.insert(buffer.end(), item, item+ByteCount);
 }
 
+namespace detail {
+
 template<typename T, size_t LowerBoundInBytes, size_t UpperBoundInBytes>
-inline void append_to_buffer(std::vector<uint8_t>& buffer, const vector<T, LowerBoundInBytes, UpperBoundInBytes>& item) {
+inline void append_vector_to_buffer(std::vector<uint8_t>& buffer, const vector<T, LowerBoundInBytes, UpperBoundInBytes>& item, std::false_type) {
     append_to_buffer(buffer, item.byte_count());
     for (size_t i = 0, sz = item.size(); i < sz; ++i) {
         append_to_buffer(buffer, item[i]);
     }
+}
+
+template<typename T, size_t LowerBoundInBytes, size_t UpperBoundInBytes>
+inline void append_vector_to_buffer(std::vector<uint8_t>& buffer, const vector<T, LowerBoundInBytes, UpperBoundInBytes>& item, std::true_type) {
+    std::vector<uint8_t> items_buffer;
+    for (const auto& subitem : item) {
+        append_to_buffer(items_buffer, subitem);
+    }
+    FUNTLS_CHECK_BINARY(items_buffer.size(), >=, LowerBoundInBytes, "Internal error: tls::vector contains too little data");
+    FUNTLS_CHECK_BINARY(items_buffer.size(), <=, UpperBoundInBytes, "Internal error: tls::vector contains too much data");
+    append_to_buffer(buffer, vector<T, LowerBoundInBytes, UpperBoundInBytes>::serialized_size_type(items_buffer.size()));
+    append_to_buffer(buffer, items_buffer);
+}
+
+} // namespace detail
+
+template<typename T, size_t LowerBoundInBytes, size_t UpperBoundInBytes>
+inline void append_to_buffer(std::vector<uint8_t>& buffer, const vector<T, LowerBoundInBytes, UpperBoundInBytes>& item) {
+    detail::append_vector_to_buffer(buffer, item, std::integral_constant<bool, item.is_complex>{});
 }
 
 inline void append_to_buffer(std::vector<uint8_t>& buffer, const std::vector<uint8_t>& item) {
@@ -75,6 +97,17 @@ inline void append_to_buffer(std::vector<uint8_t>& buffer, const extension& item
     append_to_buffer(buffer, item.data);
 }
 
+template<typename ExtensionType>
+inline ExtensionType get_as(const extension& e) {
+    FUNTLS_CHECK_BINARY(e.type, ==, ExtensionType::extension_type, "Unexpected extension type");
+    const auto& data = e.data.as_vector();
+    util::buffer_view data_buffer{data.data(), data.size()};
+    ExtensionType inner;
+    from_bytes(inner, data_buffer);
+    FUNTLS_CHECK_BINARY(data_buffer.remaining(), ==, 0, "Unread data in extension of type " + std::to_string(int(ExtensionType::extension_type)));
+    return inner;
+}
+
 inline void append_to_buffer(std::vector<uint8_t>& buffer, const client_hello& item) {
     append_to_buffer(buffer, item.client_version);
     append_to_buffer(buffer, item.random);
@@ -83,13 +116,7 @@ inline void append_to_buffer(std::vector<uint8_t>& buffer, const client_hello& i
     append_to_buffer(buffer, item.compression_methods);
 
     if (!item.extensions.empty()) {
-        std::vector<uint8_t> extension_buf;
-        for (const auto& ext : item.extensions) {
-            append_to_buffer(extension_buf, ext);
-        }
-        assert(extension_buf.size() < 65535);
-        append_to_buffer(buffer, uint16(extension_buf.size()));
-        append_to_buffer(buffer, extension_buf);
+        append_to_buffer(buffer, item.extensions);
     }
 }
 
@@ -101,13 +128,7 @@ inline void append_to_buffer(std::vector<uint8_t>& buffer, const server_hello& i
     append_to_buffer(buffer, item.compression_method);
 
     if (!item.extensions.empty()) {
-        std::vector<uint8_t> extension_buf;
-        for (const auto& ext : item.extensions) {
-            append_to_buffer(extension_buf, ext);
-        }
-        assert(extension_buf.size() < 65535);
-        append_to_buffer(buffer, uint16(extension_buf.size()));
-        append_to_buffer(buffer, extension_buf);
+        append_to_buffer(buffer, item.extensions);
     }
 }
 
@@ -162,7 +183,6 @@ inline void append_to_buffer(std::vector<uint8_t>& buffer, const server_key_exch
 
 inline void append_to_buffer(std::vector<uint8_t>& buffer, const handshake& item) {
     append_to_buffer(buffer, item.type);
-    append_to_buffer(buffer, handshake::body_length_type(static_cast<uint32_t>(item.body.size())));
     append_to_buffer(buffer, item.body);
 }
 
@@ -203,18 +223,43 @@ inline void from_bytes(uint8 (&item)[ByteCount], util::buffer_view& buffer) {
     buffer.read(item, ByteCount);
 }
 
-template<typename T, size_t LowerBoundInBytes, size_t UpperBoundInBytes>
-inline void from_bytes(vector<T, LowerBoundInBytes, UpperBoundInBytes>& item, util::buffer_view& buffer) {
-    typename smallest_possible_uint<8*log256(UpperBoundInBytes)>::type byte_count;
-    from_bytes(byte_count, buffer);
-    if (byte_count < LowerBoundInBytes) throw std::runtime_error("Byte count " + std::to_string(byte_count) + " < " + std::to_string(LowerBoundInBytes));
-    if (byte_count > UpperBoundInBytes) throw std::runtime_error("Byte count " + std::to_string(byte_count) + " > " + std::to_string(UpperBoundInBytes));
-    if (byte_count % sizeof(T)) throw std::runtime_error("Byte count " + std::to_string(byte_count) + " % " + std::to_string(sizeof(T)));
+namespace detail {
+
+template<typename T, size_t LowerBoundInBytes, size_t UpperBoundInBytes, typename ByteCountType>
+void vector_from_bytes(vector<T, LowerBoundInBytes, UpperBoundInBytes>& item, util::buffer_view& buffer, ByteCountType byte_count, std::false_type)
+{
+    FUNTLS_CHECK_BINARY(byte_count % sizeof(T), ==, 0, "Invalid byte count for tls::vector");
     std::vector<T> data(byte_count / sizeof(T));
     for (auto& subitem : data) {
         from_bytes(subitem, buffer);
     }
     item = vector<T, LowerBoundInBytes, UpperBoundInBytes>{data};
+}
+
+
+template<typename T, size_t LowerBoundInBytes, size_t UpperBoundInBytes, typename ByteCountType>
+void vector_from_bytes(vector<T, LowerBoundInBytes, UpperBoundInBytes>& item, util::buffer_view& buffer, ByteCountType byte_count, std::true_type)
+{
+    const auto expected_remaining = buffer.remaining() - byte_count;
+    std::vector<T> items;
+    while (buffer.remaining() > expected_remaining) {
+        T subitem;
+        from_bytes(subitem, buffer);
+        items.push_back(std::move(subitem));
+    }
+    FUNTLS_CHECK_BINARY(buffer.remaining(), ==, expected_remaining, "Error deserializing tls::vector - too much data read");
+    item = items;
+}
+} // namespace detail
+
+template<typename T, size_t LowerBoundInBytes, size_t UpperBoundInBytes>
+inline void from_bytes(vector<T, LowerBoundInBytes, UpperBoundInBytes>& item, util::buffer_view& buffer) {
+    typename smallest_possible_uint<8*log256(UpperBoundInBytes)>::type byte_count;
+    from_bytes(byte_count, buffer);
+    FUNTLS_CHECK_BINARY(byte_count, >=, LowerBoundInBytes, "Invalid byte count for tls::vector");
+    FUNTLS_CHECK_BINARY(byte_count, <=, UpperBoundInBytes, "Invalid byte count for tls::vector");
+    FUNTLS_CHECK_BINARY(buffer.remaining(), >=, byte_count, "Not enough data in buffer for tls::vector");
+    detail::vector_from_bytes(item, buffer, byte_count, std::integral_constant<bool, item.is_complex>{});
 }
 
 inline void from_bytes(alert& item, util::buffer_view& buffer) {
@@ -249,20 +294,9 @@ inline void from_bytes(client_hello& item, util::buffer_view& buffer) {
     from_bytes(item.session_id, buffer);
     from_bytes(item.cipher_suites, buffer);
     from_bytes(item.compression_methods, buffer);
+    item.extensions.clear();
     if (buffer.remaining()) {
-        // Extensions
-        uint16 bytes;
-        from_bytes(bytes, buffer);
-        // TODO: Better length validation
-        if (bytes != buffer.remaining()) {
-            throw std::runtime_error("Invalid ServerHello extensions list length got " + std::to_string(bytes) + " expected " + std::to_string(buffer.remaining()));
-        }
-        assert(item.extensions.empty());
-        while (buffer.remaining()) {
-            extension e;
-            from_bytes(e, buffer);
-            item.extensions.push_back(e);
-        }
+        from_bytes(item.extensions, buffer);
     }
 }
 
@@ -272,22 +306,10 @@ inline void from_bytes(server_hello& item, util::buffer_view& buffer) {
     from_bytes(item.session_id, buffer);
     from_bytes(item.cipher_suite, buffer);
     from_bytes(item.compression_method, buffer);
-    if (buffer.remaining()) {
-        // Extensions
-        assert(item.server_version == protocol_version_tls_1_2);
 
-        uint16 bytes;
-        from_bytes(bytes, buffer);
-        // TODO: Better length validation
-        if (bytes != buffer.remaining()) {
-            throw std::runtime_error("Invalid ServerHello extensions list length got " + std::to_string(bytes) + " expected " + std::to_string(buffer.remaining()));
-        }
-        assert(item.extensions.empty());
-        while (buffer.remaining()) {
-            extension e;
-            from_bytes(e, buffer);
-            item.extensions.push_back(e);
-        }
+    item.extensions.clear();
+    if (buffer.remaining()) {
+        from_bytes(item.extensions, buffer);
     }
 }
 
@@ -302,7 +324,7 @@ inline void from_bytes(certificate& item, util::buffer_view& buffer) {
         uint24 cert_length;
         from_bytes(cert_length, buffer);
         //std::cout << " Found certificate of length " << cert_length << "\n";
-        if (!cert_length) throw std::runtime_error("Empty certificate found");
+        FUNTLS_CHECK_BINARY(cert_length, !=, 0U, "Empty certifate found");
         std::vector<uint8> cert_data(cert_length);
         buffer.read(&cert_data[0], cert_data.size());
         certificate_list.emplace_back(std::move(cert_data));
@@ -347,16 +369,8 @@ inline void from_bytes(finished& item, util::buffer_view& buffer) {
 }
 
 inline void from_bytes(handshake& item, util::buffer_view& buffer) {
-    handshake_type              type;
-    handshake::body_length_type body_length;
-    std::vector<uint8>          body;
-    from_bytes(type, buffer);
-    from_bytes(body_length, buffer);
-    body.resize(body_length);
-    if (body_length) {
-        buffer.read(&body[0], body.size());
-    }
-    item = handshake{type, body};
+    from_bytes(item.type, buffer);
+    from_bytes(item.body, buffer);
 }
 
 template<typename HandshakeType>
@@ -364,7 +378,8 @@ inline HandshakeType get_as(const handshake& h) {
     if (h.type != HandshakeType::handshake_type) {
         throw std::runtime_error("Expected handshake of type " + std::to_string(int(HandshakeType::handshake_type)) + " got " + std::to_string(int(h.type)));
     }
-    util::buffer_view body_buffer{h.body.data(), h.body.size()};
+    const auto& body = h.body;
+    util::buffer_view body_buffer{body.data(), body.size()};
     HandshakeType inner;
     from_bytes(inner, body_buffer);
     if (body_buffer.remaining()) {
@@ -385,12 +400,51 @@ inline void append_to_buffer(std::vector<uint8_t>& buffer, const signature_and_h
     append_to_buffer(buffer, item.signature);
 }
 
-using supported_signature_algorithms_list = vector<signature_and_hash_algorithm, 2, (1<<16)-2>;
+inline void from_bytes(signature_and_hash_algorithm& item, util::buffer_view& buffer) {
+    from_bytes(item.hash, buffer);
+    from_bytes(item.signature, buffer);
+}
 
-inline extension make_supported_signature_algorithms(const supported_signature_algorithms_list& supported_signature_algorithms) {
-    std::vector<uint8_t> buf;
-    append_to_buffer(buf, supported_signature_algorithms);
-    return extension{extension::signature_algorithms, buf};
+inline void append_to_buffer(std::vector<uint8_t>& buffer, const server_name& item) {
+    append_to_buffer(buffer, item.name_type);
+    append_to_buffer(buffer, item.name);
+}
+
+inline void from_bytes(server_name& item, util::buffer_view& buffer) {
+    from_bytes(item.name_type, buffer);
+    from_bytes(item.name, buffer);
+}
+
+inline void append_to_buffer(std::vector<uint8_t>& buffer, const server_name_extension& item) {
+    append_to_buffer(buffer, item.server_name_list);
+}
+
+inline void from_bytes(server_name_extension& item, util::buffer_view& buffer) {
+    from_bytes(item.server_name_list, buffer);
+}
+
+inline void append_to_buffer(std::vector<uint8_t>& buffer, const signature_algorithms_extension& item) {
+    append_to_buffer(buffer, item.supported_signature_algorithms_list);
+}
+
+inline void from_bytes(signature_algorithms_extension& item, util::buffer_view& buffer) {
+    from_bytes(item.supported_signature_algorithms_list, buffer);
+}
+
+inline void append_to_buffer(std::vector<uint8_t>& buffer, const application_layer_protocol_negotiation_extension::protocol_name& item) {
+    append_to_buffer(buffer, item.name);
+}
+
+inline void from_bytes(application_layer_protocol_negotiation_extension::protocol_name& item, util::buffer_view& buffer) {
+    from_bytes(item.name, buffer);
+}
+
+inline void append_to_buffer(std::vector<uint8_t>& buffer, const application_layer_protocol_negotiation_extension& item) {
+    append_to_buffer(buffer, item.protocol_name_list);
+}
+
+inline void from_bytes(application_layer_protocol_negotiation_extension& item, util::buffer_view& buffer) {
+    from_bytes(item.protocol_name_list, buffer);
 }
 
 inline std::vector<uint8_t> verification_buffer(uint64_t seq_no, content_type content_type, protocol_version version, uint16 length)

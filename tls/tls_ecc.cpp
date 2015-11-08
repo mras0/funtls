@@ -44,6 +44,40 @@ void append_to_buffer(std::vector<uint8_t>& buffer, const ec_parameters& item) {
     append_to_buffer(buffer, item.named_curve);
 }
 
+void from_bytes(elliptic_curves_extension& item, util::buffer_view& buffer) {
+    from_bytes(item.elliptic_curve_list, buffer);
+}
+
+void append_to_buffer(std::vector<uint8_t>& buffer, const elliptic_curves_extension& item) {
+    append_to_buffer(buffer, item.elliptic_curve_list);
+}
+
+std::ostream& operator<<(std::ostream& os, const elliptic_curves_extension& ext) {
+    return os << ext.extension_type << " " << ext.elliptic_curve_list;
+}
+
+std::ostream& operator<<(std::ostream& os, ec_point_format pf) {
+    switch (pf) {
+    case ec_point_format::uncompressed: return os << "uncompressed";
+    case ec_point_format::ansiX962_compressed_prime: return os << "ansiX962_compressed_prime";
+    case ec_point_format::ansiX962_compressed_char2: return os << "ansiX962_compressed_char2";
+    }
+    assert(false);
+    return os;
+}
+
+void from_bytes(ec_point_formats_extension& item, util::buffer_view& buffer) {
+    from_bytes(item.ec_point_format_list, buffer);
+}
+
+void append_to_buffer(std::vector<uint8_t>& buffer, const ec_point_formats_extension& item) {
+    append_to_buffer(buffer, item.ec_point_format_list);
+}
+
+std::ostream& operator<<(std::ostream& os, const ec_point_formats_extension& ext) {
+    return os << ext.extension_type << " " << ext.ec_point_format_list;
+}
+
 void append_to_buffer(std::vector<uint8_t>& buffer, const server_ec_dh_params& item) {
     append_to_buffer(buffer, item.curve_params);
     append_to_buffer(buffer, item.public_key);
@@ -77,14 +111,5 @@ void from_bytes(server_key_exchange_ec_dhe& item, util::buffer_view& buffer) {
 void from_bytes(client_key_exchange_ecdhe_ecdsa& item, util::buffer_view& buffer) {
     from_bytes(item.ecdh_Yc, buffer);
 }
-
-extension make_named_curves(const named_curves_list& named_curves) {
-    return extension{extension::elliptic_curves, as_buffer(named_curves)};
-}
-
-extension make_ec_point_formats(const ec_point_format_list& point_formats) {
-    return extension{extension::ec_point_formats, as_buffer(point_formats)};
-}
-
 
 } } // namespace funtls::tls

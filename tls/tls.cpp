@@ -227,14 +227,64 @@ std::ostream& operator<<(std::ostream& os, signature_algorithm s)
     return os << "Unknown SignatureAlgorithm " << static_cast<unsigned>(s);
 }
 
-std::ostream& operator<<(std::ostream& os, extension::extension_type et)
+std::ostream& operator<<(std::ostream& os, extension_type et)
 {
     switch (et) {
-        case extension::elliptic_curves:      return os << "elliptic_curves";
-        case extension::ec_point_formats:     return os << "ec_point_formats";
-        case extension::signature_algorithms: return os << "signature_algorithms";
+#define ETCASE(n) case extension_type::n: return os << #n
+        ETCASE(server_name);
+        ETCASE(status_request);
+        ETCASE(elliptic_curves);
+        ETCASE(ec_point_formats);
+        ETCASE(signature_algorithms);
+        ETCASE(application_layer_protocol_negotiation);
+        ETCASE(signed_certificate_timestamp);
+        ETCASE(extended_master_secret);
+        ETCASE(session_ticket);
+        ETCASE(renegotiation_info);
+#undef ETCASE
     }
-    return os << "Unknown ExtensionType " << static_cast<unsigned>(et);
+    return os << "ExtensionType(" << static_cast<unsigned>(et) << ")";
+}
+
+std::ostream& operator<<(std::ostream& os, const signature_and_hash_algorithm& sh)
+{
+    return os << sh.signature << "-" << sh.hash;
+}
+
+std::ostream& operator<<(std::ostream& os, server_name::server_name_type name_type)
+{
+    switch (name_type) {
+    case server_name::server_name_type::host_name: return os << "host_name";
+    }
+    assert(false);
+    return os << "server_name_type(" << static_cast<int>(name_type) << ")";
+}
+
+std::ostream& operator<<(std::ostream& os, const server_name& name)
+{
+    const auto& n = name.name.as_vector();
+    return os << name.name_type << "=" << std::string(n.begin(), n.end());
+}
+
+std::ostream& operator<<(std::ostream& os, const server_name_extension& ext)
+{
+    return os << ext.extension_type << " " << ext.server_name_list;
+}
+
+std::ostream& operator<<(std::ostream& os, const signature_algorithms_extension& ext)
+{
+    return os << ext.extension_type << " " << ext.supported_signature_algorithms_list;
+}
+
+std::ostream& operator<<(std::ostream& os, const application_layer_protocol_negotiation_extension::protocol_name& name)
+{
+    const auto& n = name.name.as_vector();
+    return os << std::string(n.begin(), n.end());
+}
+
+std::ostream& operator<<(std::ostream& os, const application_layer_protocol_negotiation_extension& ext)
+{
+    return os << ext.extension_type << " " << ext.protocol_name_list;
 }
 
 } } // namespace funtls::tls

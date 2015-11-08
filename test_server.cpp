@@ -132,7 +132,32 @@ void connection::read_client_hello() {
                 self->log_ << "" << std::endl;
                 self->log_ << "extensions:" << std::endl;
                 for (const auto& ext : client_hello.extensions) {
-                    self->log_ << ext.type << " " << util::base16_encode(ext.data.as_vector())  << "" << std::endl;
+                    self->log_ << " ";
+                    switch (ext.type) {
+                    case extension_type::server_name:
+                        {
+                            auto sne = get_as<server_name_extension>(ext);
+                            FUNTLS_CHECK_BINARY(sne.server_name_list.size(), ==, 1, "Invalid server name extension");
+                            FUNTLS_CHECK_BINARY(int(sne.server_name_list[0].name_type), ==, int(server_name::server_name_type::host_name), "Invalid server name extension");
+                            self->log_ << sne;
+                        }
+                        break;
+                    case extension_type::elliptic_curves:
+                        self->log_ << get_as<elliptic_curves_extension>(ext);
+                        break;
+                    case extension_type::ec_point_formats:
+                        self->log_ << get_as<ec_point_formats_extension>(ext);
+                        break;
+                    case extension_type::signature_algorithms:
+                        self->log_ << get_as<signature_algorithms_extension>(ext);
+                        break;
+                    case extension_type::application_layer_protocol_negotiation:
+                        self->log_ << get_as<application_layer_protocol_negotiation_extension>(ext);
+                        break;
+                    default:
+                        self->log_ << ext.type << " " << util::base16_encode(ext.data.as_vector());
+                    }
+                    self->log_ << std::endl;
                 }
 
                 auto cipher = cipher_suite::null_with_null_null;

@@ -71,17 +71,13 @@ void client::send_client_hello(const done_handler& handler) {
         { hash_algorithm::sha256 , signature_algorithm::rsa   },
         { hash_algorithm::sha1   , signature_algorithm::rsa   },
     };
-    extensions.push_back(make_supported_signature_algorithms(supported_signature_algorithms));
+    extensions.push_back(signature_algorithms_extension{supported_signature_algorithms});
 
     // Only send elliptic curve list if requesting at least one ECC cipher
     if (use_ecc) {
-        static const named_curve named_curves[] = {
-            named_curve::secp384r1,
-            named_curve::secp256r1,
-        };
         // OpenSSL requires a list of supported named curves to support ECDH(E)_ECDSA
-        extensions.push_back(make_named_curves(named_curves));
-        extensions.push_back(make_ec_point_formats({ec_point_format::uncompressed}));
+        extensions.push_back(elliptic_curves_extension{{named_curve::secp384r1,named_curve::secp256r1}});
+        extensions.push_back(ec_point_formats_extension{{ec_point_format::uncompressed}});
     }
 
     std::cout << "Sending client hello." << std::endl;
@@ -110,7 +106,7 @@ void client::read_server_hello(const done_handler& handler)
                 throw std::runtime_error("Invalid compression method " + std::to_string((int)server_hello.compression_method));
             }
             for (const auto& e : server_hello.extensions) {
-                if (e.type == extension::ec_point_formats) {
+                if (e.type == extension_type::ec_point_formats) {
                     std::cerr << "Ignoring ec_point_formats extension in " << __FILE__ << ":" << __LINE__ << std::endl;
                 } else {
                     std::ostringstream msg;

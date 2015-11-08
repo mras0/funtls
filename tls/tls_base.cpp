@@ -23,7 +23,8 @@ void tls_base::recv_app_data(const app_data_handler& handler)
     recv_record(wrapped(
         [handler] (record&& record) {
             FUNTLS_CHECK_BINARY(record.type, ==, content_type::application_data, "Unexpected content type");
-            handler(std::move(record.fragment));
+            auto frag = record.fragment.as_vector();
+            handler(std::move(frag));
         }, handler));
 }
 
@@ -70,8 +71,8 @@ void tls_base::read_handshake(const recv_handshake_handler& handler)
 {
     recv_record(wrapped([this, handler](record&& record) {
             FUNTLS_CHECK_BINARY(record.type, ==, content_type::handshake, "Invalid content type");
-
-            util::buffer_view frag_buf{&record.fragment[0], record.fragment.size()};
+            const auto& frag = record.fragment.as_vector();
+            util::buffer_view frag_buf{frag.data(), frag.size()};
             handshake handshake;
             from_bytes(handshake, frag_buf);
             if (frag_buf.remaining()) {

@@ -2,9 +2,20 @@ project(x509)
 
 include_directories(${funtls_SOURCE_DIR})
 
-set(_x509_files x509.cpp x509_rsa.cpp x509_ec.cpp x509_io.cpp trust_store.cpp)
+set(_x509_files
+    x509.cpp
+    x509.h
+    x509_rsa.cpp
+    x509_rsa.h
+    x509_ec.cpp
+    x509_ec.h
+    x509_io.cpp
+    x509_io.h
+    trust_store.cpp
+    trust_store.h
+    )
 if (WIN32)
-    set(_x509_files ${_x509_files} trust_store_win32.cpp)
+    set(_x509_files ${_x509_files} trust_store_win32.cpp trust_store_win32.h)
 endif()
 
 add_library(x509 STATIC ${_x509_files})

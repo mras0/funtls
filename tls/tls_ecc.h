@@ -46,18 +46,30 @@ const ec::curve& curve_from_name(named_curve nc);
 
 std::ostream& operator<<(std::ostream& os, named_curve nc);
 
-using named_curves_list = vector<named_curve, 2, (1<<16)-2>;
-extension make_named_curves(const named_curves_list& named_curves);
+struct elliptic_curves_extension {
+    static constexpr auto extension_type = extension_type::elliptic_curves;
 
-// ec_point_formats extension
+    vector<named_curve, 2, (1<<16)-2> elliptic_curve_list;
+};
+void from_bytes(elliptic_curves_extension& item, util::buffer_view& buffer);
+void append_to_buffer(std::vector<uint8_t>& buffer, const elliptic_curves_extension& item);
+std::ostream& operator<<(std::ostream& os, const elliptic_curves_extension& ext);
+
 enum class ec_point_format : uint8 {
     uncompressed = 0,
     ansiX962_compressed_prime = 1,
     ansiX962_compressed_char2 = 2
 };
-using ec_point_format_list = vector<ec_point_format, 1, (1<<8)-1>;
+std::ostream& operator<<(std::ostream& os, ec_point_format pf);
 
-extension make_ec_point_formats(const ec_point_format_list& point_formats);
+struct ec_point_formats_extension {
+    static constexpr auto extension_type = extension_type::ec_point_formats;
+
+    vector<ec_point_format, 1, (1<<8)-1> ec_point_format_list;
+};
+void from_bytes(ec_point_formats_extension& item, util::buffer_view& buffer);
+void append_to_buffer(std::vector<uint8_t>& buffer, const ec_point_formats_extension& item);
+std::ostream& operator<<(std::ostream& os, const ec_point_formats_extension& ext);
 
 enum class ec_curve_type : uint8 {
     explicit_prime = 1,

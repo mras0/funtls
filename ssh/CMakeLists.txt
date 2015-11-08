@@ -2,7 +2,7 @@ project(ssh)
 
 include_directories(${funtls_SOURCE_DIR})
 
-add_library(ssh STATIC ssh.cpp)
+add_library(ssh STATIC ssh.cpp ssh.h)
 target_link_libraries(ssh util)
 
 add_executable(ssh_test ssh_test.cpp)
