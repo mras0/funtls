@@ -24,7 +24,13 @@ target_link_libraries(x509 util asn1 hash ec int_util)
 add_executable(x509_test x509_test.cpp)
 target_link_libraries(x509_test util x509)
 
+add_test(x509_test x509_test)
+
 add_executable(x509_util x509_util.cpp)
 target_link_libraries(x509_util util x509)
 
-add_test(x509_test x509_test)
+add_test(x509_util_usage x509_util)
+set_tests_properties(x509_util_usage PROPERTIES PASS_REGULAR_EXPRESSION "Usage:")
+
+add_test(x509_util_show x509_util show ${CMAKE_CURRENT_SOURCE_DIR}/localhost_test_cert.crt)
+set_tests_properties(x509_util_show PROPERTIES PASS_REGULAR_EXPRESSION "Serial number: 0x00DD43B1B0CCC9E27D.*Issuer: CN=localhost.*Subject: CN=localhost.*Verifying self-signed certificate...OK")
