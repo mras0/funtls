@@ -1,6 +1,5 @@
 // google.com certificate chain 2015-05-03
 
-
 const char* const test_cert_chain0_root =
 R"(-----BEGIN CERTIFICATE-----
 MIIDIDCCAomgAwIBAgIENd70zzANBgkqhkiG9w0BAQUFADBOMQswCQYDVQQGEwJV

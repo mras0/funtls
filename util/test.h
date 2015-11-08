@@ -41,7 +41,7 @@ void assert_failed(const char* func, const char* file, int line, const std::stri
             _funtls_oss << "Expected:\n" << #expected << " "            \
                 << #bin_op << " " << #actual << "\n"                    \
                 << "Failure:\n"                                         \
-                << "\"" << _a_val << "\" " << #bin_op << " \""          \
+                << "\"" << _a_val << "\"\n" << #bin_op << "\n\""        \
                 << _b_val << "\"\n" << message;                         \
             fail(__PRETTY_FUNCTION__, __FILE__, __LINE__,               \
                     _funtls_oss.str());                                 \

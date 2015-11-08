@@ -20,7 +20,8 @@ namespace funtls { namespace asn1 {
 
 class identifier {
 public:
-    static constexpr uint8_t constructed_bit = 0x20;
+    static constexpr uint8_t constructed_bit       = 0x20;
+    static constexpr uint8_t context_specific_bits = 0x80;
     enum tag : uint8_t {
         boolean                 = 0x01,
         integer                 = 0x02,
@@ -40,19 +41,28 @@ public:
         constructed_set         = set      | constructed_bit,
 
         // context specific
-        context_specific_tag_0  = 0 | (2<<6) | constructed_bit, 
-        context_specific_tag_1  = 1 | (2<<6) | constructed_bit, // context specific
-        context_specific_tag_2  = 2 | (2<<6) | constructed_bit, // context specific
-        context_specific_tag_3  = 3 | (2<<6) | constructed_bit, // context specific
+        context_specific_0  = context_specific_bits | 0,
+        context_specific_1  = context_specific_bits | 1,
+        context_specific_2  = context_specific_bits | 2,
+        context_specific_3  = context_specific_bits | 3,
+        context_specific_4  = context_specific_bits | 4,
+        context_specific_5  = context_specific_bits | 5,
+        context_specific_6  = context_specific_bits | 6,
+        context_specific_7  = context_specific_bits | 7,
+        context_specific_8  = context_specific_bits | 8,
+
+        context_specific_constructed_0  = context_specific_bits | constructed_bit | 0,
+        context_specific_constructed_1  = context_specific_bits | constructed_bit | 1,
+        context_specific_constructed_2  = context_specific_bits | constructed_bit | 2,
+        context_specific_constructed_3  = context_specific_bits | constructed_bit | 3,
     };
 
-    identifier(tag value) : repr_(static_cast<uint8_t>(value)) {
+    constexpr identifier(tag value) : repr_(static_cast<uint8_t>(value)) {
     }
 
     explicit operator uint8_t() const {
         return repr_;
     }
-
 private:
     uint8_t repr_;
 };

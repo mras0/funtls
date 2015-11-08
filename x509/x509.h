@@ -226,6 +226,7 @@ asn1::object_id public_key_algo_from_signature_algo(const algorithm_id& sig_algo
 // X509v3 certificate extensions
 static const asn1::object_id id_ce_subjectKeyIdentifier{2,5,29,14};
 static const asn1::object_id id_ce_keyUsage{2,5,29,15};
+static const asn1::object_id id_ce_subjectAltName{2,5,29,17};
 static const asn1::object_id id_ce_basicConstraints{2,5,29,19};
 
 // Actually PKCS#1 RFC3447 stuff:

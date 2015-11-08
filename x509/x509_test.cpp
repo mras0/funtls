@@ -292,10 +292,36 @@ void test_serialization()
     FUNTLS_ASSERT_EQUAL(digest_info_bytes, asn1::serialized(digest_info));
 }
 
+#include "test_cert4.h"
+void test_cert_extensions()
+{
+    const auto cert4 = x509::read_pem_certificate_from_string(test_cert4);
+    std::ostringstream cert4_subject_name, cert4_issuer_name;
+    cert4_subject_name << cert4.tbs().subject;
+    cert4_issuer_name << cert4.tbs().issuer;
+    FUNTLS_ASSERT_EQUAL(large_uint("0x3f7d9a402f58b092"), cert4.tbs().serial_number.as<large_uint>());
+    FUNTLS_ASSERT_EQUAL(cert4_subject_name.str(), "C=US, ST=California, L=Mountain View, O=Google Inc, CN=google.com");
+    FUNTLS_ASSERT_EQUAL(cert4_issuer_name.str(), "C=US, O=Google Inc, CN=Google Internet Authority G2");
+    FUNTLS_ASSERT_EQUAL(x509::id_sha256WithRSAEncryption, cert4.tbs().signature_algorithm.id());
+    FUNTLS_ASSERT_EQUAL(true, cert4.tbs().signature_algorithm.null_parameters());
+    FUNTLS_ASSERT_EQUAL(x509::id_rsaEncryption, cert4.tbs().subject_public_key_algo.id());
+    FUNTLS_ASSERT_EQUAL(x509::id_sha256WithRSAEncryption, cert4.signature_algorithm().id());
+    FUNTLS_ASSERT_EQUAL(true, cert4.signature_algorithm().null_parameters());
+    test_load_save(test_cert4);
+
+    //std::cout << cert4 << std::endl;
+}
+
 int main()
 {
     // TODO: Check x509::name equals operations. Only exact matches should be allowed (with order being important) etc.
-    test_cert();
-    test_pkey();
-    test_serialization();
+    try {
+        test_cert();
+        test_cert_extensions();
+        test_pkey();
+        test_serialization();
+    } catch (const std::exception& e) {
+        std::cerr << e.what() << std::endl;
+        return 1;
+    }
 }

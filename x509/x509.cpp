@@ -8,7 +8,7 @@ using namespace funtls;
 
 namespace {
 
-constexpr auto x509_version_tag = funtls::asn1::identifier::context_specific_tag_0;
+constexpr asn1::identifier x509_version_tag = asn1::identifier::context_specific_constructed_0;
 
 enum x509::version::tag version_tag_from_int(const asn1::integer& i)
 {
@@ -253,6 +253,45 @@ std::string handle_keyUsage(util::buffer_view& buf) {
     return oss.str();
 }
 
+std::string handle_subjectAltName(util::buffer_view& buf) {
+    asn1::sequence_view seq{asn1::read_der_encoded_value(buf)};
+    std::vector<asn1::ia5_string> dns_names;
+    // GeneralNames ::= SEQUENCE SIZE (1..MAX) OF GeneralName
+    do {
+        auto elem = seq.next();
+
+        // GeneralName ::= CHOICE{
+        constexpr auto id_otherName                 = asn1::identifier::context_specific_0; // INSTANCE OF OTHER-NAME,
+        constexpr auto id_rfc822Name                = asn1::identifier::context_specific_1; // IA5String,
+        constexpr auto id_dNSName                   = asn1::identifier::context_specific_2; // IA5String,
+        constexpr auto id_x400Address               = asn1::identifier::context_specific_3; // ORAddress,
+        constexpr auto id_directoryName             = asn1::identifier::context_specific_4; // Name,
+        constexpr auto id_ediPartyName              = asn1::identifier::context_specific_5; // EDIPartyName,
+        constexpr auto id_uniformResourceIdentifier = asn1::identifier::context_specific_6; // IA5String,
+        constexpr auto id_IPAddress                 = asn1::identifier::context_specific_7; // OCTET STRING,
+        constexpr auto id_registeredID              = asn1::identifier::context_specific_8; // OBJECT IDENTIFIER
+        switch (static_cast<uint8_t>(elem.id())) {
+        case id_dNSName: {
+                auto name = buffer_copy(elem.content_view());
+                dns_names.emplace_back(std::string(name.begin(), name.end()));
+            }
+            break;
+        default: {
+                std::ostringstream erross;
+                erross << "Unsupported name type found in subectAltName: " << elem.id();
+                FUNTLS_CHECK_FAILURE(erross.str());
+            }
+        }
+    } while (seq.has_next());
+    std::ostringstream oss;
+    oss << "SubjectAltName";
+    if (!dns_names.empty()) {
+        oss << " DNSNames";
+        std::for_each(begin(dns_names), end(dns_names), [&oss] (const asn1::ia5_string& s) { oss << " " << s; });
+    }
+    return oss.str();
+}
+
 std::string handle_basicConstraints(util::buffer_view& buf) {
     // BasicConstraintsSyntax ::= SEQUENCE {
     // 	cA	BOOLEAN DEFAULT FALSE,
@@ -280,6 +319,7 @@ const struct {
 } extension_handlers[] = {
     { id_ce_subjectKeyIdentifier ,&handle_subjectKeyIdentifier },
     { id_ce_keyUsage             ,&handle_keyUsage },
+    { id_ce_subjectAltName       ,&handle_subjectAltName},
     { id_ce_basicConstraints     ,&handle_basicConstraints },
 };
 
@@ -362,22 +402,26 @@ tbs_certificate parse_tbs_certificate(const asn1::der_encoded_value& repr)
     std::vector<extension> extensions;
 
     while (cert_seq.has_next()) {
+        constexpr auto id_issuerUniqueID  = asn1::identifier::context_specific_constructed_1;
+        constexpr auto id_subjectUniqueID = asn1::identifier::context_specific_constructed_2;
+        constexpr auto id_extensions      = asn1::identifier::context_specific_constructed_3;
+
         auto value = cert_seq.next();
-        if (value.id() == asn1::identifier::context_specific_tag_1) {
+        if (value.id() == id_issuerUniqueID) {
             // issuerUniqueID  [1]  IMPLICIT UniqueIdentifier OPTIONAL -- If present, version MUST be v2 or v3
             if (ver != version::v2 && ver != version::v3) {
                 std::ostringstream msg;
                 msg << value.id() << " not expected in version " << ver;
                 FUNTLS_CHECK_FAILURE(msg.str());
             }
-        } else if (value.id() == asn1::identifier::context_specific_tag_2) {
+        } else if (value.id() == id_subjectUniqueID) {
             // subjectUniqueID [2]  IMPLICIT UniqueIdentifier OPTIONAL -- If present, version MUST be v2 or v3
             if (ver != version::v2 && ver != version::v3) {
                 std::ostringstream msg;
                 msg << value.id() << " not expected in version " << ver;
                 FUNTLS_CHECK_FAILURE(msg.str());
             }
-        } else if (value.id() == asn1::identifier::context_specific_tag_3) {
+        } else if (value.id() == id_extensions) {
             //  extensions [3]  EXPLICIT Extensions OPTIONAL -- If present, version MUST be v3
             if (ver != version::v3) {
                 std::ostringstream msg;
