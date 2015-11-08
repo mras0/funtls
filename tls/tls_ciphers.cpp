@@ -512,6 +512,10 @@ std::ostream& operator<<(std::ostream& os, mac_algorithm e)
         f(dhe_rsa_with_aes_256_cbc_sha256)\
         f(rsa_with_aes_128_gcm_sha256)\
         f(rsa_with_aes_256_gcm_sha384)\
+        f(ecdhe_ecdsa_with_aes_128_cbc_sha)\
+        f(ecdhe_ecdsa_with_aes_256_cbc_sha)\
+        f(ecdhe_rsa_with_aes_128_cbc_sha)\
+        f(ecdhe_rsa_with_aes_256_cbc_sha)\
         f(ecdhe_ecdsa_with_aes_128_gcm_sha256)\
         f(ecdhe_ecdsa_with_aes_256_gcm_sha384)\
         f(ecdhe_rsa_with_aes_128_gcm_sha256)\

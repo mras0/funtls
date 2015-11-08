@@ -642,7 +642,10 @@ int main(int argc, char* argv[])
                 const std::vector<tls::cipher_suite> cipher_suites{
                     //tls::cipher_suite::ecdhe_ecdsa_with_aes_256_gcm_sha384,
                     //tls::cipher_suite::ecdhe_ecdsa_with_aes_128_gcm_sha256,
-                    
+
+                    tls::cipher_suite::ecdhe_rsa_with_aes_256_cbc_sha,
+                    tls::cipher_suite::ecdhe_rsa_with_aes_128_cbc_sha,
+
                     tls::cipher_suite::ecdhe_rsa_with_aes_256_gcm_sha384,
                     tls::cipher_suite::ecdhe_rsa_with_aes_128_gcm_sha256,
 

@@ -320,11 +320,16 @@ CS_TRAITS_SPEC(dhe_rsa_with_aes_128_cbc_sha256, dhe_rsa, aes_cbc_traits<128>, hm
 CS_TRAITS_SPEC(dhe_rsa_with_aes_256_cbc_sha256, dhe_rsa, aes_cbc_traits<256>, hmac_sha256_algo_traits<>);
 CS_TRAITS_SPEC(rsa_with_aes_128_gcm_sha256, rsa, aes_gcm_traits<128>, hmac_sha256_algo_traits<0>);
 CS_TRAITS_SPEC(rsa_with_aes_256_gcm_sha384, rsa, aes_gcm_traits<256>, hmac_sha384_algo_traits<0>);
+CS_TRAITS_SPEC(ecdhe_ecdsa_with_aes_128_cbc_sha, ecdhe_ecdsa, aes_cbc_traits<128>, hmac_sha_algo_traits);
+CS_TRAITS_SPEC(ecdhe_ecdsa_with_aes_256_cbc_sha, ecdhe_ecdsa, aes_cbc_traits<256>, hmac_sha_algo_traits);
+CS_TRAITS_SPEC(ecdhe_rsa_with_aes_128_cbc_sha, ecdhe_rsa, aes_cbc_traits<128>, hmac_sha_algo_traits);
+CS_TRAITS_SPEC(ecdhe_rsa_with_aes_256_cbc_sha, ecdhe_rsa, aes_cbc_traits<256>, hmac_sha_algo_traits);
 CS_TRAITS_SPEC(ecdhe_ecdsa_with_aes_128_gcm_sha256, ecdhe_ecdsa, aes_gcm_traits<128>, hmac_sha256_algo_traits<0>);
 CS_TRAITS_SPEC(ecdhe_ecdsa_with_aes_256_gcm_sha384, ecdhe_ecdsa, aes_gcm_traits<256>, hmac_sha384_algo_traits<0>);
 CS_TRAITS_SPEC(ecdhe_rsa_with_aes_128_gcm_sha256, ecdhe_rsa, aes_gcm_traits<128>, hmac_sha256_algo_traits<0>);
 CS_TRAITS_SPEC(ecdhe_rsa_with_aes_256_gcm_sha384, ecdhe_rsa, aes_gcm_traits<256>, hmac_sha384_algo_traits<0>);
 CS_TRAITS_SPEC(ecdhe_rsa_with_chacha20_poly1305_sha256, ecdhe_rsa, chacha20_poly1305_traits, hmac_sha256_algo_traits<0>);
+
 #undef CS_TRAITS_SPEC
 
 struct cipher_suite_parameters {

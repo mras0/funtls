@@ -188,6 +188,10 @@ void test_cipher_parsing()
     TEST_IN(dhe_rsa_with_aes_256_cbc_sha,            "DHE-RSA-AES256-sha");
     TEST_IN(rsa_with_aes_256_cbc_sha256,             "aes256-SHA256");
     TEST_IN(rsa_with_aes_128_gcm_sha256,             "AES128-GCM-SHA256");
+    TEST_IN(ecdhe_ecdsa_with_aes_128_cbc_sha,        "ecdhe_ecdsa_with_aes_128_cbc_sha");
+    TEST_IN(ecdhe_ecdsa_with_aes_256_cbc_sha,        "ecdhe_ecdsa_with_aes_256_cbc_sha");
+    TEST_IN(ecdhe_rsa_with_aes_128_cbc_sha,          "ecdhe_rsa_with_aes_128_cbc_sha");
+    TEST_IN(ecdhe_rsa_with_aes_256_cbc_sha,          "ecdhe_rsa_with_aes_256_cbc_sha");
     TEST_IN(ecdhe_ecdsa_with_aes_128_gcm_sha256,     "ECDHE-ECDSA-AES128-GCM-SHA256");
     TEST_IN(ecdhe_ecdsa_with_aes_128_gcm_sha256,     "ecdhe_ecdsa_with_aes_128_gcm_sha256");
     TEST_IN(ecdhe_rsa_with_aes_128_gcm_sha256,       "ecdhe_rsa_with_aes_128_gcm_sha256");
