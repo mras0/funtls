@@ -9,6 +9,7 @@
 #include <functional>
 #include <vector>
 #include <string>
+#include <ostream>
 
 #include <tls/tls_ciphers.h>
 
@@ -102,7 +103,7 @@ enum class alert_description : uint8_t {
 std::ostream& operator<<(std::ostream& os, alert_description desc);
 
 struct alert {
-    static constexpr content_type content_type = content_type::alert;
+    static constexpr auto content_type = tls::content_type::alert;
 
     alert_level       level;
     alert_description description;
@@ -183,8 +184,8 @@ struct vector {
         static_assert(sizeof(array) <= UpperBoundInBytes, "");
     }
 
-    template<typename Dummy = std::enable_if_t<!is_complex>>
-    serialized_size_type byte_count() const {
+    template<typename Dummy = std::enable_if<!is_complex>>
+    serialized_size_type byte_count(typename Dummy::type* = 0) const {
         using underlying_serialized_size_type = typename smallest_possible_uint<8*log256(UpperBoundInBytes)>::underlying_type;
         return static_cast<underlying_serialized_size_type>(data_.size() * sizeof(T));
     }
@@ -283,31 +284,31 @@ struct extension {
 static_assert(vector<extension, 0, (1<<16)-1>::is_complex, "");
 
 struct client_hello {
-    static constexpr handshake_type handshake_type = handshake_type::client_hello;
+    static constexpr auto handshake_type = tls::handshake_type::client_hello;
 
     protocol_version                          client_version;
-    random                                    random;
-    session_id                                session_id;
+    tls::random                               random;
+    tls::session_id                           session_id;
     vector<cipher_suite, 2, (1<<16)-2>        cipher_suites;
     vector<compression_method, 1, (1<<8)-1>   compression_methods;
     vector<extension, 0, (1<<16)-1>           extensions;
 };
 
 struct server_hello {
-    static constexpr handshake_type handshake_type = handshake_type::server_hello;
+    static constexpr auto handshake_type = tls::handshake_type::server_hello;
 
     protocol_version                server_version;
-    random                          random;
-    session_id                      session_id;
-    cipher_suite                    cipher_suite;
-    compression_method              compression_method;
+    tls::random                     random;
+    tls::session_id                 session_id;
+    tls::cipher_suite               cipher_suite;
+    tls::compression_method         compression_method;
     vector<extension, 0, (1<<16)-1> extensions;
 };
 
 using asn1cert = vector<uint8, 1, (1<<24)-1>;
 
 struct certificate {
-    static constexpr handshake_type handshake_type = handshake_type::certificate;
+    static constexpr auto handshake_type = tls::handshake_type::certificate;
 
     vector<asn1cert, 0, (1<<24)-1> certificate_list;
 };
@@ -335,8 +336,8 @@ enum class signature_algorithm : uint8 {
 std::ostream& operator<<(std::ostream& os, signature_algorithm s);
 
 struct signed_signature {
-    hash_algorithm              hash_algorithm;
-    signature_algorithm         signature_algorithm;
+    tls::hash_algorithm         hash_algorithm;
+    tls::signature_algorithm    signature_algorithm;
     vector<uint8, 1, (1<<16)-1> value;
 };
 
@@ -357,25 +358,25 @@ std::ostream& operator<<(std::ostream& os, server_name::server_name_type name_ty
 std::ostream& operator<<(std::ostream& os, const server_name& name);
 
 struct server_name_extension {
-    static constexpr auto extension_type = extension_type::server_name;
+    static constexpr auto extension_type = tls::extension_type::server_name;
     vector<server_name, 1, (1<<16)-1> server_name_list;
 };
 std::ostream& operator<<(std::ostream& os, const server_name_extension& ext);
 
 struct signature_algorithms_extension {
-    static constexpr auto extension_type = extension_type::signature_algorithms;
+    static constexpr auto extension_type = tls::extension_type::signature_algorithms;
 
     vector<signature_and_hash_algorithm, 2, (1<<16)-2> supported_signature_algorithms_list;
 };
 std::ostream& operator<<(std::ostream& os, const signature_algorithms_extension& ext);
 
 struct application_layer_protocol_negotiation_extension {
-    static constexpr auto extension_type = extension_type::application_layer_protocol_negotiation;
+    static constexpr auto extension_type = tls::extension_type::application_layer_protocol_negotiation;
 
     struct protocol_name {
         vector<uint8, 1, (1<<8)-1> name;
     };
-    
+
     vector<protocol_name, 2, (1<<16)-1> protocol_name_list;
 };
 std::ostream& operator<<(std::ostream& os, const application_layer_protocol_negotiation_extension::protocol_name& name);
@@ -389,18 +390,18 @@ struct server_dh_params {
 };
 
 struct server_key_exchange_dhe {
-    static constexpr handshake_type handshake_type = handshake_type::server_key_exchange;
+    static constexpr auto handshake_type = tls::handshake_type::server_key_exchange;
 
     server_dh_params params;
     signed_signature signature;
 };
 
 struct server_hello_done {
-    static constexpr handshake_type handshake_type = handshake_type::server_hello_done;
+    static constexpr auto handshake_type = tls::handshake_type::server_hello_done;
 };
 
 struct client_key_exchange_rsa {
-    static constexpr handshake_type handshake_type = handshake_type::client_key_exchange;
+    static constexpr auto handshake_type = tls::handshake_type::client_key_exchange;
 
     //Implementation note: Public-key-encrypted data is represented as an
     //opaque vector <0..2^16-1> (see Section 4.7).  Thus, the RSA-encrypted
@@ -412,26 +413,27 @@ struct client_key_exchange_rsa {
 };
 
 struct client_key_exchange_dhe_rsa {
-    static constexpr handshake_type handshake_type = handshake_type::client_key_exchange;
+    static constexpr auto handshake_type = tls::handshake_type::client_key_exchange;
+
     vector<uint8, 1, (1<<16)-1> dh_Yc;
 };
 
 struct finished {
-    static constexpr handshake_type handshake_type = handshake_type::finished;
+    static constexpr auto handshake_type = tls::handshake_type::finished;
 
     static constexpr size_t verify_data_min_length = 12;   // For RSA at least
     std::vector<uint8_t> verify_data;
 };
 
 struct handshake {
-    static constexpr content_type content_type = content_type::handshake;
+    static constexpr auto content_type = tls::content_type::handshake;
 
     handshake_type type;
     vector<uint8, 0, (1<<24)-1> body;
 };
 
 struct change_cipher_spec {
-    static constexpr content_type content_type = content_type::change_cipher_spec;
+    static constexpr auto content_type = tls::content_type::change_cipher_spec;
     enum : uint8 { change_cipher_spec_type = 1 };
 };
 

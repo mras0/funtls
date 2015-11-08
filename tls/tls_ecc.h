@@ -47,7 +47,7 @@ const ec::curve& curve_from_name(named_curve nc);
 std::ostream& operator<<(std::ostream& os, named_curve nc);
 
 struct elliptic_curves_extension {
-    static constexpr auto extension_type = extension_type::elliptic_curves;
+    static constexpr auto extension_type = tls::extension_type::elliptic_curves;
 
     vector<named_curve, 2, (1<<16)-2> elliptic_curve_list;
 };
@@ -63,7 +63,7 @@ enum class ec_point_format : uint8 {
 std::ostream& operator<<(std::ostream& os, ec_point_format pf);
 
 struct ec_point_formats_extension {
-    static constexpr auto extension_type = extension_type::ec_point_formats;
+    static constexpr auto extension_type = tls::extension_type::ec_point_formats;
 
     vector<ec_point_format, 1, (1<<8)-1> ec_point_format_list;
 };

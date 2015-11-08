@@ -49,6 +49,20 @@ inline void append_to_buffer(std::vector<uint8_t>& buffer, const uint8 (&item)[B
     buffer.insert(buffer.end(), item, item+ByteCount);
 }
 
+inline void append_to_buffer(std::vector<uint8_t>& buffer, const std::vector<uint8_t>& item) {
+    buffer.insert(buffer.end(), item.begin(), item.end());
+}
+
+inline void append_to_buffer(std::vector<uint8_t>& buffer, const protocol_version& item) {
+    buffer.push_back(item.major);
+    buffer.push_back(item.minor);
+}
+
+inline void append_to_buffer(std::vector<uint8_t>& buffer, const random& item) {
+    append_to_buffer(buffer, item.gmt_unix_time);
+    append_to_buffer(buffer, item.random_bytes);
+}
+
 namespace detail {
 
 template<typename T, size_t LowerBoundInBytes, size_t UpperBoundInBytes>
@@ -67,7 +81,7 @@ inline void append_vector_to_buffer(std::vector<uint8_t>& buffer, const vector<T
     }
     FUNTLS_CHECK_BINARY(items_buffer.size(), >=, LowerBoundInBytes, "Internal error: tls::vector contains too little data");
     FUNTLS_CHECK_BINARY(items_buffer.size(), <=, UpperBoundInBytes, "Internal error: tls::vector contains too much data");
-    append_to_buffer(buffer, vector<T, LowerBoundInBytes, UpperBoundInBytes>::serialized_size_type(items_buffer.size()));
+    append_to_buffer(buffer, typename vector<T, LowerBoundInBytes, UpperBoundInBytes>::serialized_size_type(items_buffer.size()));
     append_to_buffer(buffer, items_buffer);
 }
 
@@ -75,21 +89,7 @@ inline void append_vector_to_buffer(std::vector<uint8_t>& buffer, const vector<T
 
 template<typename T, size_t LowerBoundInBytes, size_t UpperBoundInBytes>
 inline void append_to_buffer(std::vector<uint8_t>& buffer, const vector<T, LowerBoundInBytes, UpperBoundInBytes>& item) {
-    detail::append_vector_to_buffer(buffer, item, std::integral_constant<bool, item.is_complex>{});
-}
-
-inline void append_to_buffer(std::vector<uint8_t>& buffer, const std::vector<uint8_t>& item) {
-    buffer.insert(buffer.end(), item.begin(), item.end());
-}
-
-inline void append_to_buffer(std::vector<uint8_t>& buffer, const protocol_version& item) {
-    buffer.push_back(item.major);
-    buffer.push_back(item.minor);
-}
-
-inline void append_to_buffer(std::vector<uint8_t>& buffer, const random& item) {
-    append_to_buffer(buffer, item.gmt_unix_time);
-    append_to_buffer(buffer, item.random_bytes);
+    detail::append_vector_to_buffer(buffer, item, std::integral_constant<bool, vector<T, LowerBoundInBytes, UpperBoundInBytes>::is_complex>{});
 }
 
 inline void append_to_buffer(std::vector<uint8_t>& buffer, const extension& item) {
@@ -259,7 +259,7 @@ inline void from_bytes(vector<T, LowerBoundInBytes, UpperBoundInBytes>& item, ut
     FUNTLS_CHECK_BINARY(byte_count, >=, LowerBoundInBytes, "Invalid byte count for tls::vector");
     FUNTLS_CHECK_BINARY(byte_count, <=, UpperBoundInBytes, "Invalid byte count for tls::vector");
     FUNTLS_CHECK_BINARY(buffer.remaining(), >=, byte_count, "Not enough data in buffer for tls::vector");
-    detail::vector_from_bytes(item, buffer, byte_count, std::integral_constant<bool, item.is_complex>{});
+    detail::vector_from_bytes(item, buffer, byte_count, std::integral_constant<bool, vector<T, LowerBoundInBytes, UpperBoundInBytes>::is_complex>{});
 }
 
 inline void from_bytes(alert& item, util::buffer_view& buffer) {
