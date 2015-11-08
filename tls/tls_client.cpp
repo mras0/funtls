@@ -6,8 +6,6 @@
 #include <assert.h>
 #include <algorithm>
 
-#include <iostream>
-
 #include <tls/tls_ecc.h>
 
 using namespace funtls;
@@ -52,7 +50,7 @@ void client::perform_handshake(const done_handler& handler) {
 }
 
 void client::send_client_hello(const done_handler& handler) {
-    std::cout << "Sending client hello\n";
+    //std::cout << "Sending client hello\n";
     std::vector<extension> extensions;
 
     const bool use_ecc = std::any_of(
@@ -80,7 +78,7 @@ void client::send_client_hello(const done_handler& handler) {
         extensions.push_back(ec_point_formats_extension{{ec_point_format::uncompressed}});
     }
 
-    std::cout << "Sending client hello." << std::endl;
+    //std::cout << "Sending client hello." << std::endl;
     send_handshake(make_handshake(
         client_hello{
             current_protocol_version(),
@@ -96,7 +94,7 @@ void client::send_client_hello(const done_handler& handler) {
 
 void client::read_server_hello(const done_handler& handler)
 {
-    std::cout << "Reading server hello." << std::endl;
+    //std::cout << "Reading server hello." << std::endl;
     read_handshake(wrapped([this, handler] (handshake&& handshake) {
             auto server_hello = get_as<tls::server_hello>(handshake);
             if (std::find(wanted_ciphers_.begin(), wanted_ciphers_.end(), server_hello.cipher_suite) == wanted_ciphers_.end()) {
@@ -107,7 +105,17 @@ void client::read_server_hello(const done_handler& handler)
             }
             for (const auto& e : server_hello.extensions) {
                 if (e.type == extension_type::ec_point_formats) {
-                    std::cerr << "Ignoring ec_point_formats extension in " << __FILE__ << ":" << __LINE__ << std::endl;
+                    auto pfs = get_as<ec_point_formats_extension>(e);
+                    bool has_uncompressed = false;
+                    for (const auto& pf : pfs.ec_point_format_list) {
+                        if (pf == ec_point_format::uncompressed) {
+                            has_uncompressed = true;
+                            break;
+                        }
+                    }
+                    if (!has_uncompressed) {
+                        FUNTLS_CHECK_FAILURE("Server does not support uncompressed points");
+                    }
                 } else {
                     std::ostringstream msg;
                     msg << "Unsupported TLS ServerHello extension " << e.type;
@@ -117,11 +125,11 @@ void client::read_server_hello(const done_handler& handler)
             negotiated_cipher(server_hello.cipher_suite);
             server_random(server_hello.random);
             session_id(server_hello.session_id);
-            std::cout << "Negotiated cipher suite:\n" << current_cipher_parameters() << std::endl;
+            //std::cout << "Negotiated cipher suite:\n" << current_cipher_parameters() << std::endl;
 
             client_kex = make_client_key_exchange_protocol(current_cipher_parameters().key_exchange_algorithm, current_protocol_version(), client_random(), server_random());
 
-            std::cout << "Reading until server hello done\n";
+            //std::cout << "Reading until server hello done\n";
             // Note: Handshake messages are only allowed in a specific order
             read_next_server_handshake({
                     handshake_type::certificate,
@@ -146,7 +154,7 @@ void client::read_next_server_handshake(const std::vector<handshake_type>& allow
             }
 
             if (handshake.type == handshake_type::server_hello_done) {
-                std::cout << "Reading server hello done." << std::endl;
+                //std::cout << "Reading server hello done." << std::endl;
 
                 (void) get_as<server_hello_done>(handshake);
                 send_client_key_exchange(handler);
@@ -154,7 +162,7 @@ void client::read_next_server_handshake(const std::vector<handshake_type>& allow
             }
 
             if (handshake.type == handshake_type::certificate) {
-                std::cout << "Reading server certificate list." << std::endl;
+                //std::cout << "Reading server certificate list." << std::endl;
                 auto cert_message = get_as<certificate>(handshake);
                 std::vector<x509::certificate> certificate_list;
                 for (const auto& c : cert_message.certificate_list) {
@@ -167,7 +175,7 @@ void client::read_next_server_handshake(const std::vector<handshake_type>& allow
                 verify_certificate_chain_(certificate_list);
                 client_kex->certificate_list(certificate_list);
             } else if (handshake.type == handshake_type::server_key_exchange) {
-                std::cout << "Reading server key exchange." << std::endl;
+                //std::cout << "Reading server key exchange." << std::endl;
                 client_kex->server_key_exchange(handshake);
             } else {
                 // Only CertificateRequest allowed before ServerHelloDone
@@ -183,13 +191,13 @@ void client::read_next_server_handshake(const std::vector<handshake_type>& allow
 void client::request_cipher_change(const std::vector<uint8_t>& pre_master_secret, const done_handler& handler)
 {
     do_wrapped([&] {
-        std::cout << "Requesting cipher change\n";
+        //std::cout << "Requesting cipher change\n";
         set_pending_ciphers(pre_master_secret);
 
         send_change_cipher_spec(wrapped([this, handler] () {
-                    std::cout << "Reading change cipher spec\n";
+                    //std::cout << "Reading change cipher spec\n";
                     read_change_cipher_spec(wrapped([this, handler] () {
-                                std::cout << "Handshake done. Session id " << util::base16_encode(session_id().as_vector()) << std::endl;
+                                //std::cout << "Handshake done. Session id " << util::base16_encode(session_id().as_vector()) << std::endl;
                                 handler(util::async_result<void>{});
                             }, handler));
                 }, handler));
@@ -199,12 +207,12 @@ void client::request_cipher_change(const std::vector<uint8_t>& pre_master_secret
 void client::send_client_key_exchange(const done_handler& handler)
 {
     do_wrapped([&] {
-        std::cout << "Sending client key exchange\n";
+        //std::cout << "Sending client key exchange\n";
         std::vector<uint8_t> pre_master_secret;
         handshake       client_key_exchange;
         assert(client_kex);
         std::tie(pre_master_secret, client_key_exchange) = client_kex->result();
-        std::cout << "Sending client key exchange." << std::endl;
+        //std::cout << "Sending client key exchange." << std::endl;
         send_handshake(client_key_exchange,
                 wrapped([this, pre_master_secret, handler] () {
                     request_cipher_change(pre_master_secret, handler);

@@ -9,8 +9,6 @@
 #include <int_util/int_util.h>
 #include <ec/ec.h>
 
-#include <iostream>
-
 #include <int_util/int.h>
 
 using namespace funtls;
@@ -19,7 +17,7 @@ namespace {
 
 void verify_signature_rsa(const x509::certificate& cert, const tls::signed_signature& sig, const std::vector<uint8_t>& digest_buf)
 {
-    std::cout << "Verify RSA " << sig.hash_algorithm << " signature" << std::endl;
+    //std::cout << "Verify RSA " << sig.hash_algorithm << " signature" << std::endl;
     auto public_key = x509::rsa_public_key_from_certificate(cert);
     FUNTLS_CHECK_BINARY(sig.signature_algorithm, ==, tls::signature_algorithm::rsa, "");
     const auto digest = x509::pkcs1_decode(public_key, sig.value.as_vector());
@@ -37,7 +35,7 @@ void verify_signature_rsa(const x509::certificate& cert, const tls::signed_signa
 
 void verify_signature_ecdsa(const x509::certificate& cert, const tls::signed_signature& sig, const std::vector<uint8_t>& digest_buf)
 {
-    std::cout << "Verify ECDSA " << sig.hash_algorithm << " signature" << std::endl;
+    //std::cout << "Verify ECDSA " << sig.hash_algorithm << " signature" << std::endl;
     auto public_key = x509::ec_public_key_from_certificate(cert);
     const auto& curve = x509::curve_from_name(public_key.curve_name);
 
@@ -205,12 +203,12 @@ ecdhe_client_kex_protocol::ecdhe_client_kex_protocol(signature_algorithm sig_alg
 void ecdhe_client_kex_protocol::do_server_key_exchange(const handshake& ske) {
     assert(params_ == nullptr);
     auto kex = get_as<server_key_exchange_ec_dhe>(ske);
-    std::cout << "curve_type=" << kex.params.curve_params.curve_type << std::endl;
+    //std::cout << "curve_type=" << kex.params.curve_params.curve_type << std::endl;
     FUNTLS_CHECK_BINARY(kex.params.curve_params.curve_type, ==, ec_curve_type::named_curve, "Unsupported curve type");
-    std::cout << "named_curve=" << kex.params.curve_params.named_curve << std::endl;
+    //std::cout << "named_curve=" << kex.params.curve_params.named_curve << std::endl;
     const auto& curve = curve_from_name(kex.params.curve_params.named_curve);
     const auto ephemeral_public_key = ec::point_from_bytes(kex.params.public_key.as_vector());
-    std::cout << "ephemeral_public_key=" << ephemeral_public_key << std::endl;
+    //std::cout << "ephemeral_public_key=" << ephemeral_public_key << std::endl;
     curve.check_public_key(ephemeral_public_key);
     append_to_buffer(digest_buf_, kex.params);
     verify_signature_(server_certificate(), kex.signature, digest_buf_);
@@ -222,7 +220,7 @@ ecdhe_client_kex_protocol::result_type ecdhe_client_kex_protocol::do_result() co
     const auto& curve = curve_from_name(params_->curve_name);
 
     const auto size = static_cast<uint32_t>(ilog256(curve.n));
-    std::cout << "size = " << size << std::endl;
+    //std::cout << "size = " << size << std::endl;
     assert(size == ilog256(curve.p));
 
     const auto d_U = rand_positive_int_less(curve.n); // private key
@@ -231,7 +229,7 @@ ecdhe_client_kex_protocol::result_type ecdhe_client_kex_protocol::do_result() co
     assert(d_U < curve.n);
 
     ec::point Yc = curve.mul(d_U, curve.G); // ephemeral client public key
-    std::cout << "Client public key: " << Yc << std::endl;
+    //std::cout << "Client public key: " << Yc << std::endl;
 #ifndef NDEBUG
     curve.check_public_key(Yc);
 #endif
@@ -239,7 +237,7 @@ ecdhe_client_kex_protocol::result_type ecdhe_client_kex_protocol::do_result() co
     ec::point P = curve.mul(d_U, params_->Q);  // shared secret
     assert(curve.on_curve(P));
 
-    std::cout << "Shared secret: " << P << std::endl;
+    //std::cout << "Shared secret: " << P << std::endl;
 
     FUNTLS_CHECK_BINARY(P, !=, ec::infinity, "Invalid shared secret obtained");
 

@@ -7,8 +7,6 @@
 
 #include <string.h>
 
-#include <iostream>
-
 #ifdef WIN32
 #include "trust_store_win32.h"
 namespace {
@@ -66,7 +64,9 @@ std::vector<const x509::certificate*> trust_store::find(const x509::name& subjec
                 x509::verify_x509_signature(cert, cert);
                 res.push_back(&cert);
             } catch (const std::exception& e) {
-                std::cout << cert << "Not used: " << e.what() << std::endl;
+                if (log_) {
+                    (*log_) << cert << "Not used: " << e.what() << std::endl;
+                }
             }
         }
     }
@@ -75,18 +75,20 @@ std::vector<const x509::certificate*> trust_store::find(const x509::name& subjec
 
 void trust_store::add_from_directory(const std::string& path)
 {
-    std::cout << "Adding certificates to trust store from " << path << std::endl;
+    //std::cout << "Adding certificates to trust store from " << path << std::endl;
     for (const auto& f : all_files_in_dir(path)) {
         assert(f.size() > path.size() + 1);
         const auto fn = f.substr(path.size()+1);
-        std::cout << " " << fn << " ... " << std::flush;
+        //std::cout << " " << fn << " ... " << std::flush;
         if (fn == "ca-certificates.crt") {
-            std::cout << "HACK - skipping\n";
-            continue;
+            if (log_) {
+                (*log_) << "HACK - skipping " << fn << "\n";
+                continue;
+            }
         }
         auto cert = x509::read_pem_certificate_from_file(f);
         add(cert);
-        std::cout << cert.tbs().subject << std::endl;
+        //std::cout << cert.tbs().subject << std::endl;
     }
 }
 
@@ -120,7 +122,9 @@ void trust_store::verify_cert_chain(const std::vector<x509::certificate>& certli
     FUNTLS_CHECK_BINARY(certlist.size(), >, 0, "Empty certificate chain not allowed");
     const auto self_signed = certlist.back().tbs().subject == certlist.back().tbs().issuer;
     if (certlist.size() == 1 && self_signed) {
-        std::cout << "Checking self-signed certificate\n" << certlist[0] << std::endl;
+        if (log_) {
+            (*log_) << "Checking self-signed certificate\n" << certlist[0] << std::endl;
+        }
         x509::verify_x509_signature(certlist[0], certlist[0]);
         return;
     }
@@ -140,7 +144,9 @@ void trust_store::verify_cert_chain(const std::vector<x509::certificate>& certli
             if (!cert) {
                 cert = c;
             } else {
-                std::cout << "Warning multiple certificates could be used for " << c->tbs().subject << std::endl;
+                if (log_) {
+                    (*log_) << "Warning multiple certificates could be used for " << c->tbs().subject << std::endl;
+                }
             }
         }
         if (!cert) {
@@ -150,8 +156,10 @@ void trust_store::verify_cert_chain(const std::vector<x509::certificate>& certli
         }
         complete_chain.push_back(*cert);
     }
-    std::cout << "Verifying trust chain:\n";
-    for (const auto& cert : complete_chain) std::cout << cert << std::endl << std::endl;
+    if (log_) {
+        (*log_) << "Verifying trust chain:\n";
+        for (const auto& cert : complete_chain) (*log_) << cert << std::endl << std::endl;
+    }
     x509::verify_x509_certificate_chain(complete_chain);
 }
 

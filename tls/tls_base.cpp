@@ -3,8 +3,6 @@
 #include <util/test.h>
 #include <util/base_conversion.h>
 
-#include <iostream>
-
 using namespace funtls;
 using util::wrapped;
 using util::do_wrapped;
@@ -127,7 +125,7 @@ void tls_base::set_pending_ciphers(const std::vector<uint8_t>& pre_master_secret
 void tls_base::send_change_cipher_spec(const done_handler& handler)
 {
     do_wrapped([&] {
-        std::cout << "Sending change cipher spec." << std::endl;
+        //std::cout << "Sending change cipher spec." << std::endl;
         if (!pending_encrypt_cipher_) {
             FUNTLS_CHECK_FAILURE("Sending ChangeCipherSpec without a pending cipher suite");
         }
@@ -247,7 +245,7 @@ void tls_base::do_decrypt(tls::content_type content_type, tls::protocol_version 
 
             std::ostringstream oss;
             oss << alert.level << " " << alert.description;
-            std::cout << "Got alert: " << oss.str() <<  std::endl;
+            //std::cout << "Got alert: " << oss.str() <<  std::endl;
             throw std::runtime_error("Alert received: " + oss.str());
         }
 

@@ -669,9 +669,10 @@ int main(int argc, char* argv[])
                 for (const auto& cs: cipher_suites) {
                     std::cout << "=== Testing " << cs << " ===" << std::endl;
                     std::string res;
+                    util::ostream_adapter fetch_log{[](const std::string& s) { std::cout << "Client: " << s; }};
                     tls_fetch("localhost", std::to_string(port), "/", {cs}, ts, [&res](const std::vector<uint8_t>& data) {
                         res.insert(res.end(), data.begin(), data.end());
-                    });
+                    }, fetch_log);
                     std::cout << "Got result: \"" << res << "\"" << std::endl;
                     FUNTLS_ASSERT_EQUAL("Hello world!", res);
                 }

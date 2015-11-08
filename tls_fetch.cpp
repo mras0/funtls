@@ -1,7 +1,5 @@
 #include "tls_fetch.h"
 
-#include <iostream>
-
 #include <util/test.h>
 #include <tls/tls_client.h>
 #include <x509/trust_store.h>
@@ -10,7 +8,7 @@
 
 namespace funtls {
 
-void tls_fetch(const std::string& host, const std::string& port, const std::string& path, const std::vector<tls::cipher_suite>& wanted_ciphers, const x509::trust_store& ts, std::function<void (const std::vector<uint8_t>&)> on_data)
+void tls_fetch(const std::string& host, const std::string& port, const std::string& path, const std::vector<tls::cipher_suite>& wanted_ciphers, const x509::trust_store& ts, std::function<void (const std::vector<uint8_t>&)> on_data, std::ostream& log)
 {
     FUNTLS_CHECK_BINARY(wanted_ciphers.size(), !=, 0, "No ciphers");
 
@@ -18,9 +16,9 @@ void tls_fetch(const std::string& host, const std::string& port, const std::stri
     boost::asio::ip::tcp::socket    socket(io_service);
     boost::asio::ip::tcp::resolver  resolver(io_service);
 
-    std::cout << "Connecting to " << host << ":" << port << " ..." << std::flush;
+    log << "Connecting to " << host << ":" << port << " ..." << std::flush;
     boost::asio::connect(socket, resolver.resolve({host, port}));
-    std::cout << " OK" << std::endl;
+    log << " OK" << std::endl;
     tls::verify_certificate_chain_func cf = std::bind(&x509::trust_store::verify_cert_chain, ts, std::placeholders::_1);
     tls::client client{make_tls_stream(std::move(socket)), wanted_ciphers, cf};
 
@@ -31,7 +29,7 @@ void tls_fetch(const std::string& host, const std::string& port, const std::stri
             client.recv_app_data(got_app_data);
         } catch (const boost::system::system_error& e) {
             if (e.code() == boost::asio::error::eof) {
-                std::cout << "Got EOF\n";
+                log << "Got EOF\n";
                 io_service.stop();
                 return;
             }
@@ -46,14 +44,14 @@ void tls_fetch(const std::string& host, const std::string& port, const std::stri
     };
 
     client.perform_handshake(util::wrapped([&] {
-        std::cout << "Handshake done!\n";
+        log << "Handshake done!\n";
         const auto data = "GET "+path+" HTTP/1.1\r\nHost: "+host+"\r\nConnection: close\r\n\r\n";
         client.send_app_data(std::vector<uint8_t>(data.begin(), data.end()), util::wrapped([&](){
             client.recv_app_data(got_app_data);
         }, handler));
     }, handler));
     io_service.run();
-    std::cout << "io service exiting\n";
+    log << "io service exiting\n";
     result.get();
 }
 

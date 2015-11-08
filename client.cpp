@@ -1,7 +1,8 @@
+#include "tls_fetch.h"
 #include <iostream>
 
 #include <util/test.h>
-#include "tls_fetch.h"
+#include <util/ostream_adapter.h>
 
 using namespace funtls;
 
@@ -71,11 +72,13 @@ int main(int argc, char* argv[])
         }
 
         x509::trust_store ts;
+        ts.set_log(std::cout);
         ts.add_os_defaults();
 
+        util::ostream_adapter fetch_log{[](const std::string& s) { std::cout << "client: " << s; }};
         tls_fetch(host, port, path, wanted_ciphers, ts, [](const std::vector<uint8_t>& data) { 
             std::cout << std::string(data.begin(), data.end()) << std::flush;
-        });
+        }, fetch_log);
         return 0;
     } catch (const std::exception& e) {
         std::cerr << e.what() << std::endl;

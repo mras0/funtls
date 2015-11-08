@@ -6,7 +6,9 @@
 namespace funtls { namespace x509 {
 class trust_store {
 public:
-    trust_store() {}
+    trust_store() : log_(nullptr) {}
+
+    void set_log(std::ostream& log) { log_ = &log; }
 
     void add(const x509::certificate& cert);
     void add_from_directory(const std::string& path);
@@ -17,6 +19,7 @@ public:
 
     void verify_cert_chain(const std::vector<x509::certificate>& certlist) const;
 private:
+    std::ostream*                  log_;
     std::vector<x509::certificate> certs_;
 };
 
