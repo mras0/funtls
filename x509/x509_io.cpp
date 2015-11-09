@@ -14,7 +14,6 @@ using namespace funtls;
 namespace {
 
 // PEM is specified in RFC1421
-const char* const pem_line_end = "\r\n";
 const char* const cert_begin_line = "-----BEGIN CERTIFICATE-----";
 const char* const cert_end_line   = "-----END CERTIFICATE-----";
 const char* const pkey_begin_line = "-----BEGIN PRIVATE KEY-----";
@@ -60,16 +59,16 @@ std::vector<uint8_t> read_pem_data(std::istream& is, const char* const begin_lin
 void write_pem_data(std::ostream& os, const char* const begin_line, const char* const end_line, const std::vector<uint8_t>& der_encoded_data)
 {
     constexpr size_t max_line_width = 64;
-    os << begin_line << pem_line_end;
+    os << begin_line << '\n';
     const auto base64_encoded_data = util::base64_encode(der_encoded_data);
     for (size_t i = 0, len = base64_encoded_data.size(); i < len; ) {
         const size_t remaining = len - i;
         const auto this_line = remaining < max_line_width ? remaining : max_line_width;
         os.write(&base64_encoded_data[i], this_line);
-        os << pem_line_end;
+        os << '\n';
         i += this_line;
     }
-    os << end_line << pem_line_end;
+    os << end_line;
 }
 
 template<typename F>

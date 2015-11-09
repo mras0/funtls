@@ -518,6 +518,15 @@ certificate certificate::parse(const asn1::der_encoded_value& repr)
     return certificate{std::move(tbs_cert), std::move(tbsCertificate), std::move(sig_algo), std::move(sig_value)};
  }
 
+void certificate::serialize(std::vector<uint8_t>& buf) const
+{
+    asn1::serialize_sequence(buf,
+        asn1::identifier::constructed_sequence,
+            tbs_certificate_der_encoded_,
+            signature_algorithm_,
+            signature_);
+}
+
 std::ostream& operator<<(std::ostream& os, const certificate& cert)
 {
     assert(cert.tbs().signature_algorithm == cert.signature_algorithm());

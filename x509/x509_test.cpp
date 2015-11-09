@@ -428,6 +428,21 @@ void test_serialization()
             //visit_asn1(btxt, asn1::read_der_encoded_value(bv));
 
             FUNTLS_ASSERT_EQUAL(cert.certificate_der_encoded(), tbs_serialized);
+
+            // Serialize the complete certificate and check that it matches the input
+            const auto cert_serialized = asn1::serialized(cert);
+            // Read the certificate..
+            util::buffer_view cert_ser_view{cert_serialized.data(), cert_serialized.size()};
+            const auto reread_cert = x509::certificate::parse(asn1::read_der_encoded_value(cert_ser_view));
+            FUNTLS_ASSERT_EQUAL(cert.certificate_der_encoded(), reread_cert.certificate_der_encoded());
+            FUNTLS_ASSERT_EQUAL(cert.signature_algorithm().id(), reread_cert.signature_algorithm().id());
+            FUNTLS_ASSERT_EQUAL(cert.signature_algorithm().parameters(), reread_cert.signature_algorithm().parameters());
+            FUNTLS_ASSERT_EQUAL(cert.signature().as_vector(), reread_cert.signature().as_vector());
+
+            // Finally check that we end up with the original PEM encoded data when re-encoding the certificate
+            std::ostringstream oss;
+            x509::write_pem_certificate(oss, cert_serialized);
+            FUNTLS_ASSERT_EQUAL(pem_data, oss.str());
         }
     }
 }
@@ -456,13 +471,6 @@ int main()
 {
     // TODO: Check x509::name equals operations. Only exact matches should be allowed (with order being important) etc.
     try {
-
-        //
-        // Temp: TODO: Remove from here
-        //
-        test_serialization();
-
-
         test_cert();
         test_cert_extensions();
         test_pkey();

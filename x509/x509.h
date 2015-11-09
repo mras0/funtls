@@ -187,6 +187,8 @@ public:
         return signature_;
     }
 
+    void serialize(std::vector<uint8_t>& buf) const;
+
 private:
     certificate(tbs_certificate&& tbs_cert, std::vector<uint8_t>&& encoded_cert, algorithm_id&& sig_alg, asn1::bit_string&& sig)
         : tbs_certificate_(std::move(tbs_cert))

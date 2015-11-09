@@ -24,6 +24,8 @@ struct rsa_public_key {
         return k;
     }
 
+    void serialize(std::vector<uint8_t>& buf) const;
+
     static rsa_public_key parse(const asn1::der_encoded_value& repr);
 };
 

@@ -47,7 +47,8 @@ void make()
     
     const asn1::utc_time not_before{"1511080000Z"};
     const asn1::utc_time not_after{"2511080000Z"};
-    const asn1::bit_string subject_public_key{std::vector<uint8_t>{1,2,3}};
+    x509::rsa_public_key subect_public_key{asn1::integer::from_bytes({1}), asn1::integer::from_bytes({2})};
+    const asn1::bit_string subject_public_key_bs{asn1::serialized(subect_public_key)};
 
     x509::tbs_certificate tbs{
         x509::version::v3,                                    // version
@@ -58,7 +59,7 @@ void make()
         not_after,                                            // validity_not_after
         subject,                                              // subect
         x509::algorithm_id{x509::id_rsaEncryption},           // subject_public_key_algo
-        subject_public_key,                                   // subject_public_key
+        subject_public_key_bs,                                // subject_public_key
         {} // extensions
     };
 

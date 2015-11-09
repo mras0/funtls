@@ -55,6 +55,11 @@ asn1::object_id digest_algo_from_signature_algo(const x509::algorithm_id& sig_al
 
 namespace funtls { namespace x509 {
 
+void rsa_public_key::serialize(std::vector<uint8_t>& buf) const
+{
+    asn1::serialize_sequence(buf, asn1::identifier::constructed_sequence, modulus, public_exponent);
+}
+
 rsa_public_key rsa_public_key::parse(const asn1::der_encoded_value& repr)
 {
     auto elem_seq        = asn1::sequence_view{repr};
