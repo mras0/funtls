@@ -9,6 +9,9 @@ using namespace funtls;
 namespace {
 
 constexpr asn1::identifier x509_version_tag = asn1::identifier::context_specific_constructed_0;
+constexpr auto id_issuerUniqueID  = asn1::identifier::context_specific_constructed_1;
+constexpr auto id_subjectUniqueID = asn1::identifier::context_specific_constructed_2;
+constexpr auto id_extensions      = asn1::identifier::context_specific_constructed_3;
 
 enum x509::version::tag version_tag_from_int(const asn1::integer& i)
 {
@@ -67,13 +70,15 @@ std::vector<x509::extension> parse_extensions(const asn1::der_encoded_value& val
         auto extnID = asn1::object_id{ext.next()};
         auto next_elem = ext.next();
         asn1::boolean critical{0};
+        bool critical_present = false;
         if (next_elem.id() == asn1::identifier::boolean) {
             critical  = asn1::boolean{next_elem};
+            critical_present = true;
             next_elem = ext.next();
         }
         auto extnValue = asn1::octet_string{next_elem};
         FUNTLS_CHECK_BINARY(ext.has_next(), ==, false, "Extra data at end of extension element");
-        ret.push_back(x509::extension{std::move(extnID), std::move(critical), std::move(extnValue)});
+        ret.push_back(x509::extension{std::move(extnID), critical_present, std::move(critical), std::move(extnValue)});
     } while (extensions.has_next());
 
     return ret;
@@ -147,11 +152,10 @@ void name::serialize(std::vector<uint8_t>& buf) const {
 
     std::vector<uint8_t> attr_buffer;
     for (const auto& a : attributes_) {
-        asn1::serialize_sequence(attr_buffer, asn1::identifier::constructed_sequence, a.first, a.second);
+        asn1::serialize_sequence(attr_buffer, asn1::identifier::constructed_set, asn1::serialized_sequence(asn1::identifier::constructed_sequence, a.first, a.second));
     }
 
-    asn1::serialize_sequence(buf, asn1::identifier::constructed_sequence,
-        asn1::serialized_sequence(asn1::identifier::constructed_set, attr_buffer));
+    asn1::serialize_sequence(buf, asn1::identifier::constructed_sequence, attr_buffer);
 }
 
 std::ostream& operator<<(std::ostream& os, const name& n)
@@ -343,6 +347,15 @@ const struct {
 };
 
 }
+void extension::serialize(std::vector<uint8_t>& buf) const
+{
+    if (critical_present) {
+        asn1::serialize_sequence(buf, asn1::identifier::constructed_sequence, id, critical, value);
+    } else {
+        assert(!critical);
+        asn1::serialize_sequence(buf, asn1::identifier::constructed_sequence, id, value);
+    }
+}
 
 std::ostream& operator<<(std::ostream& os, const extension& e)
 {
@@ -363,7 +376,13 @@ std::ostream& operator<<(std::ostream& os, const extension& e)
 void tbs_certificate::serialize(std::vector<uint8_t>& buf) const
 {
     std::vector<uint8_t> extensions_buffer;
-    assert(extensions.empty());
+
+    if (!extensions.empty()) {
+        for (const auto& ext : extensions) {
+            ext.serialize(extensions_buffer);
+        }
+        extensions_buffer = asn1::serialized_sequence(id_extensions, asn1::serialized_sequence(asn1::identifier::constructed_sequence, extensions_buffer));
+    }
 
     asn1::serialize_sequence(buf, asn1::identifier::constructed_sequence,
         version,
@@ -439,10 +458,6 @@ tbs_certificate parse_tbs_certificate(const asn1::der_encoded_value& repr)
     std::vector<extension> extensions;
 
     while (cert_seq.has_next()) {
-        constexpr auto id_issuerUniqueID  = asn1::identifier::context_specific_constructed_1;
-        constexpr auto id_subjectUniqueID = asn1::identifier::context_specific_constructed_2;
-        constexpr auto id_extensions      = asn1::identifier::context_specific_constructed_3;
-
         auto value = cert_seq.next();
         if (value.id() == id_issuerUniqueID) {
             // issuerUniqueID  [1]  IMPLICIT UniqueIdentifier OPTIONAL -- If present, version MUST be v2 or v3

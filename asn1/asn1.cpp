@@ -16,10 +16,10 @@ void serialize_helper(std::vector<uint8_t>& buf, funtls::asn1::identifier id, co
 {
     static_assert(sizeof(*data.begin()) == 1, "Invalid container");
     buf.push_back(static_cast<uint8_t>(id));
-    if (data.size() < 0x80) {
-        buf.push_back(static_cast<uint8_t>(data.size()));
-    } else {
-        FUNTLS_CHECK_FAILURE("Not implemented");
+    const size_t size = data.size();
+    buf.push_back(static_cast<uint8_t>(size));
+    if (size >= 0x80) {
+        funtls::asn1::detail::fixup_size(buf, buf.end()-1, size);
     }
     buf.insert(buf.end(), data.begin(), data.end());
 }
@@ -83,6 +83,22 @@ std::string read_string(identifier id, const der_encoded_value& repr)
     buf.read(&s[0], buf.remaining());
     // TODO: Check that the string is valid
     return s;
+}
+
+
+
+void fixup_size(std::vector<uint8_t>& buf, std::vector<uint8_t>::iterator size_byte, size_t size)
+{
+    assert(size >= 0x80);
+    uint8_t size_bytes[sizeof(size)];
+    uint8_t num_size_bytes = 0;
+    do {
+        ++num_size_bytes;
+        size_bytes[sizeof(size_bytes)-num_size_bytes] = static_cast<uint8_t>(size);
+        size >>= 8;
+    } while (size);
+    *size_byte = 0x80 | num_size_bytes;
+    buf.insert(size_byte+1, size_bytes + sizeof(size_bytes) - num_size_bytes, size_bytes + sizeof(size_bytes));
 }
 
 } // namespace detail
@@ -159,6 +175,11 @@ boolean::boolean(const der_encoded_value& repr)
     auto buf = repr.content_view();
     FUNTLS_CHECK_BINARY(buf.remaining(), ==, 1, "Invalid boolean length encountered");
     repr_ = buf.get();
+}
+
+void boolean::serialize(std::vector<uint8_t>& buf) const
+{
+    serialize_helper(buf, id, std::vector<uint8_t>{repr_});
 }
 
 integer::integer(const der_encoded_value& repr)

@@ -67,6 +67,17 @@ void test_asn1()
     FUNTLS_ASSERT_EQUAL(0, null_value.content_view().size());
 
     //
+    // BOOLEAN
+    //
+    {
+        FUNTLS_ASSERT_EQUAL(from_bytes<boolean>({0x00}), false);
+        FUNTLS_ASSERT_EQUAL(from_bytes<boolean>({0x01}), true);
+        FUNTLS_ASSERT_EQUAL(from_bytes<boolean>({0x82}), true);
+        FUNTLS_ASSERT_EQUAL((std::vector<uint8_t>{0x01, 0x01, 0x00}), serialized(boolean{false}));
+        FUNTLS_ASSERT_EQUAL((std::vector<uint8_t>{0x01, 0x01, 0x01}), serialized(boolean{true}));
+    }
+
+    //
     // INTEGER
     //
 
@@ -222,6 +233,21 @@ void test_asn1()
         FUNTLS_ASSERT_EQUAL((std::vector<uint8_t>{0x6e, 0x5d, 0xc0}), from_bytes<bit_string>({0x06, 0x6e, 0x5d, 0xc0}).repr());
 
         FUNTLS_ASSERT_EQUAL((std::vector<uint8_t>{0x03, 0x03, 0x00, 0xff, 0x80}), serialized(bit_string{std::vector<uint8_t>{0xff,0x80}}));
+
+        std::string s(500, 'x');
+        std::vector<uint8_t> v(s.begin(), s.end());
+        const auto x500str = serialized(bit_string{v});
+        FUNTLS_ASSERT_EQUAL(505, x500str.size());
+        FUNTLS_ASSERT_EQUAL(0x03, (unsigned)x500str[0]);
+        FUNTLS_ASSERT_EQUAL(0x82, (unsigned)x500str[1]);
+        FUNTLS_ASSERT_EQUAL(501/256, (unsigned)x500str[2]);
+        FUNTLS_ASSERT_EQUAL(501%256, (unsigned)x500str[3]);
+        FUNTLS_ASSERT_EQUAL(0x00, (unsigned)x500str[4]);
+        for (int i = 0; i < 500; ++i) {
+            FUNTLS_ASSERT_EQUAL('x', x500str[5+i]);
+        }
+        buffer_view reread{x500str.data(), x500str.size()};
+        FUNTLS_ASSERT_EQUAL(v, bit_string{asn1::read_der_encoded_value(reread)}.as_vector());
     }
 
     //

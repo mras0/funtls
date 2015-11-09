@@ -156,6 +156,8 @@ public:
         return repr_;
     }
 
+    void serialize(std::vector<uint8_t>& buf) const;
+
 private:
     uint8_t repr_;
 };
@@ -466,6 +468,8 @@ inline void serialize_all(std::vector<uint8_t>& buf, const Obj& obj, const Objs&
     serialize_all(buf, objs...);
 }
 
+void fixup_size(std::vector<uint8_t>& buf, std::vector<uint8_t>::iterator size_byte, size_t size);
+
 } // namespace detail
 
 template<typename... Objs>
@@ -476,8 +480,11 @@ inline void serialize_sequence(std::vector<uint8_t>& buf, identifier id, const O
     const auto content_begin_index = buf.size();
     detail::serialize_all(buf, objs...);
     const auto content_size = buf.size() - content_begin_index;
-    assert(content_size < 0x80);
-    buf[content_begin_index-1] = static_cast<uint8_t>(content_size);
+    if (content_size < 0x80) {
+        buf[content_begin_index-1] = static_cast<uint8_t>(content_size);
+    } else {
+        detail::fixup_size(buf, buf.begin() + (content_begin_index - 1), content_size);
+    }
 }
 
 template<typename Obj>

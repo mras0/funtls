@@ -248,6 +248,30 @@ void test_pkey()
     FUNTLS_ASSERT_EQUAL(msg, x509::pkcs1_decode(pkey, e2_msg));
 }
 
+void visit_asn1(std::ostream& os, const asn1::der_encoded_value& v, int level);
+
+template<asn1::identifier::tag tag>
+void visit_asn1_sequence(std::ostream& os, const asn1::der_encoded_value& v, int level)
+{
+    auto seq = asn1::container_view<tag>{v};
+    while (seq.has_next()) {
+        visit_asn1(os, seq.next(), level);
+    }
+}
+
+void visit_asn1(std::ostream& os, const asn1::der_encoded_value& v, int level = 0)
+{
+    os << std::string(level*2, ' ') << v.id() << " len=" << v.content_view().remaining() << std::endl;
+    switch (static_cast<uint8_t>(v.id())) {
+    case asn1::identifier::constructed_sequence:
+        visit_asn1_sequence<asn1::identifier::constructed_sequence>(os, v, level+1);
+        break;
+    case asn1::identifier::constructed_set:
+         visit_asn1_sequence<asn1::identifier::constructed_set>(os, v, level+1);
+         break;
+    }
+}
+
 void test_serialization()
 {
     //digest_info.insert(digest_info.begin(), {0x30, 0x21, 0x30, 0x09, 0x06, 0x05, 0x2b, 0x0e, 0x03, 0x02, 0x1a, 0x05, 0x00, 0x04, 0x14});
@@ -311,7 +335,7 @@ void test_serialization()
         FUNTLS_ASSERT_EQUAL(asn1::serialized(common_name_localhost), common_name_localhost_bytes);
     
         x509::name name{{std::make_pair(x509::attr_commonName, asn1::ia5_string{"Hello world"}),std::make_pair(x509::attr_countryName, asn1::ia5_string{"XQ"})}};
-        const std::vector<uint8_t> expeced_name_bytes = util::base16_decode("3021311F30120603550403160B48656C6C6F20776F726C643009060355040616025851");
+        const std::vector<uint8_t> expeced_name_bytes = util::base16_decode("3023311430120603550403160B48656C6C6F20776F726C64310B3009060355040616025851");
         FUNTLS_ASSERT_EQUAL(asn1::serialized(name), expeced_name_bytes);
         util::buffer_view name_view{expeced_name_bytes.data(), expeced_name_bytes.size()};
         FUNTLS_ASSERT_EQUAL(x509::name{asn1::read_der_encoded_value(name_view)} , name);
@@ -353,6 +377,60 @@ void test_serialization()
         FUNTLS_ASSERT_EQUAL(x509::id_rsaEncryption, read_tbs.subject_public_key_algo.id());
         FUNTLS_ASSERT_EQUAL(true, read_tbs.subject_public_key_algo.null_parameters());
         FUNTLS_ASSERT_EQUAL(true, read_tbs.extensions.empty());
+
+        const char* const certs[] = {
+            test_cert0,
+            test_cert1,
+            //test_cert2, // Doesn't work yet
+            test_cert3,
+            test_cert_chain0_root
+        };
+
+        for (auto pem_data : certs) {
+            const auto cert = x509::read_pem_certificate_from_string(pem_data);
+            std::cout << cert << std::endl;
+
+            const auto tbs_serialized = asn1::serialized(cert.tbs());
+            // Can the serialized data be re-read
+            util::buffer_view tbs_serialized_view{tbs_serialized.data(), tbs_serialized.size()};
+            const auto reread_tbs = x509::parse_tbs_certificate(asn1::read_der_encoded_value(tbs_serialized_view));
+            std::cout << reread_tbs << std::endl;
+
+            FUNTLS_ASSERT_EQUAL(cert.tbs().version, reread_tbs.version);
+            FUNTLS_ASSERT_EQUAL(cert.tbs().serial_number.as_vector(), reread_tbs.serial_number.as_vector());
+            FUNTLS_ASSERT_EQUAL(cert.tbs().signature_algorithm.id(), reread_tbs.signature_algorithm.id());
+            FUNTLS_ASSERT_EQUAL(cert.tbs().signature_algorithm.null_parameters(), reread_tbs.signature_algorithm.null_parameters());
+            FUNTLS_ASSERT_EQUAL(cert.tbs().subject, reread_tbs.subject);
+            FUNTLS_ASSERT_EQUAL(cert.tbs().validity_not_before.as_string(), reread_tbs.validity_not_before.as_string());
+            FUNTLS_ASSERT_EQUAL(cert.tbs().validity_not_after.as_string(), reread_tbs.validity_not_after.as_string());
+            FUNTLS_ASSERT_EQUAL(cert.tbs().issuer, reread_tbs.issuer);
+            FUNTLS_ASSERT_EQUAL(cert.tbs().subject_public_key_algo.id(), reread_tbs.subject_public_key_algo.id());
+            FUNTLS_ASSERT_EQUAL(cert.tbs().subject_public_key_algo.null_parameters(), reread_tbs.subject_public_key_algo.null_parameters());
+            FUNTLS_ASSERT_EQUAL(cert.tbs().extensions.size(), reread_tbs.extensions.size());
+            for (size_t i = 0; i < reread_tbs.extensions.size(); ++i) {
+                const auto& a = cert.tbs().extensions[i];
+                const auto& b = reread_tbs.extensions[i];
+                FUNTLS_ASSERT_EQUAL(a.id, b.id);
+                FUNTLS_ASSERT_EQUAL(a.critical_present, b.critical_present);
+                FUNTLS_ASSERT_EQUAL(a.critical, b.critical);
+                FUNTLS_ASSERT_EQUAL(a.value, b.value);
+            }
+
+            // Can we serialize the tbs_certificate and get it back exactly?
+
+            auto a = cert.certificate_der_encoded();
+            util::buffer_view av{a.data(), a.size()};
+            std::ofstream atxt("c:/temp/a.txt");
+            visit_asn1(atxt, asn1::read_der_encoded_value(av));
+            std::cout << "\n\n";
+            auto b = tbs_serialized;
+            util::buffer_view bv{b.data(), b.size()};
+            std::ofstream btxt("c:/temp/b.txt");
+            visit_asn1(btxt, asn1::read_der_encoded_value(bv));
+
+
+            FUNTLS_ASSERT_EQUAL(cert.certificate_der_encoded(), tbs_serialized);
+        }
     }
 }
 
@@ -380,6 +458,13 @@ int main()
 {
     // TODO: Check x509::name equals operations. Only exact matches should be allowed (with order being important) etc.
     try {
+
+        //
+        // Temp: TODO: Remove from here
+        //
+        test_serialization();
+
+
         test_cert();
         test_cert_extensions();
         test_pkey();

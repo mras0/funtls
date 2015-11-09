@@ -138,8 +138,11 @@ std::ostream& operator<<(std::ostream& os, const algorithm_id& aid);
 
 struct extension {
     asn1::object_id    id;
+    bool               critical_present;
     asn1::boolean      critical;
     asn1::octet_string value;
+
+    void serialize(std::vector<uint8_t>& buf) const;
 };
 
 std::ostream& operator<<(std::ostream& os, const extension& ext);
