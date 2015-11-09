@@ -165,6 +165,8 @@ struct tbs_certificate {
 std::ostream& operator<<(std::ostream& os, const tbs_certificate& c);
 tbs_certificate parse_tbs_certificate(const asn1::der_encoded_value& repr);
 
+class certificate_signer;
+
 struct certificate {
 public:
     static certificate parse(const asn1::der_encoded_value&);
@@ -189,18 +191,34 @@ private:
     certificate(tbs_certificate&& tbs_cert, std::vector<uint8_t>&& encoded_cert, algorithm_id&& sig_alg, asn1::bit_string&& sig)
         : tbs_certificate_(std::move(tbs_cert))
         , tbs_certificate_der_encoded_(std::move(encoded_cert))
-        , signature_algorithm_(sig_alg)
-        , signature_(sig) {
+        , signature_algorithm_(std::move(sig_alg))
+        , signature_(std::move(sig)) {
     }
 
     tbs_certificate         tbs_certificate_;
     std::vector<uint8_t>    tbs_certificate_der_encoded_;
     algorithm_id            signature_algorithm_;
     asn1::bit_string        signature_;
+
+    friend certificate_signer;
 };
 
 std::ostream& operator<<(std::ostream& os, const certificate& cert);
 
+class certificate_signer {
+public:
+    virtual ~certificate_signer() {}
+
+    certificate sign(const tbs_certificate& tbs_cert) const {
+        auto der_cert = asn1::serialized(tbs_cert);
+        auto sig = do_sign(der_cert);
+        return certificate{tbs_certificate(tbs_cert), std::move(der_cert), do_algorithm_id(), asn1::bit_string{sig}};
+    }
+
+private:
+    virtual std::vector<uint8_t> do_sign(const std::vector<uint8_t>&) const = 0;
+    virtual algorithm_id         do_algorithm_id() const = 0;
+};
 
 //
 // Checks the signature of the X509 v3 certificate 'subject_cert' against the issuers certificate

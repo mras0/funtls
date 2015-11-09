@@ -375,6 +375,7 @@ std::ostream& operator<<(std::ostream& os, const extension& e)
 
 void tbs_certificate::serialize(std::vector<uint8_t>& buf) const
 {
+    assert(version == x509::version::v3);
     std::vector<uint8_t> extensions_buffer;
 
     if (!extensions.empty()) {

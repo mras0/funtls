@@ -381,20 +381,18 @@ void test_serialization()
         const char* const certs[] = {
             test_cert0,
             test_cert1,
-            //test_cert2, // Doesn't work yet
+            // test_cert2, // x509v1 certificate - not supported
             test_cert3,
             test_cert_chain0_root
         };
 
         for (auto pem_data : certs) {
             const auto cert = x509::read_pem_certificate_from_string(pem_data);
-            std::cout << cert << std::endl;
 
             const auto tbs_serialized = asn1::serialized(cert.tbs());
             // Can the serialized data be re-read
             util::buffer_view tbs_serialized_view{tbs_serialized.data(), tbs_serialized.size()};
             const auto reread_tbs = x509::parse_tbs_certificate(asn1::read_der_encoded_value(tbs_serialized_view));
-            std::cout << reread_tbs << std::endl;
 
             FUNTLS_ASSERT_EQUAL(cert.tbs().version, reread_tbs.version);
             FUNTLS_ASSERT_EQUAL(cert.tbs().serial_number.as_vector(), reread_tbs.serial_number.as_vector());
@@ -418,16 +416,16 @@ void test_serialization()
 
             // Can we serialize the tbs_certificate and get it back exactly?
 
-            auto a = cert.certificate_der_encoded();
-            util::buffer_view av{a.data(), a.size()};
-            std::ofstream atxt("c:/temp/a.txt");
-            visit_asn1(atxt, asn1::read_der_encoded_value(av));
-            std::cout << "\n\n";
-            auto b = tbs_serialized;
-            util::buffer_view bv{b.data(), b.size()};
-            std::ofstream btxt("c:/temp/b.txt");
-            visit_asn1(btxt, asn1::read_der_encoded_value(bv));
-
+            //auto a = cert.certificate_der_encoded();
+            //util::buffer_view av{a.data(), a.size()};
+            //std::ofstream atxt("c:/temp/a.txt");
+            //atxt << cert << "\n\n";
+            //visit_asn1(atxt, asn1::read_der_encoded_value(av));
+            //auto b = tbs_serialized;
+            //util::buffer_view bv{b.data(), b.size()};
+            //std::ofstream btxt("c:/temp/b.txt");
+            //btxt << reread_tbs << "\n\n";
+            //visit_asn1(btxt, asn1::read_der_encoded_value(bv));
 
             FUNTLS_ASSERT_EQUAL(cert.certificate_der_encoded(), tbs_serialized);
         }
