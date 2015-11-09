@@ -112,6 +112,17 @@ bool is_prime(const int_type& n) {
     return miller_rabin_test(n, 25);
 }
 
+template<typename IntType>
+IntType gcd(IntType a, IntType b) {
+    for (;;) {
+        if (b == 0) return a;
+        IntType temp = a % b;
+        a = b;
+        b = temp;
+    }
+}
+
+
 } // namespace funtls
 
 #endif

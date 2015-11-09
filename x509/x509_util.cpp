@@ -8,7 +8,7 @@
 
 using namespace funtls;
 
-void show(const std::string& filename)
+void show_certificate(const std::string& filename)
 {
     std::ifstream in(filename, std::ifstream::binary);
     if (!in || !in.is_open()) {
@@ -38,6 +38,7 @@ private:
 };
 
 
+#include <util/test.h>
 #include <int_util/int.h>
 #include <int_util/int_util.h>
 
@@ -45,14 +46,31 @@ asn1::integer to_asn1_int(large_uint n, unsigned byte_count) {
     return asn1::integer::from_bytes(be_uint_to_bytes(n, byte_count));
 }
 
-x509::rsa_private_key make_rsa_private_key()
+// TODO: This is unsafe. The boost multiprecision sample uses independent random generators for testing and number generation
+// The miller-rabin test isn't run enough times
+// It's probably also terrible in other aspects
+large_uint random_prime(unsigned byte_count)
 {
-    constexpr unsigned byte_count = 2048 / 8;
+    constexpr int maxiter = 1000;
+    std::vector<uint8_t> bytes(byte_count);
+    for (int iter = 0; iter < maxiter; ++iter) {
+        util::get_random_bytes(&bytes[0], bytes.size());
+        auto res = be_uint_from_bytes<large_uint>(bytes);
+        if (miller_rabin_test(res, 5)) {
+            return res;
+        }
+    }
+    FUNTLS_CHECK_FAILURE("No prime of " + std::to_string(byte_count) + " bytes found in " + std::to_string(maxiter) + " iterations");
+}
+
+x509::rsa_private_key generate_rsa_private_key()
+{
+    constexpr unsigned byte_count = 512 / 8;
 
     // 1. Choose two distinct prime numbers p and q.
-    const large_uint p = 61;
-    const large_uint q = 53;
+    const large_uint p = random_prime(byte_count / 2);
     std::cout << "p = " << p << std::endl;
+    const large_uint q = random_prime(byte_count / 2);
     std::cout << "q = " << q << std::endl;
     // 2. Compute n = pq.
     const large_uint n = p * q;
@@ -61,8 +79,13 @@ x509::rsa_private_key make_rsa_private_key()
     const large_uint phi_n = n - (p + q - 1);
     std::cout << "phi(n) = " << phi_n << std::endl;
     // 4. Choose an integer e such that 1 < e < phi(n) and gcd(e, phi(n)) = 1; i.e., e and phi(n) are coprime.
-    const large_uint e = 17;
-    //assert(gcd(phi_n, e) == 1);
+    large_uint e = 0;
+    for (int iter=0;;++iter) {
+        FUNTLS_CHECK_BINARY(iter, <, 1000, "Took too many iterations to find public exponent");
+        e = rand_positive_int_less(phi_n);
+        if (gcd(phi_n, e) == 1) break;
+    }
+    
     // 5. Determine d as d == e^?1 (mod phi(n)); i.e., d is the multiplicative inverse of e (modulo phi(n)).
     const large_uint d = modular_inverse(e, phi_n);
     assert(large_uint((e*d) % phi_n) == 1);
@@ -81,13 +104,14 @@ x509::rsa_private_key make_rsa_private_key()
         to_asn1_int(modular_inverse(q, p), byte_count)};    // coefficient      = (inverse of q) mod p
 }
 
-void make()
+void make_rsa_private_key()
 {
-    const auto private_key = make_rsa_private_key();
+    x509::write_pem_private_key_info(std::cout, make_private_key_info(generate_rsa_private_key()));
+}
 
-    x509::write_pem_private_key_info(std::cout, make_private_key_info(private_key));
-    std::cout  << "\n\n";
-
+void make_certificate()
+{
+    const auto private_key = generate_rsa_private_key();
     x509::name subject{{std::make_pair(x509::attr_commonName, asn1::ia5_string{"localhost"})}};
     
     const asn1::utc_time not_before{"1511080000Z"};
@@ -118,8 +142,9 @@ int main(int argc, char** argv)
     auto usage = [program_name = argv[0]] {
         std::cout << "Usage: " << program_name << " <command> [<args>]\n";
         std::cout << "Commands:\n";
-        std::cout << "   show <certificate file>  Show certificate\n";
-        std::cout << "   make                     Make certificate [Experimental]\n";
+        std::cout << "   show-cert <certificate file>  Show certificate\n";
+        std::cout << "   make-cert                     Make certificate [Experimental]\n";
+        std::cout << "   make-rsa-private-key          Make RSA private key [Experimental]\n";
         exit(1);
     };
 
@@ -137,10 +162,12 @@ int main(int argc, char** argv)
     const std::string command = consume_argv();
 
     try {
-        if (command == "show") {
-            show(consume_argv());
-        } else if (command == "make") {
-            make();
+        if (command == "show-cert") {
+            show_certificate(consume_argv());
+        } else if (command == "make-cert") {
+            make_certificate();
+        } else if (command == "make-rsa-private-key") {
+            make_rsa_private_key();
         } else {
             std::cout << "Unknown command '" << command << "'\n";
             usage();
