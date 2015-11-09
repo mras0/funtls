@@ -169,6 +169,11 @@ class integer {
 public:
     static constexpr auto id = identifier::integer;
 
+    explicit integer(std::intmax_t n) {
+        assert(n >= 0 && n <= 0x7F); // lazy
+        repr_.push_back(static_cast<uint8_t>(n));
+    }
+
     explicit integer(const der_encoded_value& repr);
 
     // Would have liked to do this as an explicit conversion operator

@@ -125,6 +125,11 @@ void write_pem_certificate(std::ostream& os, const std::vector<uint8_t>& der_enc
     write_pem_data(os, cert_begin_line, cert_end_line, der_encoded_certificate);
 }
 
+void write_pem_private_key_info(std::ostream& os, const private_key_info& pki)
+{
+    write_pem_data(os, pkey_begin_line, pkey_end_line, asn1::serialized(pki));
+}
+
 private_key_info read_pem_private_key(std::istream& is)
 {
     auto pkey_der_data = read_pem_data(is, pkey_begin_line, pkey_end_line);

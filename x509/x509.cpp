@@ -596,6 +596,11 @@ void verify_x509_certificate_chain(const std::vector<certificate>& chain)
     }
 }
 
+void private_key_info::serialize(std::vector<uint8_t>& buf) const
+{
+    asn1::serialize_sequence(buf, asn1::identifier::constructed_sequence, version, algorithm, key);
+}
+
 private_key_info private_key_info::parse(const asn1::der_encoded_value& repr)
 {
     auto pkey_seq = asn1::sequence_view{repr};

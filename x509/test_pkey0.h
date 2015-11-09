@@ -1,6 +1,5 @@
 const char* const test_pkey0 =
-R"(
------BEGIN PRIVATE KEY-----
+R"(-----BEGIN PRIVATE KEY-----
 MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQD1nlx1neS/fAFY
 JWfFgobX5txlyrUGKtjb522d5oGp6zGSA1vmabIgSbPdSCCXDw5p4I2Fro3tgI6p
 pQB1US7E9LEc8ZI0XadWShy00ewo+9dOBbRrspo079VjfdAmHF56X6M2id07E3aF

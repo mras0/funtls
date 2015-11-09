@@ -8,6 +8,23 @@
 
 namespace funtls { namespace x509 {
 
+struct rsa_private_key {
+    asn1::integer version;          // { two-prime(0), multi(1) }
+    asn1::integer modulus;          // n
+    asn1::integer public_exponent;  // e
+    asn1::integer private_exponent; // d
+    asn1::integer prime1;           // p
+    asn1::integer prime2;           // q
+    asn1::integer exponent1;        // d mod (p-1)
+    asn1::integer exponent2;        // d mod (q-1)
+    asn1::integer coefficient;      // (inverse of q) mod p
+    // otherPrimeInfos   OtherPrimeInfos OPTIONAL
+
+    void serialize(std::vector<uint8_t>& buf) const;
+
+    static rsa_private_key parse(const asn1::der_encoded_value& repr);
+};
+
 struct rsa_public_key {
     asn1::integer modulus;           // n
     asn1::integer public_exponent;   // e
@@ -26,22 +43,11 @@ struct rsa_public_key {
 
     void serialize(std::vector<uint8_t>& buf) const;
 
+    static rsa_public_key from_private(const rsa_private_key& k) {
+        return {k.modulus, k.public_exponent};
+    }
+
     static rsa_public_key parse(const asn1::der_encoded_value& repr);
-};
-
-struct rsa_private_key {
-    asn1::integer version;          // { two-prime(0), multi(1) }
-    asn1::integer modulus;          // n
-    asn1::integer public_exponent;  // e
-    asn1::integer private_exponent; // d
-    asn1::integer prime1;           // p
-    asn1::integer prime2;           // q
-    asn1::integer exponent1;        // d mod (p-1)
-    asn1::integer exponent2;        // d mod (q-1)
-    asn1::integer coefficient;      // (inverse of q) mod p
-    // otherPrimeInfos   OtherPrimeInfos OPTIONAL
-
-    static rsa_private_key parse(const asn1::der_encoded_value& repr);
 };
 
 class digest_info {
@@ -71,6 +77,8 @@ rsa_public_key rsa_public_key_from_certificate(const certificate& cert);
 rsa_private_key rsa_private_key_from_pki(const private_key_info& pki);
 
 void verify_x509_signature_rsa(const certificate& subject_cert, const certificate& issuer_cert);
+
+private_key_info make_private_key_info(const rsa_private_key& private_key);
 
 } } // namespace funtls::x509
 

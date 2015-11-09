@@ -211,15 +211,17 @@ class certificate_signer {
 public:
     virtual ~certificate_signer() {}
 
-    certificate sign(const tbs_certificate& tbs_cert) const {
+    certificate sign(tbs_certificate tbs_cert) const {
         auto der_cert = asn1::serialized(tbs_cert);
         auto sig = do_sign(der_cert);
-        return certificate{tbs_certificate(tbs_cert), std::move(der_cert), do_algorithm_id(), asn1::bit_string{sig}};
+        return certificate{std::move(tbs_cert), std::move(der_cert), std::move(sig.first), asn1::bit_string{std::move(sig.second)}};
     }
 
+protected:
+    using sign_result_t = std::pair<algorithm_id, std::vector<uint8_t>>;
+
 private:
-    virtual std::vector<uint8_t> do_sign(const std::vector<uint8_t>&) const = 0;
-    virtual algorithm_id         do_algorithm_id() const = 0;
+    virtual sign_result_t do_sign(const std::vector<uint8_t>&) const = 0;
 };
 
 //
@@ -322,6 +324,8 @@ struct private_key_info {
     asn1::integer       version;
     x509::algorithm_id  algorithm;
     asn1::octet_string  key;
+
+    void serialize(std::vector<uint8_t>& buf) const;
 
     static private_key_info parse(const asn1::der_encoded_value&);
 };

@@ -95,6 +95,37 @@ std::vector<x509::certificate> read_pem_cert_chain(std::istream& in)
     return chain;
 }
 
+void visit_asn1(std::ostream& os, const asn1::der_encoded_value& v, int level);
+
+template<asn1::identifier::tag tag>
+void visit_asn1_sequence(std::ostream& os, const asn1::der_encoded_value& v, int level)
+{
+    auto seq = asn1::container_view<tag>{v};
+    while (seq.has_next()) {
+        visit_asn1(os, seq.next(), level);
+    }
+}
+
+void visit_asn1(std::ostream& os, const asn1::der_encoded_value& v, int level = 0)
+{
+    os << std::string(level*2, ' ') << v << std::endl;
+    switch (static_cast<uint8_t>(v.id())) {
+    case asn1::identifier::constructed_sequence:
+        visit_asn1_sequence<asn1::identifier::constructed_sequence>(os, v, level+1);
+        break;
+    case asn1::identifier::constructed_set:
+        visit_asn1_sequence<asn1::identifier::constructed_set>(os, v, level+1);
+        break;
+    }
+}
+
+void visit_asn1(std::ostream& os, const std::vector<uint8_t>& v, int level = 0)
+{
+    util::buffer_view view{v.data(), v.size()};
+    visit_asn1(os, asn1::read_der_encoded_value(view), level);
+}
+
+
 #include "test_cert0.h"
 #include "test_cert1.h"
 #include "test_cert2.h"
@@ -236,7 +267,7 @@ void test_pkey()
     FUNTLS_ASSERT_EQUAL(test_pkey0_e2, util::base16_encode(pkey.exponent2.as_vector()));
     FUNTLS_ASSERT_EQUAL(test_pkey0_c, util::base16_encode(pkey.coefficient.as_vector()));
 
-    const x509::rsa_public_key pub{pkey.modulus, pkey.public_exponent};
+    const auto pub = x509::rsa_public_key::from_private(pkey);
     const std::vector<uint8_t> msg{0x30, 0x21, 0x30, 0x09, 0x06, 0x05, 0x2b, 0x0e, 0x03, 0x02, 0x1a, 0x05, 0x00, 0x04, 0x14,
         0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14 };
     const auto e1_msg = x509::pkcs1_encode(pkey, msg);
@@ -246,30 +277,13 @@ void test_pkey()
 
     const auto e2_msg = x509::pkcs1_encode(pub, msg);
     FUNTLS_ASSERT_EQUAL(msg, x509::pkcs1_decode(pkey, e2_msg));
-}
 
-void visit_asn1(std::ostream& os, const asn1::der_encoded_value& v, int level);
+    // Serialization
+    FUNTLS_ASSERT_EQUAL(crude_get_pem_data(test_pkey0), asn1::serialized(pki));
 
-template<asn1::identifier::tag tag>
-void visit_asn1_sequence(std::ostream& os, const asn1::der_encoded_value& v, int level)
-{
-    auto seq = asn1::container_view<tag>{v};
-    while (seq.has_next()) {
-        visit_asn1(os, seq.next(), level);
-    }
-}
-
-void visit_asn1(std::ostream& os, const asn1::der_encoded_value& v, int level = 0)
-{
-    os << std::string(level*2, ' ') << v.id() << " len=" << v.content_view().remaining() << std::endl;
-    switch (static_cast<uint8_t>(v.id())) {
-    case asn1::identifier::constructed_sequence:
-        visit_asn1_sequence<asn1::identifier::constructed_sequence>(os, v, level+1);
-        break;
-    case asn1::identifier::constructed_set:
-         visit_asn1_sequence<asn1::identifier::constructed_set>(os, v, level+1);
-         break;
-    }
+    std::ostringstream pkey_pem;
+    x509::write_pem_private_key_info(pkey_pem, pki);
+    FUNTLS_ASSERT_EQUAL(test_pkey0, pkey_pem.str());
 }
 
 void test_serialization()

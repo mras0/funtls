@@ -91,6 +91,11 @@ void test_asn1()
     FUNTLS_ASSERT_EQUAL(1, int_value_1_.octet_count());
     FUNTLS_ASSERT_EQUAL(42, int_value_1_.octet(0));
 
+    // Supported range so far
+    FUNTLS_ASSERT_EQUAL(0, integer{0}.as<int>());
+    FUNTLS_ASSERT_EQUAL(42, integer{42}.as<int>());
+    FUNTLS_ASSERT_EQUAL(0x7f, integer{0x7f}.as<int>());
+
     // TODO: Check illegal encodings
     // E.g. ints encoded with more than the needed bytes
 

@@ -55,6 +55,21 @@ asn1::object_id digest_algo_from_signature_algo(const x509::algorithm_id& sig_al
 
 namespace funtls { namespace x509 {
 
+void rsa_private_key::serialize(std::vector<uint8_t>& buf) const
+{
+    asn1::serialize_sequence(buf, asn1::identifier::constructed_sequence,
+        version,
+        modulus,
+        public_exponent,
+        private_exponent,
+        prime1,
+        prime2,
+        exponent1,
+        exponent2,
+        coefficient
+        );
+}
+
 void rsa_public_key::serialize(std::vector<uint8_t>& buf) const
 {
     asn1::serialize_sequence(buf, asn1::identifier::constructed_sequence, modulus, public_exponent);
@@ -278,6 +293,15 @@ void verify_x509_signature_rsa(const certificate& subject_cert, const certificat
         oss << "Signature: " << util::base16_encode(digest.digest());
         FUNTLS_CHECK_FAILURE(oss.str());
     }
+}
+
+private_key_info make_private_key_info(const rsa_private_key& private_key)
+{
+    return {
+        asn1::integer{0}, // version
+        algorithm_id{id_rsaEncryption},
+        asn1::octet_string{asn1::serialized(private_key)}
+    };
 }
 
 } } // namespace funtls::x509
