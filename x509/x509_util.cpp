@@ -112,6 +112,12 @@ void make_certificate()
 {
     const auto private_key = generate_rsa_private_key(512);
 
+    {
+        std::cout << "Private Key:\n";
+        std::cout << util::base64_encode(asn1::serialized(x509::make_private_key_info(private_key))) << std::endl;
+        std::cout << std::endl;
+    }
+
     const x509::name subject{{std::make_pair(x509::attr_commonName, asn1::ia5_string{"localhost"})}};
     const asn1::utc_time not_before{"1511080000Z"};
     const asn1::utc_time not_after{"2511080000Z"};
