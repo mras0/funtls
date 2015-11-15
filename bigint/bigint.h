@@ -141,7 +141,7 @@ private:
             size_--;
         }
     }
-#ifdef NDEBUG
+#if defined(NDEBUG) || !defined(FUNTLS_BIGINT_CHECK_REPR)
     void check_repr() const {}
 #else
     void check_repr() const;

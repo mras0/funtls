@@ -36,7 +36,7 @@ namespace funtls { namespace bigint {
 
 constexpr biguint::size_type biguint::max_size;
 
-#ifndef NDEBUG
+#if !defined(NDEBUG) && defined(FUNTLS_BIGINT_CHECK_REPR)
 void biguint::check_repr() const
 {
     FUNTLS_CHECK_BINARY(size_, <=, max_size, "Invalid representation: " + util::base16_encode(v_, size_));
