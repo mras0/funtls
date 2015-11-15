@@ -43,38 +43,24 @@ private:
 #include <int_util/int_util.h>
 
 asn1::integer to_asn1_int(large_uint n, unsigned byte_count) {
-    return asn1::integer::from_bytes(be_uint_to_bytes(n, byte_count));
+    auto bytes = be_uint_to_bytes(n, byte_count);
+    if (bytes[0] & 0x80) bytes.insert(bytes.begin(), 0x00);
+    return asn1::integer::from_bytes(bytes);
 }
 
-// TODO: This is unsafe. The boost multiprecision sample uses independent random generators for testing and number generation
-// The miller-rabin test isn't run enough times
-// It's probably also terrible in other aspects
-large_uint random_prime(unsigned byte_count)
+// openssl rsa -check -inform pem -text -noout
+x509::rsa_private_key generate_rsa_private_key(unsigned bit_count)
 {
-    constexpr int maxiter = 1000;
-    std::vector<uint8_t> bytes(byte_count);
-    for (int iter = 0; iter < maxiter; ++iter) {
-        util::get_random_bytes(&bytes[0], bytes.size());
-        auto res = be_uint_from_bytes<large_uint>(bytes);
-        if (miller_rabin_test(res, 5)) {
-            return res;
-        }
-    }
-    FUNTLS_CHECK_FAILURE("No prime of " + std::to_string(byte_count) + " bytes found in " + std::to_string(maxiter) + " iterations");
-}
-
-x509::rsa_private_key generate_rsa_private_key()
-{
-    constexpr unsigned byte_count = 512 / 8;
-
     // 1. Choose two distinct prime numbers p and q.
-    const large_uint p = random_prime(byte_count / 2);
+    const large_uint p = random_prime<large_uint>(large_uint{1}<<((bit_count/2)-1), large_uint{1}<<(bit_count/2));
     std::cout << "p = " << p << std::endl;
-    const large_uint q = random_prime(byte_count / 2);
+    const large_uint q = random_prime<large_uint>((large_uint{1}<<(bit_count-1))/p + 1, (((large_uint{1}<<bit_count)-1)/p)+1);
     std::cout << "q = " << q << std::endl;
     // 2. Compute n = pq.
     const large_uint n = p * q;
     std::cout << "n = " << n << std::endl;
+    assert(n >= large_uint{1}<<(bit_count-1) && n < (large_uint{1}<<bit_count));
+    
     // 3. Compute phi(n) = phi(p)phi(q) =  (p ? 1)(q ? 1) = n - (p + q - 1)
     const large_uint phi_n = n - (p + q - 1);
     std::cout << "phi(n) = " << phi_n << std::endl;
@@ -92,6 +78,10 @@ x509::rsa_private_key generate_rsa_private_key()
 
     std::cout << "Public key: (" << n << ", " << e << ")\n";
     std::cout << "Private key: " << d << std::endl;
+
+    const unsigned byte_count = (bit_count+7) / 8;
+    assert(ilog256(n) == byte_count);
+
     return x509::rsa_private_key{
         asn1::integer{0},                                   // version          = two-prime
         to_asn1_int(n, byte_count),                         // modulus          = n
@@ -104,14 +94,15 @@ x509::rsa_private_key generate_rsa_private_key()
         to_asn1_int(modular_inverse(q, p), byte_count)};    // coefficient      = (inverse of q) mod p
 }
 
-void make_rsa_private_key()
+void make_rsa_private_key(unsigned bit_count)
 {
-    x509::write_pem_private_key_info(std::cout, make_private_key_info(generate_rsa_private_key()));
+    x509::write_pem_private_key_info(std::cout, make_private_key_info(generate_rsa_private_key(bit_count)));
+    std::cout << "\n";
 }
 
 void make_certificate()
 {
-    const auto private_key = generate_rsa_private_key();
+    const auto private_key = generate_rsa_private_key(512);
     x509::name subject{{std::make_pair(x509::attr_commonName, asn1::ia5_string{"localhost"})}};
     
     const asn1::utc_time not_before{"1511080000Z"};
@@ -143,8 +134,8 @@ int main(int argc, char** argv)
         std::cout << "Usage: " << program_name << " <command> [<args>]\n";
         std::cout << "Commands:\n";
         std::cout << "   show-cert <certificate file>  Show certificate\n";
-        std::cout << "   make-cert                     Make certificate [Experimental]\n";
-        std::cout << "   make-rsa-private-key          Make RSA private key [Experimental]\n";
+        std::cout << "   make-cert                     Make certificate ((Experimental))\n";
+        std::cout << "   make-rsa-private-key          Make RSA private key [bits] ((Experimental))\n";
         exit(1);
     };
 
@@ -167,7 +158,16 @@ int main(int argc, char** argv)
         } else if (command == "make-cert") {
             make_certificate();
         } else if (command == "make-rsa-private-key") {
-            make_rsa_private_key();
+            unsigned bits = 512;
+            if (argc >= 1) {
+                const auto arg = consume_argv();
+                std::istringstream iss(arg);
+                if (!(iss >> bits) || bits < 10 || bits > 4096) {
+                    std::cerr << "Invalid bit count " << bits << std::endl;
+                    usage();
+                }
+            }
+            make_rsa_private_key(bits);
         } else {
             std::cout << "Unknown command '" << command << "'\n";
             usage();

@@ -16,9 +16,9 @@
 
 namespace funtls {
 
-template<typename a_expr, typename int_type>
-int_type pmod(const a_expr& a, const int_type& p) {
-    int_type res = a % p;
+template<typename a_expr, typename IntType>
+IntType pmod(const a_expr& a, const IntType& p) {
+    IntType res = a % p;
 #ifndef USE_FUNTLS_BIGINT
     if (res < 0) res += p;
 #endif
@@ -26,15 +26,15 @@ int_type pmod(const a_expr& a, const int_type& p) {
     return res;
 }
 
-template<typename a_expr, typename int_type>
-int_type modular_inverse(const a_expr& a, const int_type& n)
+template<typename a_expr, typename IntType>
+IntType modular_inverse(const a_expr& a, const IntType& n)
 {
     assert(n!=0);
-    int_type r = n, newr = pmod(a, n);
-    int_type t = 0, newt = 1;
+    IntType r = n, newr = pmod(a, n);
+    IntType t = 0, newt = 1;
     while (newr != 0) {
-        int_type quotient = r / newr;
-        int_type saved = newt;
+        IntType quotient = r / newr;
+        IntType saved = newt;
         newt = pmod(quotient * saved, n);
         if (t < newt) t += n;
         assert(t>=newt);
@@ -52,16 +52,16 @@ int_type modular_inverse(const a_expr& a, const int_type& n)
     return t;
 }
 
-template<typename a_expr, typename b_expr, typename int_type>
-int_type div_mod(const a_expr& a, const b_expr& b, const int_type& n)
+template<typename a_expr, typename b_expr, typename IntType>
+IntType div_mod(const a_expr& a, const b_expr& b, const IntType& n)
 {
     return pmod(a * modular_inverse(b, n), n);
 }
 
-template<typename int_type>
-int_type be_uint_from_bytes(const std::vector<uint8_t>& bytes)
+template<typename IntType>
+IntType be_uint_from_bytes(const std::vector<uint8_t>& bytes)
 {
-    int_type res = 0;
+    IntType res = 0;
     for (const auto& byte : bytes ) {
         res <<= 8;
         res |= byte;
@@ -82,8 +82,8 @@ std::vector<uint8_t> be_uint_to_bytes(IntType i, size_t byte_count)
 }
 
 
-template<typename int_type>
-size_t ilog256(int_type n)
+template<typename IntType>
+size_t ilog256(IntType n)
 {
     assert(n >= 0);
     size_t size = 1;
@@ -95,21 +95,64 @@ size_t ilog256(int_type n)
 }
 
 template<typename IntType>
-IntType rand_positive_int_less(const IntType& n) {
-    const auto byte_count = ilog256(n);
+IntType rand_int_less(const IntType& less_than) {
+    assert(less_than != 0);
+    const auto byte_count   = static_cast<uint32_t>(ilog256<IntType>(less_than - 1));
+    const auto leading_byte = static_cast<uint8_t>(((less_than-1) >> (8*(byte_count-1))) & 0xff);
+
+    uint8_t lead_byte_mask = 0xFF;
+    while ((lead_byte_mask>>1) > leading_byte) {
+        lead_byte_mask >>= 1;
+    }
+    assert(lead_byte_mask);
+
     assert(byte_count != 0);
     std::vector<uint8_t> bytes(byte_count);
     IntType res;
+    int iter = 0;
     do {
         util::get_random_bytes(&bytes[0], bytes.size());
+        bytes[0] &= lead_byte_mask;
         res = be_uint_from_bytes<IntType>(bytes);
-    } while (res == 0 || res >= n);
+        if (++iter > 1000) {
+            assert(!"Internal error");
+            std::abort();
+        }
+    } while (res >= less_than);
     return res;
 }
 
-template<typename int_type>
-bool is_prime(const int_type& n) {
+template<typename IntType>
+IntType rand_positive_int_in_interval(const IntType& no_less_than, const IntType& no_greater_equal_than) {
+    assert(no_less_than + 1 < no_greater_equal_than && "Empty range");
+    return no_less_than + rand_int_less<IntType>(no_greater_equal_than - no_less_than);
+}
+
+template<typename IntType>
+IntType rand_positive_int_less(const IntType& n) {
+    return rand_positive_int_in_interval<IntType>(1, n);
+}
+
+template<typename IntType>
+bool is_prime(const IntType& n) {
     return miller_rabin_test(n, 25);
+}
+
+
+// TODO: This is unsafe. The boost multiprecision sample uses independent random generators for testing and number generation
+// It's probably also terrible in other aspects
+template<typename IntType>
+IntType random_prime(const IntType& no_less_than, const IntType& no_greater_equal_than)
+{
+    constexpr int maxiter = 10000; // According to the prime number theorem we expect a random 4096-number to be prime with probability ~ 1/log(2**4096) ~ 1/3000
+    for (int iter = 0; iter < maxiter; ++iter) {
+        auto res = rand_positive_int_in_interval(no_less_than, no_greater_equal_than);
+        if (miller_rabin_test(res, 25)) {
+            return res;
+        }
+    }
+    assert(!"Internal error: No prime generated within maxiter iterations");
+    std::abort();
 }
 
 template<typename IntType>

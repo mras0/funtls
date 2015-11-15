@@ -4,8 +4,6 @@ project(funtls)
 set(CMAKE_EXPORT_COMPILE_COMMANDS 1) # For YouCompleteMe support (see https://github.com/Valloric/YouCompleteMe)
 
 enable_testing()
-# http://stackoverflow.com/questions/16158091/cmake-setting-an-environmental-variable-for-ctest-or-otherwise-getting-failed
-add_custom_target(check COMMAND ${CMAKE_CTEST_COMMAND} --force-new-ctest-process --output-on-failure)
 
 if (MSVC)
     set(CMAKE_CONFIGURATION_TYPES "Debug;Release" CACHE STRING "Supported build configurations" FORCE)
@@ -67,6 +65,26 @@ if (use_bigint)
     add_definitions("-DUSE_FUNTLS_BIGINT")
 endif()
 
+# http://stackoverflow.com/questions/16158091/cmake-setting-an-environmental-variable-for-ctest-or-otherwise-getting-failed
+if (CMAKE_CONFIGURATION_TYPES)
+    add_custom_target(check COMMAND ${CMAKE_CTEST_COMMAND} --force-new-ctest-process --output-on-failure --build-config "$<CONFIGURATION>")
+else()
+    add_custom_target(check COMMAND ${CMAKE_CTEST_COMMAND} --force-new-ctest-process --output-on-failure)
+endif()
+
+# Creating a test where the output is piped is a pain in the ... with CMake
+# http://cmake.3232098.n2.nabble.com/testing-with-standard-output-td3256689.html
+function(add_piped_test name cmd1 cmd1_args cmd2 cmd2_args)
+    add_test(NAME ${name} COMMAND
+        ${CMAKE_COMMAND}
+        -DCMD1=${cmd1}
+        -DCMD1_ARGS:STRING=${cmd1_args}
+        -DCMD2=${cmd2}
+        -DCMD2_ARGS:STRING=${cmd2_args}
+        -P ${funtls_SOURCE_DIR}/ctest_pipe.cmake
+     )
+endfunction()
+
 
 # Ugly handling of boost stuff
 set(boost_dir "${CMAKE_CURRENT_SOURCE_DIR}/../boost_1_59_0/" CACHE PATH "Root of boost installation")
@@ -74,6 +92,11 @@ include_directories(${boost_dir})
 add_definitions("-DBOOST_ALL_NO_LIB -DBOOST_SYSTEM_NO_DEPRECATED -DBOOST_ERROR_CODE_HEADER_ONLY")
 if (WIN32)
     add_definitions("-D_WIN32_WINNT=0x0501")
+endif()
+
+find_program(OPENSSL_EXE openssl)
+if (OPENSSL_EXE)
+    message("openssl found ${OPENSSL_EXE}")
 endif()
 
 add_subdirectory(util)

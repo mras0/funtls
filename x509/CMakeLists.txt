@@ -35,5 +35,11 @@ set_tests_properties(x509_util_usage PROPERTIES PASS_REGULAR_EXPRESSION "Usage:"
 add_test(x509_util_show_cert x509_util show-cert ${CMAKE_CURRENT_SOURCE_DIR}/localhost_test_cert.crt)
 set_tests_properties(x509_util_show_cert PROPERTIES PASS_REGULAR_EXPRESSION "Serial number: 0x00DD43B1B0CCC9E27D.*Issuer: CN=localhost.*Subject: CN=localhost.*Verifying self-signed certificate...OK")
 
-add_test(x509_util_make_pkey x509_util make-rsa-private-key)
+add_test(x509_util_make_pkey x509_util make-rsa-private-key 256)
 set_tests_properties(x509_util_make_pkey PROPERTIES PASS_REGULAR_EXPRESSION "-----BEGIN PRIVATE KEY-----\nMII.*-----END PRIVATE KEY-----")
+
+if (OPENSSL_EXE)
+    add_piped_test(x509_util_make_pkey_ok $<TARGET_FILE:x509_util> "make-rsa-private-key 512" ${OPENSSL_EXE} "rsa -check -inform pem -text -noout")
+    set_tests_properties(x509_util_make_pkey_ok PROPERTIES PASS_REGULAR_EXPRESSION "Private-Key: \\(512 bit\\).*RSA key ok")
+endif()
+
