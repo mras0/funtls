@@ -116,16 +116,27 @@ add_subdirectory(ssh)
 
 include_directories(${funtls_SOURCE_DIR})
 
-add_executable(funtls client.cpp tls_fetch.cpp)
-target_link_libraries(funtls tls)
+add_library(https_fetch https_fetch.cpp https_fetch.h)
+target_link_libraries(https_fetch tls)
+
+add_executable(funtls client.cpp)
+target_link_libraries(funtls https_fetch)
 
 add_executable(test_server test_server.cpp)
 target_link_libraries(test_server tls)
 
-add_executable(self_test test_server.cpp tls_fetch.cpp)
-target_link_libraries(self_test tls)
+add_executable(self_test test_server.cpp)
+target_link_libraries(self_test https_fetch)
 set_target_properties(self_test PROPERTIES COMPILE_FLAGS "-DSELF_TEST")
 add_test(self_test self_test)
+
+if (OPENSSL_EXE)
+    add_executable(test_against_openssl test_server.cpp)
+    target_link_libraries(test_against_openssl tls)
+    set_target_properties(test_against_openssl PROPERTIES COMPILE_FLAGS "-DOPENSSL_TEST")
+    #add_test(test_against_openssl test_against_openssl 0 ${OPENSSL_EXE})
+    message(WARNING "test_against_openssl not added as test - not ready yet")
+endif()
 
 if (NOT WIN32)
     find_program(HAS_CTAGS ctags)

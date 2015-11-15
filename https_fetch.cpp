@@ -1,4 +1,4 @@
-#include "tls_fetch.h"
+#include "https_fetch.h"
 
 #include <util/test.h>
 #include <tls/tls_client.h>
@@ -8,7 +8,7 @@
 
 namespace funtls {
 
-void tls_fetch(const std::string& host, const std::string& port, const std::string& path, const std::vector<tls::cipher_suite>& wanted_ciphers, const x509::trust_store& ts, std::function<void (const std::vector<uint8_t>&)> on_data, std::ostream& log)
+void https_fetch(const std::string& host, const std::string& port, const std::string& path, const std::vector<tls::cipher_suite>& wanted_ciphers, const x509::trust_store& ts, std::function<void (const std::vector<uint8_t>&)> on_data, std::ostream& log)
 {
     FUNTLS_CHECK_BINARY(wanted_ciphers.size(), !=, 0, "No ciphers");
 

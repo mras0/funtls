@@ -1,4 +1,4 @@
-#include "tls_fetch.h"
+#include "https_fetch.h"
 #include <iostream>
 
 #include <util/test.h>
@@ -76,7 +76,7 @@ int main(int argc, char* argv[])
         ts.add_os_defaults();
 
         util::ostream_adapter fetch_log{[](const std::string& s) { std::cout << "client: " << s; }};
-        tls_fetch(host, port, path, wanted_ciphers, ts, [](const std::vector<uint8_t>& data) { 
+        https_fetch(host, port, path, wanted_ciphers, ts, [](const std::vector<uint8_t>& data) { 
             std::cout << std::string(data.begin(), data.end()) << std::flush;
         }, fetch_log);
         return 0;
