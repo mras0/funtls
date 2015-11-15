@@ -102,19 +102,23 @@ private:
     const x509::rsa_private_key& private_key_;
 
     virtual sign_result_t do_sign(const std::vector<uint8_t>& certificate_der_encoded) const override {
-        assert(digest_algo_id_ == x509::id_md5);
-        x509::digest_info di{x509::algorithm_id{digest_algo_id_}, hash::md5{}.input(certificate_der_encoded).result()};
-        return std::make_pair(x509::algorithm_id{x509::id_md5WithRSAEncryption}, x509::pkcs1_encode(private_key_, asn1::serialized(di)));
+        assert(digest_algo_id_ == x509::id_sha1);
+        x509::digest_info di{x509::algorithm_id{digest_algo_id_}, hash::sha1{}.input(certificate_der_encoded).result()};
+        return std::make_pair(x509::algorithm_id{x509::id_sha1WithRSAEncryption}, x509::pkcs1_encode(private_key_, asn1::serialized(di)));
     }
 };
 
 void make_certificate()
 {
-    const auto private_key = generate_rsa_private_key(512);
+    const auto private_key = generate_rsa_private_key(1024);
 
     {
         std::cout << "Private Key:\n";
-        std::cout << util::base64_encode(asn1::serialized(x509::make_private_key_info(private_key))) << std::endl;
+        const auto s=util::base64_encode(asn1::serialized(x509::make_private_key_info(private_key)));
+        for (size_t i = 0, sz=s.size(); i < sz; ++i) {
+            if (i && (i % 64 == 0)) std::cout << '\n';
+            std::cout << s[i];
+        }
         std::cout << std::endl;
     }
 
@@ -122,7 +126,7 @@ void make_certificate()
     const asn1::utc_time not_before{"1511080000Z"};
     const asn1::utc_time not_after{"2511080000Z"};
     const asn1::bit_string subject_public_key_bs{asn1::serialized(x509::rsa_public_key::from_private(private_key))};
-    const x509::algorithm_id algo_id{x509::id_md5WithRSAEncryption};
+    const x509::algorithm_id algo_id{x509::id_sha1WithRSAEncryption};
 
     x509::tbs_certificate tbs{
         x509::version::v3,                                    // version
@@ -137,7 +141,7 @@ void make_certificate()
         {}                                                    // extensions
     };
 
-    auto cert = rsa_certificate_signer{x509::id_md5, private_key}.sign(tbs);
+    auto cert = rsa_certificate_signer{x509::id_sha1, private_key}.sign(tbs);
     std::cout << cert << std::endl;
     x509::verify_x509_signature(cert, cert);
     x509::write_pem_certificate(std::cout, asn1::serialized(cert));
