@@ -259,7 +259,11 @@ inline void from_bytes(vector<T, LowerBoundInBytes, UpperBoundInBytes>& item, ut
     FUNTLS_CHECK_BINARY(byte_count, >=, LowerBoundInBytes, "Invalid byte count for tls::vector");
     FUNTLS_CHECK_BINARY(byte_count, <=, UpperBoundInBytes, "Invalid byte count for tls::vector");
     FUNTLS_CHECK_BINARY(buffer.remaining(), >=, byte_count, "Not enough data in buffer for tls::vector");
-    detail::vector_from_bytes(item, buffer, byte_count, std::integral_constant<bool, vector<T, LowerBoundInBytes, UpperBoundInBytes>::is_complex>{});
+    if (byte_count) {
+        detail::vector_from_bytes(item, buffer, byte_count, std::integral_constant<bool, vector<T, LowerBoundInBytes, UpperBoundInBytes>::is_complex>{});
+    } else {
+        item = vector<T, LowerBoundInBytes, UpperBoundInBytes>();
+    }
 }
 
 inline void from_bytes(alert& item, util::buffer_view& buffer) {

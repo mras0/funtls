@@ -1,4 +1,4 @@
-build/
+build*/
 tags
 *.pyc
 ec-key.pem

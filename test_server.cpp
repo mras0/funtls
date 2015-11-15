@@ -572,6 +572,7 @@ AZokDceX95yJnwKqa6SzgQ==
 #include <stdio.h> // popen
 #ifdef _MSC_VER
 #define popen _popen
+#define pclose _pclose
 #endif
 #endif
 
@@ -623,22 +624,28 @@ int main(int argc, char* argv[])
             try {
 #ifdef OPENSSL_TEST
                 FUNTLS_CHECK_BINARY(argc, ==, 3, "Invalid arguments to test");
-
+                const std::string cipher = "RC4-MD5";
                 std::ostringstream cmd;
-                cmd << "echo HELLO WORLD | " << argv[2] << " s_client -debug -msg -connect localhost:" << port << " 2>&1";
-                io_service.post([&] {
-                        std::cout << "Running command: " << cmd.str() << std::endl;
+                cmd << "echo HELLO WORLD | " << argv[2] << " s_client -debug -msg -cipher " << cipher <<  " -connect localhost:" << port << " 2>&1";
+                const auto cmdline = cmd.str();
+                io_service.post([cmdline] {
+                        std::cout << "Running command: " << cmdline << std::endl;
                         });
-                std::unique_ptr<FILE, decltype(&::fclose)> f{popen(cmd.str().c_str(), "r"), &::fclose};
+                std::unique_ptr<FILE, decltype(&::pclose)> f{popen(cmdline.c_str(), "r"), &::pclose};
                 assert(f);
 
                 char buffer[1024];
                 while (fgets(buffer, sizeof(buffer), f.get())) {
                     std::string s=buffer;
-                    io_service.dispatch([s] {
-                            std::cout << "[openssh] " << s;
+                    io_service.post([s] {
+                            std::cout << "[openssl] " << s;
                             });
                 }
+                const bool eof = feof(f.get());
+                io_service.post([eof] {
+                        std::cout << "openssl command finished - " << (eof ? "EOF" : "Other error encountered") << "\n";
+                        FUNTLS_ASSERT_EQUAL(eof, true);
+                        });
 #elif defined(SELF_TEST)
                 x509::trust_store ts;
 
@@ -670,13 +677,13 @@ int main(int argc, char* argv[])
                 };
 
                 for (const auto& cs: cipher_suites) {
-                    io_service.dispatch([cs] { std::cout << "=== Testing " << cs << " ===" << std::endl; });
+                    io_service.post([cs] { std::cout << "=== Testing " << cs << " ===" << std::endl; });
                     std::string res;
                     util::ostream_adapter fetch_log{[&io_service](const std::string& s) { io_service.post([s] { std::cout << "Client: " << s; }); }};
                     https_fetch("localhost", std::to_string(port), "/", {cs}, ts, [&res](const std::vector<uint8_t>& data) {
                         res.insert(res.end(), data.begin(), data.end());
                     }, fetch_log);
-                    io_service.dispatch([res] {
+                    io_service.post([res] {
                         std::cout << "Got result: \"" << res << "\"" << std::endl;
                         FUNTLS_ASSERT_EQUAL("Hello world!", res);
                     });
@@ -687,7 +694,7 @@ int main(int argc, char* argv[])
             } catch (...) {
                 eptr = std::current_exception();
             }
-            io_service.stop();
+            io_service.post([&io_service] { io_service.stop(); });
     });
 #endif
 

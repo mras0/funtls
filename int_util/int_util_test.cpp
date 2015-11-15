@@ -57,7 +57,7 @@ void test_random_large_uint()
         mean += static_cast<double>(t) / test_count;
     }
     const auto expected_mean = n_max / 2.0;
-    FUNTLS_ASSERT_BINARY_MESSAGE(abs(mean - expected_mean)/static_cast<double>(expected_mean), <=, 0.01, "Invalid distribution");
+    FUNTLS_ASSERT_BINARY_MESSAGE(fabs(mean - expected_mean)/static_cast<double>(expected_mean), <=, 0.01, "Invalid distribution");
 
     // Calculate chi-squared
     double chi_squared = 0.0;

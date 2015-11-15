@@ -299,6 +299,14 @@ std::string handle_subjectAltName(util::buffer_view& buf) {
                 dns_names.emplace_back(std::string(name.begin(), name.end()));
             }
             break;
+        case id_otherName:
+        case id_rfc822Name:
+        case id_x400Address:
+        case id_directoryName:
+        case id_ediPartyName:
+        case id_uniformResourceIdentifier:
+        case id_IPAddress:
+        case id_registeredID:
         default: {
                 std::ostringstream erross;
                 erross << "Unsupported name type found in subectAltName: " << elem.id();
