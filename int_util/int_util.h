@@ -2,6 +2,7 @@
 #define INT_UTIL_INT_UTIL_H_INCLUDED
 
 #include <cassert>
+#include <cstdlib>
 #include <vector>
 #include <util/random.h>
 #include <stdint.h>
