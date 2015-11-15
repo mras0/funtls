@@ -95,12 +95,16 @@ public:
     }
     biguint& operator>>=(uint32_t shift);
     biguint& operator<<=(uint32_t shift);
+
     static biguint& add(biguint& res, const biguint& lhs, const biguint& rhs);
     static biguint& sub(biguint& res, const biguint& lhs, const biguint& rhs);
+
+    // Aliasing between res and lhs/rhs is disallowed
     static biguint& mul(biguint& res, const biguint& lhs, const biguint& rhs);
     static biguint& div(biguint& res, const biguint& lhs, const biguint& rhs);
     static biguint& mod(biguint& res, const biguint& lhs, const biguint& rhs);
 
+    // No aliasing of arguments allowed
     static void divmod(biguint& quot, biguint& rem, const biguint& lhs, const biguint& rhs);
     static biguint& pow(biguint& res, const biguint& lhs, const biguint& rhs, const biguint& mod);
 

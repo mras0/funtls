@@ -641,7 +641,7 @@ int main(int argc, char* argv[])
                             std::cout << "[openssl] " << s;
                             });
                 }
-                const bool eof = feof(f.get());
+                const bool eof = feof(f.get()) != 0;
                 io_service.post([eof] {
                         std::cout << "openssl command finished - " << (eof ? "EOF" : "Other error encountered") << "\n";
                         FUNTLS_ASSERT_EQUAL(eof, true);

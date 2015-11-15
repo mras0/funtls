@@ -170,6 +170,8 @@ biguint& biguint::sub(biguint& res, const biguint& lhs, const biguint& rhs)
 
 biguint& biguint::mul(biguint& res, const biguint& lhs, const biguint& rhs)
 {
+    assert(&res != &lhs && &res != &rhs);
+
     lhs.check_repr();
     rhs.check_repr();
 
@@ -208,11 +210,6 @@ biguint& biguint::mul(biguint& res, const biguint& lhs, const biguint& rhs)
         }
         res.check_repr();
         return res;
-    }
-
-    if (&res == &lhs || &res == &rhs) {
-        biguint tmp;
-        return res = biguint::mul(tmp, lhs, rhs);
     }
 
     res.size_ = std::min(biguint::max_size, static_cast<size_type>(lhs.size_ + rhs.size_));
@@ -294,7 +291,8 @@ biguint::limb_type biguint::div_guess(const biguint& rem, const biguint& rhs)
 
 void biguint::divmod(biguint& quot, biguint& rem, const biguint& lhs, const biguint& rhs)
 {
-    assert(&quot != &rem);
+    assert(&quot != &lhs && &quot != &rhs && &rem != &lhs && &rem != &rhs && &quot != &rem);
+
     lhs.check_repr();
     rhs.check_repr();
 
@@ -368,17 +366,6 @@ void biguint::divmod(biguint& quot, biguint& rem, const biguint& lhs, const bigu
         quot.trim();
         quot.check_repr();
         rem.check_repr();
-        return;
-    }
-
-    //
-    // We're now in a confirmed hard case. Make sure we're not aliasing
-    //
-    if (&quot == &lhs || &quot == &rhs || &rem == &lhs || &rem == &rhs) {
-        biguint q, r;
-        divmod(q, r, lhs, rhs);
-        quot = q;
-        rem = r;
         return;
     }
 
@@ -545,10 +532,7 @@ biguint& biguint::operator<<=(uint32_t shift)
 biguint& biguint::pow(biguint& res, const biguint& lhs, const biguint& rhs, const biguint& n)
 {
     assert(n.size_ <= max_size / 2);
-    if (&res == &lhs || &res == &rhs || &res == &n) {
-        biguint tmp;
-        return res = biguint::pow(tmp, lhs, rhs, n);
-    }
+    assert(&res != &lhs && &res != &rhs && &res != &n);
 
     biguint base;
     biguint::mod(base, lhs, n);
@@ -562,15 +546,17 @@ biguint& biguint::pow(biguint& res, const biguint& lhs, const biguint& rhs, cons
     biguint exponent=rhs;
     while (exponent.size_) {
         if (exponent & 1) {
-            biguint::mul(res, res, base);
-            biguint::mod(res, res, n);
+            biguint temp_res;
+            biguint::mul(temp_res, res, base);
+            biguint::mod(res, temp_res, n);
             if (!res.size_) {
                 break;
             }
         }
         exponent >>= 1;
-        biguint::mul(base, base, base);
-        biguint::mod(base, base, n);
+        biguint temp_base;
+        biguint::mul(temp_base, base, base);
+        biguint::mod(base, temp_base, n);
     }
     return res;
 }
@@ -602,7 +588,8 @@ std::ostream& operator<<(std::ostream& os, const biguint& ui)
         auto n = ui;
         std::string s;
         do {
-            biguint::divmod(n, rem, n, 10);
+            biguint old_n = n;
+            biguint::divmod(n, rem, old_n, 10);
             assert(rem < 10);
             s += '0' + static_cast<uint8_t>(rem);
             assert(ui == 0 || n < ui);
@@ -682,7 +669,8 @@ bool miller_rabin_test(const biguint& n, unsigned g)
         bool definitely_composite = true;
         for (int i = 0; i < s - 1; ++i) {
             // x <- x**2 mod n
-            biguint::pow(x, x, 2, n);
+            const biguint temp_x = x;
+            biguint::pow(x, temp_x, 2, n);
 
             // if x = 1 then return composite
             if (x == 1) {
