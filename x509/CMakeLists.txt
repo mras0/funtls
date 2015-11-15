@@ -38,8 +38,14 @@ set_tests_properties(x509_util_show_cert PROPERTIES PASS_REGULAR_EXPRESSION "Ser
 add_test(x509_util_make_pkey x509_util make-rsa-private-key 256)
 set_tests_properties(x509_util_make_pkey PROPERTIES PASS_REGULAR_EXPRESSION "-----BEGIN PRIVATE KEY-----\nMII.*-----END PRIVATE KEY-----")
 
+add_test(x509_util_make_cert x509_util make-cert)
+set_tests_properties(x509_util_make_cert PROPERTIES PASS_REGULAR_EXPRESSION "-----BEGIN CERTIFICATE-----\nMII.*-----END CERTIFICATE-----")
+
 if (OPENSSL_EXE)
     add_piped_test(x509_util_make_pkey_ok $<TARGET_FILE:x509_util> "make-rsa-private-key 512" ${OPENSSL_EXE} "rsa -check -inform pem -text -noout")
     set_tests_properties(x509_util_make_pkey_ok PROPERTIES PASS_REGULAR_EXPRESSION "Private-Key: \\(512 bit\\).*RSA key ok")
+
+    add_piped_test(x509_util_make_cert_ok $<TARGET_FILE:x509_util> "make-cert" ${OPENSSL_EXE} "x509 -inform pem -text -noout")
+    set_tests_properties(x509_util_make_cert_ok PROPERTIES PASS_REGULAR_EXPRESSION "Not Before: Nov  8 00:00:00 2015 GMT.*RSA Public Key: \\(512 bit\\).*Signature Algorithm: md5WithRSAEncryption")
 endif()
 

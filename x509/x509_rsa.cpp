@@ -166,6 +166,8 @@ std::vector<uint8_t> pkcs1_encode(const rsa_private_key& key, const std::vector<
     const auto d = key.private_exponent.as<large_uint>();
     const size_t k = ilog256(n);
 
+    FUNTLS_CHECK_BINARY(message.size() + 3, <=, k, "RSA private key too small for message.");
+
     std::vector<uint8_t> EM(k-message.size());
     EM[0] = 0x00;
     EM[1] = 0x01;
