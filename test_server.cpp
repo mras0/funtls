@@ -567,9 +567,12 @@ AZokDceX95yJnwKqa6SzgQ==
 #endif
 
 #ifdef SELF_TEST
-#include "tls_fetch.h"
+#include "https_fetch.h"
 #elif defined(OPENSSL_TEST)
 #include <stdio.h> // popen
+#ifdef _MSC_VER
+#define popen _popen
+#endif
 #endif
 
 int main(int argc, char* argv[])
@@ -604,9 +607,7 @@ int main(int argc, char* argv[])
                     oss << state->socket.remote_endpoint();
                     tls::connection::make(oss.str(), make_tls_stream(std::move(state->socket)), {&server_id});
                 }
-#ifndef OPENSSL_TEST
                 start_accept();
-#endif
             });
     };
 
@@ -616,13 +617,15 @@ int main(int argc, char* argv[])
 #ifdef TESTING
     unsigned short port = acceptor.local_endpoint().port();
     std::exception_ptr eptr = nullptr;
-    std::thread client_thread([port, &io_service, &eptr] {
+    std::thread client_thread([&] {
             boost::asio::io_service::work work(io_service); // keep the io_service running as long as the thread does
 
             try {
 #ifdef OPENSSL_TEST
+                FUNTLS_CHECK_BINARY(argc, ==, 3, "Invalid arguments to test");
+
                 std::ostringstream cmd;
-                cmd << "echo HELLO WORLD | openssl s_client -debug -msg -connect localhost:" << port << " 2>&1";
+                cmd << "echo HELLO WORLD | " << argv[2] << " s_client -debug -msg -connect localhost:" << port << " 2>&1";
                 io_service.post([&] {
                         std::cout << "Running command: " << cmd.str() << std::endl;
                         });
@@ -632,7 +635,7 @@ int main(int argc, char* argv[])
                 char buffer[1024];
                 while (fgets(buffer, sizeof(buffer), f.get())) {
                     std::string s=buffer;
-                    io_service.post([s] {
+                    io_service.dispatch([s] {
                             std::cout << "[openssh] " << s;
                             });
                 }
@@ -670,7 +673,7 @@ int main(int argc, char* argv[])
                     io_service.dispatch([cs] { std::cout << "=== Testing " << cs << " ===" << std::endl; });
                     std::string res;
                     util::ostream_adapter fetch_log{[&io_service](const std::string& s) { io_service.post([s] { std::cout << "Client: " << s; }); }};
-                    tls_fetch("localhost", std::to_string(port), "/", {cs}, ts, [&res](const std::vector<uint8_t>& data) {
+                    https_fetch("localhost", std::to_string(port), "/", {cs}, ts, [&res](const std::vector<uint8_t>& data) {
                         res.insert(res.end(), data.begin(), data.end());
                     }, fetch_log);
                     io_service.dispatch([res] {
