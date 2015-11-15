@@ -405,20 +405,22 @@ void biguint::divmod(biguint& quot, biguint& rem, const biguint& lhs, const bigu
 
         quot.v_[i] = div_guess(rem, rhs);
         assert(quot.v_[i]);
-        biguint tmp = quot.v_[i] * rhs;
+        biguint tmp;
+        biguint::mul(tmp, quot.v_[i], rhs);
 #ifdef DIVIDE_DEBUG
         std::cout << " quot[i] " << wrapped(quot.v_[i]);
         std::cout << " tmp " << tmp;
 #endif
         unsigned padj = 0, madj = 0;
         while (tmp > rem) {
-            biguint error = tmp - rem;
+            biguint error;
+            biguint::sub(error, tmp, rem);
 #ifdef DIVIDE_DEBUG
             std::cout << "\n  error " << error << std::flush;
 #endif
             if (error < rhs) {
                 quot.v_[i]--;
-                tmp = tmp - rhs;
+                biguint::sub(tmp, tmp, rhs);
                 break;
             }
             const limb_type guess2 = div_guess(error, rhs);
@@ -431,14 +433,15 @@ void biguint::divmod(biguint& quot, biguint& rem, const biguint& lhs, const bigu
             tmp = tmp - tmp2;
         }
         assert(tmp <= rem);
-        rem = rem - tmp;
+        biguint::sub(rem, rem, tmp);
         while (rem >= rhs) {
 #ifdef DIVIDE_DEBUG
             std::cout << "\n  error -" << biguint(rem-rhs);
 #endif
             ++padj;
             limb_type guess2 = div_guess(rem-rhs, rhs);
-            biguint tmp2 = guess2*rhs;
+            biguint tmp2;
+            biguint::mul(tmp2, guess2, rhs);
 #ifdef DIVIDE_DEBUG
             std::cout << " guess2 " << wrapped(guess2) << " tmp2 " << tmp2 << std::flush;
 #endif

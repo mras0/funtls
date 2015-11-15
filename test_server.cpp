@@ -472,12 +472,12 @@ private:
     virtual std::vector<uint8_t> do_client_key_exchange(const handshake& handshake) const override {
         auto kex = get_as<client_key_exchange_ecdhe_ecdsa>(handshake);
         const auto Yc = ec::point_from_bytes(kex.ecdh_Yc.as_vector());
-        std::cout << "SERVER: Client public key " << Yc << std::endl;
+        //std::cout << "SERVER: Client public key " << Yc << std::endl;
 
         ec::point P = curve().mul(d_U_, Yc);  // shared secret
         assert(curve().on_curve(P));
 
-        std::cout << "Shared secret: " << P << std::endl;
+        //std::cout << "Shared secret: " << P << std::endl;
 
         return x509::base256_encode(P.x, curve_size_bytes());
     }
