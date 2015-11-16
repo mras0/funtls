@@ -595,11 +595,13 @@ static const char certificate[] =
 #include "https_fetch.h"
 #elif defined(OPENSSL_TEST)
 
+// TODO: This should be moved somewhere else...
+
 class child_process {
 public:
     virtual ~child_process() {}
 
-    std::errc wait() {
+    int wait() {
         return do_wait();
     }
 
@@ -607,19 +609,201 @@ public:
         return do_read_line(line);
     }
 
+    void write(const std::string& data) {
+        do_write(data);
+    }
+
+    void close_stdin() {
+        do_close_stdin();
+    }
+
     static std::unique_ptr<child_process> create(const std::vector<std::string>& args);
 
 private:
-    virtual std::errc do_wait() = 0;
+    virtual int do_wait() = 0;
     virtual bool do_read_line(std::string& line) = 0;
+    virtual void do_write(const std::string& data) = 0;
+    virtual void do_close_stdin() = 0;
 };
 
-#include <stdio.h> // popen
-#ifdef _MSC_VER
-#define popen _popen
-#define pclose _pclose
-#endif
+#ifdef WIN32
+#include <windows.h>
+struct win32_handle_closer {
+    using pointer = HANDLE;
+    void operator()(HANDLE h) {
+        const BOOL closed_ok = CloseHandle(h);
+        assert(closed_ok); (void)closed_ok;
+    }
+};
+using win32_handle = std::unique_ptr<HANDLE, win32_handle_closer>;
 
+void throw_system_error(const std::string& what, const DWORD dwErrorCode = GetLastError())
+{
+    assert(dwErrorCode != ERROR_SUCCESS);
+    throw std::system_error(dwErrorCode, std::system_category(), what);
+}
+
+class child_process_win32 : public child_process {
+public:
+    explicit child_process_win32(const std::vector<std::string>& args) {
+        std::ostringstream oss;
+        for (size_t i = 0; i < args.size(); ++i) {
+            if (i) oss << " ";
+            oss << args[i];
+        }
+        auto cmdline = oss.str();
+
+        auto in_pipe = create_inheritable_pipe();
+        auto out_pipe = create_inheritable_pipe();
+
+        if (!SetHandleInformation(in_pipe.second.get(), HANDLE_FLAG_INHERIT, 0) || !SetHandleInformation(out_pipe.first.get(), HANDLE_FLAG_INHERIT, 0)) {
+            throw_system_error("Could not mark pipe handles non-inheritable");
+        }
+
+        STARTUPINFOA si;
+        ZeroMemory(&si, sizeof(si));
+        si.cb         = sizeof(si);
+        si.dwFlags    = STARTF_USESTDHANDLES;
+        si.hStdInput  = in_pipe.first.get();
+        si.hStdOutput = out_pipe.second.get();
+        si.hStdError  = out_pipe.second.get();
+
+        PROCESS_INFORMATION pi;
+        if (!CreateProcessA(
+            nullptr,     // LPCTSTR               lpApplicationName,
+            &cmdline[0], // LPTSTR                lpCommandLine,
+            nullptr,     // LPSECURITY_ATTRIBUTES lpProcessAttributes,
+            nullptr,     // LPSECURITY_ATTRIBUTES lpThreadAttributes,
+            TRUE,        // BOOL                  bInheritHandles,
+            0,           // DWORD                 dwCreationFlags,
+            nullptr,     // LPVOID                lpEnvironment,
+            nullptr,     // LPCTSTR               lpCurrentDirectory,
+            &si,         // LPSTARTUPINFO         lpStartupInfo,
+            &pi          // LPPROCESS_INFORMATION lpProcessInformation
+            )) {
+            throw_system_error("CreateProcess failed");
+        }
+        CloseHandle(pi.hThread);
+        process_.reset(pi.hProcess);
+
+        child_in_  = std::move(in_pipe.second);
+        child_out_ = std::move(out_pipe.first);
+    }
+
+    ~child_process_win32() {
+        child_in_.reset();
+        child_out_.reset();
+        if (process_) {
+            const DWORD dwWaitRes = WaitForSingleObject(process_.get(), 60*1000);
+            if (dwWaitRes != WAIT_OBJECT_0) {
+                assert(false);
+                std::abort();
+            }
+        }
+    }
+
+private:
+    win32_handle process_;
+    win32_handle child_in_;
+    win32_handle child_out_;
+    std::string  child_out_buffer_;
+
+    static std::pair<win32_handle, win32_handle> create_inheritable_pipe() {
+        HANDLE hRead, hWrite;
+        SECURITY_ATTRIBUTES sa;
+        ZeroMemory(&sa, sizeof(sa));
+        sa.bInheritHandle = TRUE;
+        if (!CreatePipe(&hRead, &hWrite, &sa, 0)) {
+            throw_system_error("Error creating pipe");
+        }
+        return {win32_handle{hRead}, win32_handle{hWrite}};
+    }
+
+    bool fill_child_out_buffer() {
+        assert(child_out_);
+        char buffer[256];
+        DWORD dwRead;
+        if (!ReadFile(child_out_.get(), buffer, sizeof(buffer), &dwRead, nullptr)) {
+            if (GetLastError() == ERROR_BROKEN_PIPE) {
+                return false;
+            }
+            throw_system_error("Error reading from child stdout");
+        }
+        assert(dwRead != 0);
+        child_out_buffer_ += std::string(buffer, buffer + dwRead);
+        return true;
+    }
+
+    virtual int do_wait() override {
+        return 0;
+    }
+
+    virtual bool do_read_line(std::string& line) override {
+        for (;;) {
+            const auto new_line_pos = child_out_buffer_.find('\n');
+            if (new_line_pos == std::string::npos) {
+                if (!fill_child_out_buffer()) {
+                    return false;
+                }
+            } else {
+                line = child_out_buffer_.substr(0, new_line_pos + 1);
+                child_out_buffer_.erase(child_out_buffer_.begin(), child_out_buffer_.begin() + new_line_pos + 1);
+                return true;
+            }
+        }
+    }
+
+    virtual void do_write(const std::string& data) override {
+        assert(child_in_);
+        DWORD dwWritten;
+        if (!WriteFile(child_in_.get(), data.data(), static_cast<DWORD>(data.size()), &dwWritten, nullptr)) {
+            throw_system_error("Error writing to child stdin");
+        }
+        assert(dwWritten == data.size());
+    }
+
+    virtual void do_close_stdin() override {
+        assert(child_in_);
+
+        child_in_.reset();
+    }
+};
+
+std::unique_ptr<child_process> child_process::create(const std::vector<std::string>& args)
+{
+    return std::unique_ptr<child_process>{new child_process_win32{args}};
+}
+
+void send_enter_to_console()
+{
+    HANDLE hStdIn = CreateFileA("CONIN$", GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (hStdIn == INVALID_HANDLE_VALUE) {
+        throw_system_error("Could not open console");
+    }
+    win32_handle console_stdin{hStdIn};
+
+    INPUT_RECORD ir[2];
+    ir[0].EventType = KEY_EVENT;
+    ir[0].Event.KeyEvent.bKeyDown          = TRUE;
+    ir[0].Event.KeyEvent.wRepeatCount      = 1;
+    ir[0].Event.KeyEvent.wVirtualKeyCode   = VK_RETURN;
+    ir[0].Event.KeyEvent.uChar.AsciiChar   = '\r';
+    ir[0].Event.KeyEvent.dwControlKeyState = 0;
+    ir[1].EventType = KEY_EVENT;
+    ir[1].Event.KeyEvent.bKeyDown          = FALSE;
+    ir[1].Event.KeyEvent.wRepeatCount      = 0;
+    ir[1].Event.KeyEvent.wVirtualKeyCode   = VK_RETURN;
+    ir[1].Event.KeyEvent.uChar.AsciiChar   = '\r';
+    ir[1].Event.KeyEvent.dwControlKeyState = 0;
+    DWORD cWritten;
+    if (!WriteConsoleInputA(console_stdin.get(), ir, _countof(ir), &cWritten)) {
+        throw_system_error("Error writing to console input");
+    }
+    assert(cWritten == _countof(ir));
+}
+
+#else
+#include <stdio.h> // popen
 class child_process_popen : public child_process {
 public:
     explicit child_process_popen(const std::vector<std::string>& args) : f_{popen(concat_args(args).c_str(), "r"), &::pclose} {
@@ -637,8 +821,8 @@ private:
         return oss.str();
     }
 
-    virtual std::errc do_wait() override {
-        return static_cast<std::errc>(pclose(f_.release()));
+    virtual int do_wait() override {
+        return pclose(f_.release());
     }
 
     virtual bool do_read_line(std::string& line) override {
@@ -656,6 +840,7 @@ std::unique_ptr<child_process> child_process::create(const std::vector<std::stri
     return std::unique_ptr<child_process>{new child_process_popen{args}};
 }
 
+#endif
 #endif
 
 int main(int argc, char* argv[])
@@ -713,7 +898,6 @@ int main(int argc, char* argv[])
                 std::replace(begin(openssl), end(openssl), '/', '\\');
 #endif
                 auto openssl_child_process = child_process::create({
-                    "echo hello world|", // HACK
                     openssl,
                     "s_client",
                     "-tls1_2",   // We require TLS1.2 (this will also catch us testing against ancient versions of openssl
@@ -725,6 +909,13 @@ int main(int argc, char* argv[])
                     "localhost:" + std::to_string(port)
                 });
 
+                openssl_child_process->write("HELLO WORLD\r\n");
+                openssl_child_process->close_stdin();
+
+#ifdef WIN32
+                // HACK for openssl
+                send_enter_to_console();
+#endif
                 for (std::string s; openssl_child_process->read_line(s); ) {
                     io_service.post([s] {
                             std::cout << "[openssl] " << s;
@@ -732,7 +923,7 @@ int main(int argc, char* argv[])
                 }
                 const auto wait_result = openssl_child_process->wait();
                 io_service.post([wait_result] {
-                    FUNTLS_CHECK_BINARY(static_cast<int>(wait_result), ==, 0, "Wait failed");
+                    FUNTLS_CHECK_BINARY(wait_result, ==, 0, "Wait failed");
                     std::cout << "openssl exited OK\n";
                     });
 #elif defined(SELF_TEST)
