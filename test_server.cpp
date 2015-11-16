@@ -50,12 +50,14 @@ public:
     virtual std::unique_ptr<server_key_exchange_protocol> key_exchange_protocol(key_exchange_algorithm) const = 0;
 };
 
-class connection : private tls_base, public std::enable_shared_from_this<connection> {
+using client_connect_handler = std::function<void(util::async_result<std::shared_ptr<tls_base>>)>;
+
+class connection : public tls_base, public std::enable_shared_from_this<connection> {
 public:
     using ptr_t = std::shared_ptr<connection>;
 
-    static ptr_t make(const std::string& name, std::unique_ptr<stream> stream, const std::vector<const server_id*> server_ids) {
-        auto c = ptr_t(new connection{name, std::move(stream), server_ids});
+    static ptr_t make(const std::string& name, std::unique_ptr<stream> stream, const std::vector<const server_id*> server_ids, const client_connect_handler& on_client_connected) {
+        auto c = ptr_t(new connection{name, std::move(stream), server_ids, on_client_connected});
         c->read_client_hello();
         return c;
     }
@@ -64,9 +66,10 @@ public:
 private:
     util::ostream_adapter                           log_;
     std::vector<const server_id*>                   server_ids_;
+    client_connect_handler                          on_client_connected_;
     std::unique_ptr<server_key_exchange_protocol>   server_kex_;
 
-    connection(const std::string& name, std::unique_ptr<stream> stream, const std::vector<const server_id*> server_ids);
+    connection(const std::string& name, std::unique_ptr<stream> stream, const std::vector<const server_id*> server_ids, const client_connect_handler& on_client_connected);
 
     void read_client_hello();
     void send_server_hello();
@@ -74,15 +77,15 @@ private:
     void send_server_key_exchange();
     void send_server_hello_done();
     void read_client_key_exchange();
-    void main_loop();
 
     void handle_error(std::exception_ptr e) const;
 };
 
-connection::connection(const std::string& name, std::unique_ptr<stream> stream, const std::vector<const server_id*> server_ids)
+connection::connection(const std::string& name, std::unique_ptr<stream> stream, const std::vector<const server_id*> server_ids, const client_connect_handler& on_client_connected)
     : tls_base(std::move(stream), tls_base::connection_end::server)
     , log_([name] (const std::string& s) { std::cout << name + ": " + s;} )
     , server_ids_(server_ids)
+    , on_client_connected_(on_client_connected)
     , server_kex_(nullptr)
 {
     log_ << "Connected" << std::endl;
@@ -262,29 +265,13 @@ void connection::read_client_key_exchange() {
                                 self->send_change_cipher_spec(wrapped(
                                     [self] () {
                                         self->log_ << "Handshake done. Session id " << util::base16_encode(self->session_id().as_vector()) << std::endl;
-                                        self->main_loop();
+                                        self->on_client_connected_(std::shared_ptr<tls_base>{self});
                                     },
                                     std::bind(&connection::handle_error, self, std::placeholders::_1)));
                             },
                             std::bind(&connection::handle_error, self, std::placeholders::_1)));
             },
             std::bind(&connection::handle_error, self, std::placeholders::_1)));
-}
-
-// TODO: Allow user to specificy what happens in this function
-void connection::main_loop()
-{
-    auto self = shared_from_this();
-    recv_app_data(wrapped(
-        [self] (std::vector<uint8_t>&& data) {
-            self->log_ << "Got app data: " << std::string(data.begin(), data.end());
-            std::string text("Hello world!");
-            self->send_app_data(std::vector<uint8_t>(text.begin(), text.end()), [self] (util::async_result<void> res) {
-                res.get();
-                // self->main_loop();
-            });
-        },
-        std::bind(&connection::handle_error, self, std::placeholders::_1)));
 }
 
 class rsa_server_id : public server_id {
@@ -980,6 +967,23 @@ std::unique_ptr<child_process> child_process::create(const std::vector<std::stri
 
 #endif
 #endif
+const std::string generic_reply = "Content-type: text/ascii\r\n\r\nHello world!\r\n";
+
+void main_loop(async_result<std::shared_ptr<tls::tls_base>> async_self)
+{
+    auto self = async_self.get();
+    self->recv_app_data(
+        [self](async_result<std::vector<uint8_t>> async_data) {
+        const auto data = async_data.get();
+        std::cout << "Got app data: " << std::string(data.begin(), data.end());
+        self->send_app_data(std::vector<uint8_t>(generic_reply.begin(), generic_reply.end()), [self](util::async_result<void> res) {
+            res.get();
+            // self->main_loop();
+        });
+    });
+}
+
+
 
 int main(int argc, char* argv[])
 {
@@ -1011,7 +1015,7 @@ int main(int argc, char* argv[])
                 } else {
                     std::ostringstream oss;
                     oss << state->socket.remote_endpoint();
-                    tls::connection::make(oss.str(), make_tls_stream(std::move(state->socket)), {&server_id});
+                    tls::connection::make(oss.str(), make_tls_stream(std::move(state->socket)), {&server_id}, &main_loop);
                 }
                 start_accept();
             });
@@ -1103,7 +1107,7 @@ int main(int argc, char* argv[])
                     }, fetch_log);
                     io_service.post([res] {
                         std::cout << "Got result: \"" << res << "\"" << std::endl;
-                        FUNTLS_ASSERT_EQUAL("Hello world!", res);
+                        FUNTLS_ASSERT_EQUAL(generic_reply, res);
                     });
                 }
 #else
