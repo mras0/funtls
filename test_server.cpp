@@ -594,11 +594,68 @@ static const char certificate[] =
 #ifdef SELF_TEST
 #include "https_fetch.h"
 #elif defined(OPENSSL_TEST)
+
+class child_process {
+public:
+    virtual ~child_process() {}
+
+    std::errc wait() {
+        return do_wait();
+    }
+
+    bool read_line(std::string& line) {
+        return do_read_line(line);
+    }
+
+    static std::unique_ptr<child_process> create(const std::vector<std::string>& args);
+
+private:
+    virtual std::errc do_wait() = 0;
+    virtual bool do_read_line(std::string& line) = 0;
+};
+
 #include <stdio.h> // popen
 #ifdef _MSC_VER
 #define popen _popen
 #define pclose _pclose
 #endif
+
+class child_process_popen : public child_process {
+public:
+    explicit child_process_popen(const std::vector<std::string>& args) : f_{popen(concat_args(args).c_str(), "r"), &::pclose} {
+    }
+
+private:
+    std::unique_ptr<FILE, decltype(&::pclose)> f_;
+
+    static std::string concat_args(const std::vector<std::string>& args) {
+        std::ostringstream oss;
+        for (size_t i = 0; i < args.size(); ++i) {
+            if (i) oss << " ";
+            oss << args[i];
+        }
+        return oss.str();
+    }
+
+    virtual std::errc do_wait() override {
+        return static_cast<std::errc>(pclose(f_.release()));
+    }
+
+    virtual bool do_read_line(std::string& line) override {
+        char buffer[1024];
+        if (fgets(buffer, sizeof(buffer), f_.get())) {
+            line = buffer;
+            return true;
+        }
+        return false;
+    }
+};
+
+std::unique_ptr<child_process> child_process::create(const std::vector<std::string>& args)
+{
+    return std::unique_ptr<child_process>{new child_process_popen{args}};
+}
+
 #endif
 
 int main(int argc, char* argv[])
@@ -641,6 +698,7 @@ int main(int argc, char* argv[])
     std::cout << "Server running: " << acceptor.local_endpoint() << std::endl;
 
 #ifdef TESTING
+
     unsigned short port = acceptor.local_endpoint().port();
     std::exception_ptr eptr = nullptr;
     std::thread client_thread([&] {
@@ -650,27 +708,33 @@ int main(int argc, char* argv[])
 #ifdef OPENSSL_TEST
                 FUNTLS_CHECK_BINARY(argc, ==, 3, "Invalid arguments to test");
                 const std::string cipher = "RC4-MD5";
-                std::ostringstream cmd;
-                cmd << "echo HELLO WORLD | " << argv[2] << " s_client -debug -msg -cipher " << cipher <<  " -connect localhost:" << port << " 2>&1";
-                const auto cmdline = cmd.str();
-                io_service.post([cmdline] {
-                        std::cout << "Running command: " << cmdline << std::endl;
-                        });
-                std::unique_ptr<FILE, decltype(&::pclose)> f{popen(cmdline.c_str(), "r"), &::pclose};
-                assert(f);
+                std::string openssl = argv[2];
+#ifdef WIN32
+                std::replace(begin(openssl), end(openssl), '/', '\\');
+#endif
+                auto openssl_child_process = child_process::create({
+                    "echo hello world|", // HACK
+                    openssl,
+                    "s_client",
+                    "-tls1_2",   // We require TLS1.2 (this will also catch us testing against ancient versions of openssl
+                    "-debug",
+                    "-msg",
+                    "-cipher",
+                    cipher,
+                    "-connect",
+                    "localhost:" + std::to_string(port)
+                });
 
-                char buffer[1024];
-                while (fgets(buffer, sizeof(buffer), f.get())) {
-                    std::string s=buffer;
+                for (std::string s; openssl_child_process->read_line(s); ) {
                     io_service.post([s] {
                             std::cout << "[openssl] " << s;
                             });
                 }
-                const bool eof = feof(f.get()) != 0;
-                io_service.post([eof] {
-                        std::cout << "openssl command finished - " << (eof ? "EOF" : "Other error encountered") << "\n";
-                        FUNTLS_ASSERT_EQUAL(eof, true);
-                        });
+                const auto wait_result = openssl_child_process->wait();
+                io_service.post([wait_result] {
+                    FUNTLS_CHECK_BINARY(static_cast<int>(wait_result), ==, 0, "Wait failed");
+                    std::cout << "openssl exited OK\n";
+                    });
 #elif defined(SELF_TEST)
                 x509::trust_store ts;
 

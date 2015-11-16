@@ -135,7 +135,7 @@ if (OPENSSL_EXE)
     target_link_libraries(test_against_openssl tls)
     set_target_properties(test_against_openssl PROPERTIES COMPILE_FLAGS "-DOPENSSL_TEST")
     add_test(test_against_openssl test_against_openssl 0 ${OPENSSL_EXE})
-    set_tests_properties(test_against_openssl PROPERTIES PASS_REGULAR_EXPRESSION "openssl command finished - EOF")
+    set_tests_properties(test_against_openssl PROPERTIES PASS_REGULAR_EXPRESSION "openssl exited OK")
 endif()
 
 if (NOT WIN32)
