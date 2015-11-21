@@ -166,8 +166,11 @@ int main(int argc, char* argv[])
             return 1;
         }
     }
+
+    const auto loopback_address = boost::asio::ip::address_v4(0x7F000001);
+
     boost::asio::io_service        io_service;
-    boost::asio::ip::tcp::acceptor acceptor(io_service, boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), static_cast<uint16_t>(wanted_port)));
+    boost::asio::ip::tcp::acceptor acceptor(io_service, boost::asio::ip::tcp::endpoint(loopback_address, static_cast<uint16_t>(wanted_port)));
 
     struct accept_state {
         accept_state(boost::asio::io_service& io_service) : socket(io_service) {
