@@ -2,6 +2,7 @@
 #define FUNTLS_TLS_TLS_SERVER_H_INCLUDED
 
 #include <tls/tls_base.h>
+#include <util/async_result.h>
 
 namespace funtls { namespace tls {
 
@@ -47,6 +48,10 @@ private:
     virtual bool do_supports(key_exchange_algorithm) const = 0;
     virtual std::unique_ptr<server_key_exchange_protocol> do_key_exchange_protocol(key_exchange_algorithm) const = 0;
 };
+
+using client_connect_handler = std::function<void(util::async_result<std::shared_ptr<tls_base>>)>;
+
+void perform_handshake_with_client(const std::string& name, std::unique_ptr<stream> stream, const std::vector<const server_id*> server_ids, const client_connect_handler& on_client_connected);
 
 } } // namespace funtls::tls
 
