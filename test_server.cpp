@@ -7,6 +7,7 @@
 #include <tls/tls_base.h>
 #include <tls/tls_ser.h>
 #include <tls/tls_ecc.h>
+#include <tls/tls_server.h>
 #include <int_util/int.h>
 #include <int_util/int_util.h>
 #include <asio_stream_adapter.h>
@@ -18,37 +19,6 @@ using util::wrapped;
 using util::do_wrapped;
 
 namespace funtls { namespace tls {
-
-class server_key_exchange_protocol {
-public:
-    virtual ~server_key_exchange_protocol() {}
-
-    // returns nullptr if no ServerCertificate message should be sent, a list of certificates to send otherwise
-    const std::vector<asn1cert>* certificate_chain() const {
-        return do_certificate_chain();
-    }
-
-    // returns nullptr if no ServerKexEchange message should be sent, the appropriate handshake otherwise
-    std::unique_ptr<handshake> server_key_exchange(const random& client_random, const random& server_random) const {
-        return do_server_key_exchange(client_random, server_random);
-    }
-
-    // returns the master secret, the handshake is the ClientKeyExchange message received from the client
-    std::vector<uint8_t> client_key_exchange(const handshake& handshake) const {
-        return do_client_key_exchange(handshake);
-    }
-
-private:
-    virtual const std::vector<asn1cert>* do_certificate_chain() const = 0;
-    virtual std::unique_ptr<handshake> do_server_key_exchange(const random& client_random, const random& server_random) const = 0;
-    virtual std::vector<uint8_t> do_client_key_exchange(const handshake&) const = 0;
-};
-
-class server_id {
-public:
-    virtual bool supports(key_exchange_algorithm) const = 0;
-    virtual std::unique_ptr<server_key_exchange_protocol> key_exchange_protocol(key_exchange_algorithm) const = 0;
-};
 
 using client_connect_handler = std::function<void(util::async_result<std::shared_ptr<tls_base>>)>;
 
@@ -293,8 +263,8 @@ private:
     std::vector<asn1cert> certificate_chain_;
     x509::rsa_private_key      private_key_;
 
-    virtual bool supports(key_exchange_algorithm kex) const override;
-    virtual std::unique_ptr<server_key_exchange_protocol> key_exchange_protocol(key_exchange_algorithm kex) const override;
+    virtual bool do_supports(key_exchange_algorithm kex) const override;
+    virtual std::unique_ptr<server_key_exchange_protocol> do_key_exchange_protocol(key_exchange_algorithm kex) const override;
 };
 
 class rsa_server_key_exchange_protocol : public server_key_exchange_protocol  {
@@ -471,11 +441,11 @@ private:
 };
 
 
-bool rsa_server_id::supports(key_exchange_algorithm kex) const {
+bool rsa_server_id::do_supports(key_exchange_algorithm kex) const {
     return kex == key_exchange_algorithm::rsa || kex == key_exchange_algorithm::dhe_rsa || kex == key_exchange_algorithm::ecdhe_rsa;
 }
 
-std::unique_ptr<server_key_exchange_protocol> rsa_server_id::key_exchange_protocol(key_exchange_algorithm kex) const {
+std::unique_ptr<server_key_exchange_protocol> rsa_server_id::do_key_exchange_protocol(key_exchange_algorithm kex) const {
     switch (kex) {
     case key_exchange_algorithm::rsa:
         return std::unique_ptr<server_key_exchange_protocol>{new rsa_server_key_exchange_protocol{*this}};

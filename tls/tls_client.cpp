@@ -1,5 +1,5 @@
 #include <tls/tls_client.h>
-#include <tls/tls_kex.h>
+#include <tls/tls_client_kex.h>
 #include <tls/tls_ser.h>
 #include <util/test.h>
 #include <util/base_conversion.h>

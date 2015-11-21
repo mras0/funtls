@@ -13,9 +13,11 @@ add_library(tls STATIC
     tls_client.h
     tls_ecc.cpp
     tls_ecc.h
-    tls_kex.cpp
-    tls_kex.h
+    tls_client_kex.cpp
+    tls_client_kex.h
     tls_ser.h
+    tls_server.cpp
+    tls_server.h
     )
 target_link_libraries(tls util x509 hash aes rc4 3des ec chacha poly1305 int_util)
 
