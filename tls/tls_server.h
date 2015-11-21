@@ -32,6 +32,8 @@ private:
 
 class server_id {
 public:
+    virtual ~server_id() {}
+
     // returns true if the server identification supports the key exchange algorithm
     bool supports(key_exchange_algorithm kex_algo) const {
         return do_supports(kex_algo);
