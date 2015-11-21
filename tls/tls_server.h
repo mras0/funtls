@@ -51,7 +51,7 @@ private:
 
 using client_connect_handler = std::function<void(util::async_result<std::shared_ptr<tls_base>>)>;
 
-void perform_handshake_with_client(const std::string& name, std::unique_ptr<stream> stream, const std::vector<const server_id*> server_ids, const client_connect_handler& on_client_connected);
+void perform_handshake_with_client(std::unique_ptr<stream> stream, const std::vector<const server_id*> server_ids, const client_connect_handler& on_client_connected, std::ostream* log);
 
 } } // namespace funtls::tls
 

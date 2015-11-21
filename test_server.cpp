@@ -488,14 +488,19 @@ std::unique_ptr<child_process> child_process::create(const std::vector<std::stri
 #endif
 const std::string generic_reply = "Content-type: text/ascii\r\n\r\nHello world!\r\n";
 
-void main_loop(util::async_result<std::shared_ptr<tls::tls_base>> async_self)
+std::shared_ptr<util::ostream_adapter> make_log(const std::string& name)
+{
+    return std::make_shared<util::ostream_adapter>([name](const std::string& s) { std::cout << name + ": " + s; });
+}
+
+void main_loop(std::shared_ptr<util::ostream_adapter> log, util::async_result<std::shared_ptr<tls::tls_base>> async_self)
 {
     auto self = async_self.get();
     self->recv_app_data(
-        [self](util::async_result<std::vector<uint8_t>> async_data) {
+        [self, log](util::async_result<std::vector<uint8_t>> async_data) {
         const auto data = async_data.get();
-        std::cout << "Got app data: " << std::string(data.begin(), data.end());
-        self->send_app_data(std::vector<uint8_t>(generic_reply.begin(), generic_reply.end()), [self](util::async_result<void> res) {
+        (*log) << "Got app data: " << std::string(data.begin(), data.end());
+        self->send_app_data(std::vector<uint8_t>(generic_reply.begin(), generic_reply.end()), [self, log](util::async_result<void> res) {
             res.get();
             // self->main_loop();
         });
@@ -534,7 +539,8 @@ int main(int argc, char* argv[])
                 } else {
                     std::ostringstream oss;
                     oss << state->socket.remote_endpoint();
-                    tls::perform_handshake_with_client(oss.str(), make_tls_stream(std::move(state->socket)), {server_id.get()}, &main_loop);
+                    auto log = make_log(oss.str());
+                    tls::perform_handshake_with_client(make_tls_stream(std::move(state->socket)), {server_id.get()}, std::bind(&main_loop, log, std::placeholders::_1), log.get());
                 }
                 start_accept();
             });

@@ -9,7 +9,6 @@ class client_key_exchange_protocol;
 
 class client : public tls_base {
 public:
-
     explicit client(std::unique_ptr<stream> stream, const std::vector<cipher_suite>& wanted_ciphers, const verify_certificate_chain_func& verify_certificate_chain);
     ~client();
 
