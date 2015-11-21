@@ -3,6 +3,11 @@
 #include <unistd.h>
 #include <sys/wait.h>
 
+#include <cassert>
+#include <cstdlib>
+#include <system_error>
+#include <stdexcept>
+
 namespace funtls { namespace util {
 
 void throw_system_error(const std::string& what, int error = errno)
