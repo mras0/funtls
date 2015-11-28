@@ -2,6 +2,7 @@
 #include <fstream>
 #include <string>
 #include <util/base_conversion.h>
+#include <util/test.h>
 #include <x509/x509.h>
 #include <x509/x509_rsa.h>
 #include <x509/x509_io.h>
@@ -26,62 +27,9 @@ void show_certificate(const std::string& filename)
     }
 }
 
-#include <util/test.h>
-#include <int_util/int.h>
-#include <int_util/int_util.h>
-
-// openssl rsa -check -inform pem -text -noout
-x509::rsa_private_key generate_rsa_private_key(unsigned bit_count)
-{
-    const large_uint e = 65537; // Use same public exponent as openssl
-    large_uint p, q, n, d;
-
-    for (int iter = 0; ; ++iter) {
-        FUNTLS_CHECK_BINARY(iter, <, 10, "Couldn't generate private key");
-        // 1. Choose two distinct prime numbers p and q.
-        p = random_prime<large_uint>(large_uint{1}<<((bit_count/2)-1), large_uint{1}<<(bit_count/2));
-        assert(p >= large_uint{1}<<(bit_count/2-1) && p < (large_uint{1}<<(bit_count/2)));
-        std::cout << "p = " << p << std::endl;
-        q = random_prime<large_uint>((large_uint{1}<<(bit_count-1))/p + 1, (((large_uint{1}<<bit_count)-1)/p)+1);
-        std::cout << "q = " << q << std::endl;
-        // 2. Compute n = pq.
-        n = p * q;
-        std::cout << "n = " << n << std::endl;
-        assert(n >= large_uint{1}<<(bit_count-1) && n < (large_uint{1}<<bit_count));
-    
-        // 3. Compute phi(n) = phi(p)phi(q) =  (p ? 1)(q ? 1) = n - (p + q - 1)
-        const large_uint phi_n = n - (p + q - 1);
-        std::cout << "phi(n) = " << phi_n << std::endl;
-        // 4. Choose an integer e such that 1 < e < phi(n) and gcd(e, phi(n)) = 1; i.e., e and phi(n) are coprime.
-        if (gcd(e, phi_n) == 1) {
-            // 5. Determine d as d == e^?1 (mod phi(n)); i.e., d is the multiplicative inverse of e (modulo phi(n)).
-            d = modular_inverse(e, phi_n);
-            assert(large_uint((e*d) % phi_n) == 1);
-            break;
-        }
-    
-        std::cout << "gcd(e, phi_n) != 1 retrying...\n";
-        assert(false); // How often does this happen?
-    }
-
-    std::cout << "Public key: (" << n << ", " << e << ")\n";
-    std::cout << "Private key: " << d << std::endl;
-
-    return x509::rsa_private_key{
-        asn1::integer{0},                                     // version          = two-prime
-        asn1::integer{n},                                     // modulus          = n
-        asn1::integer{e},                                     // public_exponent  = e
-        asn1::integer{d},                                     // private_exponent = d
-        asn1::integer{p},                                     // prime1           = p
-        asn1::integer{q},                                     // prime2           = q
-        asn1::integer{large_uint{d % (p - 1)}},               // exponent1        = d mod (p-1)
-        asn1::integer{large_uint{d % (q - 1)}},               // exponent2        = d mod (q-1)
-        asn1::integer{large_uint{modular_inverse(q, p)}}};    // coefficient      = (inverse of q) mod p
-}
-
 void make_rsa_private_key(unsigned bit_count)
 {
-    x509::write_pem_private_key_info(std::cout, make_private_key_info(generate_rsa_private_key(bit_count)));
+    x509::write_pem_private_key_info(std::cout, make_private_key_info(x509::rsa_private_key::generate(bit_count)));
     std::cout << "\n";
 }
 
@@ -106,7 +54,7 @@ private:
 
 void make_certificate()
 {
-    const auto private_key = generate_rsa_private_key(1024);
+    const auto private_key = x509::rsa_private_key::generate(1024);
 
     {
         std::cout << "Private Key:\n";

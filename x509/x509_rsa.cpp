@@ -259,6 +259,60 @@ rsa_private_key rsa_private_key::parse(const asn1::der_encoded_value& repr)
     return {version, n, e, d, p, q, e1, e2, c};
 }
 
+const asn1::integer rsa_private_key::version_two_prime{0};
+
+rsa_private_key rsa_private_key::generate(unsigned bit_count)
+{
+    assert(bit_count > 0);
+
+    // Check with: openssl rsa -check -inform pem -text -noout
+
+    const large_uint public_exponent = 65537; // Use same public exponent as openssl
+    large_uint prime1, prime2, modulus, private_exponent;
+
+    for (int iter = 0; ; ++iter) {
+        FUNTLS_CHECK_BINARY(iter, <, 10, "Couldn't generate private key");
+        // 1. Choose two distinct prime numbers p and q.
+        prime1 = random_prime(large_uint{1}<<((bit_count/2)-1), large_uint{1}<<(bit_count/2));
+        assert(prime1 >= large_uint{1}<<(bit_count/2-1) && prime1 < (large_uint{1}<<(bit_count/2)));
+
+        prime2 = random_prime<large_uint>((large_uint{1}<<(bit_count-1))/prime1 + 1, (((large_uint{1}<<bit_count)-1)/prime1)+1);
+
+        // 2. Compute n = pq.
+        modulus = prime1 * prime2;
+        assert(modulus >= large_uint{1}<<(bit_count-1) && modulus < (large_uint{1}<<bit_count));
+
+        // 3. Compute phi(n) = phi(p)phi(q) =  (p - 1)(q - 1) = n - (p + q - 1)
+        const large_uint phi_n = modulus - (prime1 + prime2 - 1);
+
+        // 4. Choose an integer e such that 1 < e < phi(n) and gcd(e, phi(n)) = 1; i.e., e and phi(n) are coprime.
+        if (gcd(public_exponent, phi_n) == 1) {
+            // 5. Determine d as d == e^-1 (mod phi(n)); i.e., d is the multiplicative inverse of e (modulo phi(n)).
+            private_exponent = modular_inverse(public_exponent, phi_n);
+            FUNTLS_CHECK_BINARY(large_uint((public_exponent*private_exponent) % phi_n), ==, 1, "Bad private key generated");
+            break;
+        }
+
+        assert(false); // How often does this happen?
+    }
+
+    const large_uint exponent1   = private_exponent % (prime1 - 1); // d mod (p-1)
+    const large_uint exponent2   = private_exponent % (prime2 - 1); // d mod (q-1)
+    const large_uint coefficient = modular_inverse(prime2, prime1);
+
+    return rsa_private_key{
+        version_two_prime,
+        asn1::integer{modulus},
+        asn1::integer{public_exponent},
+        asn1::integer{private_exponent},
+        asn1::integer{prime1},
+        asn1::integer{prime2},
+        asn1::integer{exponent1},
+        asn1::integer{exponent2},
+        asn1::integer{coefficient}
+    };
+}
+
 rsa_private_key rsa_private_key_from_pki(const private_key_info& pki)
 {
     FUNTLS_CHECK_BINARY(pki.version.as<int>(), ==, 0, "Unsupported private key version");

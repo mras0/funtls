@@ -9,6 +9,8 @@
 namespace funtls { namespace x509 {
 
 struct rsa_private_key {
+    static const asn1::integer version_two_prime;
+    
     asn1::integer version;          // { two-prime(0), multi(1) }
     asn1::integer modulus;          // n
     asn1::integer public_exponent;  // e
@@ -23,6 +25,7 @@ struct rsa_private_key {
     void serialize(std::vector<uint8_t>& buf) const;
 
     static rsa_private_key parse(const asn1::der_encoded_value& repr);
+    static rsa_private_key generate(unsigned bit_count);
 };
 
 struct rsa_public_key {

@@ -286,6 +286,46 @@ void test_pkey()
     FUNTLS_ASSERT_EQUAL(test_pkey0, pkey_pem.str());
 }
 
+void test_pkey_generation()
+{
+    const auto pk = x509::rsa_private_key::generate(256);
+
+    const auto n = pk.modulus.as<large_uint>();
+    const auto e = pk.public_exponent.as<large_uint>();
+    const auto d = pk.private_exponent.as<large_uint>();
+    const auto p = pk.prime1.as<large_uint>();
+    const auto q = pk.prime2.as<large_uint>();
+    const auto e1 = pk.exponent1.as<large_uint>();
+    const auto e2 = pk.exponent2.as<large_uint>();
+    const auto coef = pk.coefficient.as<large_uint>();
+    const auto bit_count = 8 * ilog256(n);
+
+    FUNTLS_ASSERT_EQUAL(0, pk.version.as<int>());
+    FUNTLS_ASSERT_EQUAL(256, bit_count);
+    FUNTLS_ASSERT_EQUAL(true, is_prime(p));
+    FUNTLS_ASSERT_EQUAL(true, is_prime(q));
+    FUNTLS_ASSERT_EQUAL(n, p * q);
+    const large_uint phi_n = n - (p + q -1);
+    FUNTLS_ASSERT_BINARY_MESSAGE(e, >=, 65537, ""); 
+    FUNTLS_ASSERT_BINARY_MESSAGE(e, <, phi_n, "");
+    FUNTLS_ASSERT_EQUAL(1, gcd(e, phi_n));
+    FUNTLS_ASSERT_EQUAL(d, modular_inverse(e, phi_n));
+
+    FUNTLS_ASSERT_EQUAL(e1, d % (p-1));
+    FUNTLS_ASSERT_EQUAL(e2, d % (q-1));
+    FUNTLS_ASSERT_EQUAL(coef, modular_inverse(q, p));
+
+    // 2n**(1/4) for n = 2**256 = 2 * 18446744073709551616
+    const large_uint n_pow_neg4_est("18446744073709551616");
+    FUNTLS_ASSERT_BINARY_MESSAGE(p > q ? p - q : q - p, >, 2*n_pow_neg4_est, "Primes are too close");
+
+    FUNTLS_ASSERT_BINARY_MESSAGE(d, >, n_pow_neg4_est / 3, "Private key too small");
+
+    // TODO: Better checking of the generated values
+    // e.g. if either p ? 1 or q ? 1 has only small prime factors, n can be factored quickl
+}
+
+
 void test_serialization()
 {
     //digest_info.insert(digest_info.begin(), {0x30, 0x21, 0x30, 0x09, 0x06, 0x05, 0x2b, 0x0e, 0x03, 0x02, 0x1a, 0x05, 0x00, 0x04, 0x14});
@@ -488,6 +528,7 @@ int main()
         test_cert();
         test_cert_extensions();
         test_pkey();
+        test_pkey_generation();
         test_serialization();
     } catch (const std::exception& e) {
         std::cerr << e.what() << std::endl;
