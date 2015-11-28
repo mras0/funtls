@@ -91,16 +91,11 @@ void test_asn1()
     FUNTLS_ASSERT_EQUAL(1, int_value_1_.octet_count());
     FUNTLS_ASSERT_EQUAL(42, int_value_1_.octet(0));
 
-    // Supported range so far
-    FUNTLS_ASSERT_EQUAL(0, integer{0}.as<int>());
-    FUNTLS_ASSERT_EQUAL(42, integer{42}.as<int>());
-    FUNTLS_ASSERT_EQUAL(0x7f, integer{0x7f}.as<int>());
-
     // TODO: Check illegal encodings
     // E.g. ints encoded with more than the needed bytes
 
     static const struct {
-        int64_t int_val;
+        uint64_t int_val;
         std::vector<uint8_t> bytes;
     } int_test_cases[] = {
         { 0, { 0 } },
@@ -108,6 +103,8 @@ void test_asn1()
         { 127, { 0x7f } },
         { 128, { 0x00, 0x80 } },
         { 256, { 0x01, 0x00 } },
+        { 0x1020304050607080, { 0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80 } },
+        { 0xF020304050607080, { 0x00, 0xF0, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80 } },
         //{ -128, { 0x80 } },
         //{ -129, { 0xFF, 0x7F } },
     };
@@ -118,14 +115,16 @@ void test_asn1()
         for (size_t i = 0; i < int_test_case.bytes.size(); ++i) {
             FUNTLS_ASSERT_EQUAL(int_test_case.bytes[i], the_int.octet(i));
         }
-        FUNTLS_ASSERT_EQUAL(int_test_case.int_val, the_int.as<int64_t>());
         FUNTLS_ASSERT_EQUAL(large_uint(int_test_case.int_val), the_int.as<large_uint>());
         if (int_test_case.bytes.size() == 1) {
             FUNTLS_ASSERT_EQUAL(static_cast<int8_t>(int_test_case.int_val), the_int.as<int8_t>());
+            FUNTLS_ASSERT_EQUAL(static_cast<int8_t>(int_test_case.int_val), integer{int_test_case.int_val}.as<int8_t>());
         } else if (int_test_case.bytes.size() == 2) {
             FUNTLS_ASSERT_EQUAL(static_cast<int16_t>(int_test_case.int_val), the_int.as<int16_t>());
-        } else {
-            assert(false);
+            FUNTLS_ASSERT_EQUAL(static_cast<int16_t>(int_test_case.int_val), integer{int_test_case.int_val}.as<int16_t>());
+        } else if (int_test_case.bytes.size() <= 8) {
+            FUNTLS_ASSERT_EQUAL(int_test_case.int_val, the_int.as<uint64_t>());
+            FUNTLS_ASSERT_EQUAL(int_test_case.int_val, integer{int_test_case.int_val}.as<uint64_t>());
         }
 
         std::vector<uint8_t> int_serialized;
@@ -139,6 +138,11 @@ void test_asn1()
     FUNTLS_ASSERT_EQUAL(10, large_int.octet_count());
     FUNTLS_ASSERT_THROWS(large_int.as<int64_t>(), std::runtime_error);
     FUNTLS_ASSERT_EQUAL(large_uint("0x7fffffffffffffffffff"), large_int.as<large_uint>());
+
+    large_uint li("0x80ffffffffffffffffff");
+    asn1::integer large_int2{li};
+    FUNTLS_ASSERT_EQUAL(11, large_int2.octet_count());
+    FUNTLS_ASSERT_EQUAL(li, large_int2.as<large_uint>());
 
     //
     // OBJECT IDENTIFER

@@ -30,12 +30,6 @@ void show_certificate(const std::string& filename)
 #include <int_util/int.h>
 #include <int_util/int_util.h>
 
-asn1::integer to_asn1_int(large_uint n, unsigned byte_count) {
-    auto bytes = be_uint_to_bytes(n, byte_count);
-    if (bytes[0] & 0x80) bytes.insert(bytes.begin(), 0x00);
-    return asn1::integer::from_bytes(bytes);
-}
-
 // openssl rsa -check -inform pem -text -noout
 x509::rsa_private_key generate_rsa_private_key(unsigned bit_count)
 {
@@ -73,19 +67,16 @@ x509::rsa_private_key generate_rsa_private_key(unsigned bit_count)
     std::cout << "Public key: (" << n << ", " << e << ")\n";
     std::cout << "Private key: " << d << std::endl;
 
-    const unsigned byte_count = (bit_count+7) / 8;
-    assert(ilog256(n) == byte_count);
-
     return x509::rsa_private_key{
-        asn1::integer{0},                                   // version          = two-prime
-        to_asn1_int(n, byte_count),                         // modulus          = n
-        to_asn1_int(e, byte_count),                         // public_exponent  = e
-        to_asn1_int(d, byte_count),                         // private_exponent = d
-        to_asn1_int(p, byte_count),                         // prime1           = p
-        to_asn1_int(q, byte_count),                         // prime2           = q
-        to_asn1_int(d % (p - 1), byte_count),               // exponent1        = d mod (p-1)
-        to_asn1_int(d % (q - 1), byte_count),               // exponent2        = d mod (q-1)
-        to_asn1_int(modular_inverse(q, p), byte_count)};    // coefficient      = (inverse of q) mod p
+        asn1::integer{0},                                     // version          = two-prime
+        asn1::integer{n},                                     // modulus          = n
+        asn1::integer{e},                                     // public_exponent  = e
+        asn1::integer{d},                                     // private_exponent = d
+        asn1::integer{p},                                     // prime1           = p
+        asn1::integer{q},                                     // prime2           = q
+        asn1::integer{large_uint{d % (p - 1)}},               // exponent1        = d mod (p-1)
+        asn1::integer{large_uint{d % (q - 1)}},               // exponent2        = d mod (q-1)
+        asn1::integer{large_uint{modular_inverse(q, p)}}};    // coefficient      = (inverse of q) mod p
 }
 
 void make_rsa_private_key(unsigned bit_count)
@@ -135,7 +126,7 @@ void make_certificate()
 
     x509::tbs_certificate tbs{
         x509::version::v3,                                    // version
-        asn1::integer::from_bytes({0x01}),                    // serial_number
+        asn1::integer(1),                                     // serial_number
         algo_id,                                              // signature_algorithm
         subject,                                              // issuer
         not_before,                                           // validity_not_before

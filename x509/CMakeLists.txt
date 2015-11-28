@@ -36,7 +36,7 @@ add_test(x509_util_show_cert x509_util show-cert ${CMAKE_CURRENT_SOURCE_DIR}/loc
 set_tests_properties(x509_util_show_cert PROPERTIES PASS_REGULAR_EXPRESSION "Serial number: 0x00DD43B1B0CCC9E27D.*Issuer: CN=localhost.*Subject: CN=localhost.*Verifying self-signed certificate...OK")
 
 add_test(x509_util_make_pkey x509_util make-rsa-private-key 256)
-set_tests_properties(x509_util_make_pkey PROPERTIES PASS_REGULAR_EXPRESSION "-----BEGIN PRIVATE KEY-----\nMII.*-----END PRIVATE KEY-----")
+set_tests_properties(x509_util_make_pkey PROPERTIES PASS_REGULAR_EXPRESSION "-----BEGIN PRIVATE KEY-----\nMI.*-----END PRIVATE KEY-----")
 
 add_test(x509_util_make_cert x509_util make-cert)
 set_tests_properties(x509_util_make_cert PROPERTIES PASS_REGULAR_EXPRESSION "-----BEGIN CERTIFICATE-----\nMII.*-----END CERTIFICATE-----")

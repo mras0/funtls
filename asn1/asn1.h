@@ -169,9 +169,25 @@ class integer {
 public:
     static constexpr auto id = identifier::integer;
 
-    explicit integer(std::intmax_t n) {
-        assert(n >= 0 && n <= 0x7F); // lazy
-        repr_.push_back(static_cast<uint8_t>(n));
+    template<typename IntType>
+    explicit integer(IntType n) {
+        assert(n >= 0);
+        if (n == 0) {
+            repr_.push_back(0);
+            return;
+        }
+
+        std::vector<uint8_t> le_bytes;
+        while (n != 0) {
+            le_bytes.push_back(static_cast<uint8_t>(n));
+            n >>= 8;
+        }
+        assert(!le_bytes.empty());
+        // Must have zero byte if the most siginificant bit is set
+        if (le_bytes.back() & 0x80) {
+            le_bytes.push_back(0);
+        }
+        repr_ = std::vector<uint8_t>(le_bytes.crbegin(), le_bytes.crend());
     }
 
     explicit integer(const der_encoded_value& repr);
