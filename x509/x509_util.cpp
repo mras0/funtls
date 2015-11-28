@@ -54,12 +54,7 @@ x509::rsa_private_key generate_rsa_private_key(unsigned bit_count)
     const large_uint phi_n = n - (p + q - 1);
     std::cout << "phi(n) = " << phi_n << std::endl;
     // 4. Choose an integer e such that 1 < e < phi(n) and gcd(e, phi(n)) = 1; i.e., e and phi(n) are coprime.
-    large_uint e = 0;
-    for (int iter=0;;++iter) {
-        FUNTLS_CHECK_BINARY(iter, <, 1000, "Took too many iterations to find public exponent");
-        e = rand_positive_int_less(phi_n);
-        if (gcd(phi_n, e) == 1) break;
-    }
+    large_uint e = 65537; // Use same public exponent as openssl
     
     // 5. Determine d as d == e^?1 (mod phi(n)); i.e., d is the multiplicative inverse of e (modulo phi(n)).
     const large_uint d = modular_inverse(e, phi_n);
