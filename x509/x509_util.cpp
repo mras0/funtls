@@ -39,26 +39,36 @@ asn1::integer to_asn1_int(large_uint n, unsigned byte_count) {
 // openssl rsa -check -inform pem -text -noout
 x509::rsa_private_key generate_rsa_private_key(unsigned bit_count)
 {
-    // 1. Choose two distinct prime numbers p and q.
-    const large_uint p = random_prime<large_uint>(large_uint{1}<<((bit_count/2)-1), large_uint{1}<<(bit_count/2));
-    assert(p >= large_uint{1}<<(bit_count/2-1) && p < (large_uint{1}<<(bit_count/2)));
-    std::cout << "p = " << p << std::endl;
-    const large_uint q = random_prime<large_uint>((large_uint{1}<<(bit_count-1))/p + 1, (((large_uint{1}<<bit_count)-1)/p)+1);
-    std::cout << "q = " << q << std::endl;
-    // 2. Compute n = pq.
-    const large_uint n = p * q;
-    std::cout << "n = " << n << std::endl;
-    assert(n >= large_uint{1}<<(bit_count-1) && n < (large_uint{1}<<bit_count));
+    const large_uint e = 65537; // Use same public exponent as openssl
+    large_uint p, q, n, d;
+
+    for (int iter = 0; ; ++iter) {
+        FUNTLS_CHECK_BINARY(iter, <, 10, "Couldn't generate private key");
+        // 1. Choose two distinct prime numbers p and q.
+        p = random_prime<large_uint>(large_uint{1}<<((bit_count/2)-1), large_uint{1}<<(bit_count/2));
+        assert(p >= large_uint{1}<<(bit_count/2-1) && p < (large_uint{1}<<(bit_count/2)));
+        std::cout << "p = " << p << std::endl;
+        q = random_prime<large_uint>((large_uint{1}<<(bit_count-1))/p + 1, (((large_uint{1}<<bit_count)-1)/p)+1);
+        std::cout << "q = " << q << std::endl;
+        // 2. Compute n = pq.
+        n = p * q;
+        std::cout << "n = " << n << std::endl;
+        assert(n >= large_uint{1}<<(bit_count-1) && n < (large_uint{1}<<bit_count));
     
-    // 3. Compute phi(n) = phi(p)phi(q) =  (p ? 1)(q ? 1) = n - (p + q - 1)
-    const large_uint phi_n = n - (p + q - 1);
-    std::cout << "phi(n) = " << phi_n << std::endl;
-    // 4. Choose an integer e such that 1 < e < phi(n) and gcd(e, phi(n)) = 1; i.e., e and phi(n) are coprime.
-    large_uint e = 65537; // Use same public exponent as openssl
+        // 3. Compute phi(n) = phi(p)phi(q) =  (p ? 1)(q ? 1) = n - (p + q - 1)
+        const large_uint phi_n = n - (p + q - 1);
+        std::cout << "phi(n) = " << phi_n << std::endl;
+        // 4. Choose an integer e such that 1 < e < phi(n) and gcd(e, phi(n)) = 1; i.e., e and phi(n) are coprime.
+        if (gcd(e, phi_n) == 1) {
+            // 5. Determine d as d == e^?1 (mod phi(n)); i.e., d is the multiplicative inverse of e (modulo phi(n)).
+            d = modular_inverse(e, phi_n);
+            assert(large_uint((e*d) % phi_n) == 1);
+            break;
+        }
     
-    // 5. Determine d as d == e^?1 (mod phi(n)); i.e., d is the multiplicative inverse of e (modulo phi(n)).
-    const large_uint d = modular_inverse(e, phi_n);
-    assert(large_uint((e*d) % phi_n) == 1);
+        std::cout << "gcd(e, phi_n) != 1 retrying...\n";
+        assert(false); // How often does this happen?
+    }
 
     std::cout << "Public key: (" << n << ", " << e << ")\n";
     std::cout << "Private key: " << d << std::endl;
