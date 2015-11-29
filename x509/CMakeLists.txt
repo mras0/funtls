@@ -46,6 +46,6 @@ if (OPENSSL_EXE)
     set_tests_properties(x509_util_make_pkey_ok PROPERTIES PASS_REGULAR_EXPRESSION "Private-Key: \\(512 bit\\).*publicExponent: 65537.*RSA key ok")
 
     add_piped_test(x509_util_make_cert_ok $<TARGET_FILE:x509_util> "make-cert" ${OPENSSL_EXE} "x509 -inform pem -text -noout")
-    set_tests_properties(x509_util_make_cert_ok PROPERTIES PASS_REGULAR_EXPRESSION "Not Before: Nov  8 00:00:00 2015 GMT.*Public[- ]Key: \\(1024 bit\\).*Signature Algorithm: sha1WithRSAEncryption")
+    set_tests_properties(x509_util_make_cert_ok PROPERTIES PASS_REGULAR_EXPRESSION "Not Before: Nov  8 00:00:00 2015 GMT.*Public[- ]Key: \\(1024 bit\\).*Signature Algorithm: sha256WithRSAEncryption")
 endif()
 

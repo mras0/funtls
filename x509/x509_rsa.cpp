@@ -30,24 +30,21 @@ hash::hash_algorithm get_hash(const asn1::object_id& oid)
     FUNTLS_CHECK_FAILURE(oss.str());
 }
 
-asn1::object_id digest_algo_from_signature_algo(const x509::algorithm_id& sig_algo)
+asn1::object_id digest_algo_from_signature_algo(const asn1::object_id& sig_algo_id)
 {
-    if (public_key_algo_from_signature_algo(sig_algo) == x509::id_rsaEncryption) {
-        FUNTLS_CHECK_BINARY(sig_algo.null_parameters(), ==, true, "Invalid algorithm parameters");
-    }
-    if (sig_algo.id() == x509::id_md5WithRSAEncryption) {
+    if (sig_algo_id == x509::id_md5WithRSAEncryption) {
         return x509::id_md5;
-    } else if (sig_algo.id() == x509::id_sha1WithRSAEncryption) {
+    } else if (sig_algo_id == x509::id_sha1WithRSAEncryption) {
         return x509::id_sha1;
-    } else if (sig_algo.id() == x509::id_sha256WithRSAEncryption) {
+    } else if (sig_algo_id == x509::id_sha256WithRSAEncryption) {
         return x509::id_sha256;
-    } else if (sig_algo.id() == x509::id_sha384WithRSAEncryption) {
+    } else if (sig_algo_id == x509::id_sha384WithRSAEncryption) {
         return x509::id_sha384;
-    } else if (sig_algo.id() == x509::id_sha512WithRSAEncryption) {
+    } else if (sig_algo_id == x509::id_sha512WithRSAEncryption) {
         return x509::id_sha512;
     }
     std::ostringstream oss;
-    oss << "Unknown signature algorithm " << sig_algo;
+    oss << "Unknown signature algorithm id " << sig_algo_id;
     FUNTLS_CHECK_FAILURE(oss.str());
 }
 
@@ -334,7 +331,11 @@ void verify_x509_signature_rsa(const certificate& subject_cert, const certificat
 
     FUNTLS_CHECK_BINARY(c.issuer, ==, issuer_cert.tbs().subject, "Issuer certificate does not match");
 
-    const auto digest_algo = digest_algo_from_signature_algo(subject_cert.signature_algorithm());
+    const auto sig_algo = subject_cert.signature_algorithm();
+    if (public_key_algo_from_signature_algo(sig_algo) == x509::id_rsaEncryption) {
+        FUNTLS_CHECK_BINARY(sig_algo.null_parameters(), ==, true, "Invalid algorithm parameters");
+    }
+    const auto digest_algo = digest_algo_from_signature_algo(sig_algo.id());
 
     // Decode the signature using the issuers public key
     auto digest = x509::pkcs1_decode(rsa_public_key_from_certificate(issuer_cert), subject_cert.signature().as_vector());
@@ -358,6 +359,35 @@ private_key_info make_private_key_info(const rsa_private_key& private_key)
         algorithm_id{id_rsaEncryption},
         asn1::octet_string{asn1::serialized(private_key)}
     };
+}
+
+class rsa_certificate_signer::impl  {
+public:
+    impl(const asn1::object_id& algorithm_id, const rsa_private_key& private_key)
+        : algo_id_(algorithm_id)
+        , private_key_(private_key) {
+    }
+
+    x509::certificate_signer::sign_result_t sign(const std::vector<uint8_t>& certificate_der_encoded) const {
+        auto digest_algo_id = digest_algo_from_signature_algo(algo_id_);
+        x509::digest_info di{x509::algorithm_id{digest_algo_id}, get_hash(digest_algo_id).input(certificate_der_encoded).result()};
+        return std::make_pair(x509::algorithm_id{algo_id_}, x509::pkcs1_encode(private_key_, asn1::serialized(di)));
+    }
+private:
+    asn1::object_id              algo_id_;
+    const x509::rsa_private_key& private_key_;
+};
+
+rsa_certificate_signer::rsa_certificate_signer(const asn1::object_id& algorithm_id, const x509::rsa_private_key& private_key)
+    : impl_(new impl{algorithm_id, private_key})
+{
+}
+
+rsa_certificate_signer::~rsa_certificate_signer() = default;
+
+certificate_signer::sign_result_t rsa_certificate_signer::do_sign(const std::vector<uint8_t>& certificate_der_encoded) const
+{
+    return impl_->sign(certificate_der_encoded);
 }
 
 } } // namespace funtls::x509

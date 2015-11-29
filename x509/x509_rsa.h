@@ -83,6 +83,17 @@ void verify_x509_signature_rsa(const certificate& subject_cert, const certificat
 
 private_key_info make_private_key_info(const rsa_private_key& private_key);
 
+class rsa_certificate_signer : public x509::certificate_signer {
+public:
+    rsa_certificate_signer(const asn1::object_id& algorithm_id, const rsa_private_key& private_key);
+    ~rsa_certificate_signer();
+
+private:
+    class impl;
+    std::unique_ptr<impl> impl_;
+    virtual sign_result_t do_sign(const std::vector<uint8_t>& certificate_der_encoded) const override;
+};
+
 } } // namespace funtls::x509
 
 #endif
