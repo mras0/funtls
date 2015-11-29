@@ -304,22 +304,22 @@ void test_pkey_generation()
     FUNTLS_ASSERT_EQUAL(256, bit_count);
     FUNTLS_ASSERT_EQUAL(true, is_prime(p));
     FUNTLS_ASSERT_EQUAL(true, is_prime(q));
-    FUNTLS_ASSERT_EQUAL(n, p * q);
+    FUNTLS_ASSERT_EQUAL(n, large_uint{p * q});
     const large_uint phi_n = n - (p + q -1);
     FUNTLS_ASSERT_BINARY_MESSAGE(e, >=, 65537, ""); 
     FUNTLS_ASSERT_BINARY_MESSAGE(e, <, phi_n, "");
     FUNTLS_ASSERT_EQUAL(1, gcd(e, phi_n));
     FUNTLS_ASSERT_EQUAL(d, modular_inverse(e, phi_n));
 
-    FUNTLS_ASSERT_EQUAL(e1, d % (p-1));
-    FUNTLS_ASSERT_EQUAL(e2, d % (q-1));
+    FUNTLS_ASSERT_EQUAL(e1, large_uint{d % (p-1)});
+    FUNTLS_ASSERT_EQUAL(e2, large_uint{d % (q-1)});
     FUNTLS_ASSERT_EQUAL(coef, modular_inverse(q, p));
 
     // 2n**(1/4) for n = 2**256 = 2 * 18446744073709551616
     const large_uint n_pow_neg4_est("18446744073709551616");
-    FUNTLS_ASSERT_BINARY_MESSAGE(p > q ? p - q : q - p, >, 2*n_pow_neg4_est, "Primes are too close");
+    FUNTLS_ASSERT_BINARY_MESSAGE(large_uint{p > q ? p - q : q - p}, >, large_uint{2*n_pow_neg4_est}, "Primes are too close");
 
-    FUNTLS_ASSERT_BINARY_MESSAGE(d, >, n_pow_neg4_est / 3, "Private key too small");
+    FUNTLS_ASSERT_BINARY_MESSAGE(d, >, large_uint{n_pow_neg4_est / 3}, "Private key too small");
 
     // TODO: Better checking of the generated values
     // e.g. if either p ? 1 or q ? 1 has only small prime factors, n can be factored quickl
