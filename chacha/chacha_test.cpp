@@ -165,9 +165,14 @@ void test_poly1305_key_gen()
 
 int main()
 {
-    test_rotate();
-    test_quarter_round();
-    test_block();
-    test_chacha20();
-    test_poly1305_key_gen();
+    try {
+        test_rotate();
+        test_quarter_round();
+        test_block();
+        test_chacha20();
+        test_poly1305_key_gen();
+    } catch (const std::exception& e) {
+        std::cerr << e.what() << std::endl;
+        return 1;
+    }
 }

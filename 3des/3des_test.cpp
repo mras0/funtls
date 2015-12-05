@@ -157,8 +157,12 @@ void _3des_cbc_tests()
 
 int main()
 {
-    des_tests();
-    _3des_tests();
-    _3des_cbc_tests();
-
+    try {
+        des_tests();
+        _3des_tests();
+        _3des_cbc_tests();
+    } catch (const std::exception& e) {
+        std::cerr << e.what() << std::endl;
+        return 1;
+    }
 }

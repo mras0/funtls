@@ -47,16 +47,7 @@ protected:
 
     using recv_handshake_handler = std::function<void(util::async_result<handshake>)>;
 
-    explicit tls_base(std::unique_ptr<stream> stream, connection_end ce) : stream_(std::move(stream)), connection_end_(ce) {
-        assert(stream_);
-        if (connection_end_ == connection_end::server) {
-            server_random_ = make_random();
-        } else {
-            assert(connection_end_ == connection_end::client);
-            client_random_ = make_random();
-        }
-    }
-
+    explicit tls_base(std::unique_ptr<stream> stream, connection_end ce);
     ~tls_base();
 
     void send_record(tls::content_type content_type, const std::vector<uint8_t>& plaintext, const done_handler& handler);

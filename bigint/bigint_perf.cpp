@@ -226,9 +226,14 @@ void report(const results_t& results)
 #include <boost/multiprecision/cpp_int.hpp>
 int main()
 {
-    results_t results;
-    test<boost::multiprecision::cpp_int>("boost", results);
-    test<funtls::bigint::biguint>("funtls", results);
-    std::sort(results.begin(), results.end());
-    report(results);
+    try {
+        results_t results;
+        test<boost::multiprecision::cpp_int>("boost", results);
+        test<funtls::bigint::biguint>("funtls", results);
+        std::sort(results.begin(), results.end());
+        report(results);
+    } catch (const std::exception& e) {
+        std::cerr << e.what() << std::endl;
+        return 1;
+    }
 }

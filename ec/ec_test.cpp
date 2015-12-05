@@ -16,7 +16,7 @@ ec::curve make_curve(const ec::field_elem& p, const ec::field_elem& a, const ec:
     };
 }
 
-int main()
+void ec_test()
 {
     {
         const auto C = make_curve(5, 1, 1);
@@ -36,5 +36,15 @@ int main()
         FUNTLS_ASSERT_EQUAL((ec::point{0,min_2}), C.add(P,Q));
         FUNTLS_ASSERT_EQUAL((ec::point{0,min_2}), C.add(Q, P));
         FUNTLS_ASSERT_EQUAL(ec::infinity, C.add(Q, Q));
+    }
+}
+
+int main()
+{
+    try {
+        ec_test();
+    } catch (const std::exception& e) {
+        std::cerr << e.what() << std::endl;
+        return 1;
     }
 }

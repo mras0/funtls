@@ -23,11 +23,21 @@ std::ostream& operator<<(std::ostream& os, const std::vector<uint8_t>& v)
         RC4_CHECK(expeceted, key, _input_vec);                                     \
     } while (0)
 
-int main()
+void rc4_test()
 {
     // Tests from wikipedia
     RC4_CHECK_STR("BBF316E8D940AF0AD3", "Key", "Plaintext");
     RC4_CHECK_STR("1021BF0420", "Wiki", "pedia");
     RC4_CHECK_STR("45A01F645FC35B383552544B9BF5", "Secret", "Attack at dawn");
-    return 0;
+}
+
+#include <iostream>
+int main()
+{
+    try {
+        rc4_test();
+    } catch (const std::exception& e) {
+        std::cerr << e.what() << std::endl;
+        return 1;
+    }
 }

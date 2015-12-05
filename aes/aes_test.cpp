@@ -623,14 +623,18 @@ void test_increment()
 
 int main()
 {
-    test_increment();
-    tests_aes_internals();
-    test_ecb_aes128();
-    test_ecb_aes192();
-    test_ecb_aes256();
-    test_cbc_aes128();
-    test_cbc_aes192();
-    test_cbc_aes256();
-
-    test_cgm_aes();
+    try {
+        test_increment();
+        tests_aes_internals();
+        test_ecb_aes128();
+        test_ecb_aes192();
+        test_ecb_aes256();
+        test_cbc_aes128();
+        test_cbc_aes192();
+        test_cbc_aes256();
+        test_cgm_aes();
+    } catch (const std::exception& e) {
+        std::cerr << e.what() << std::endl;
+        return 1;
+    }
 }

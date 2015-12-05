@@ -12,6 +12,8 @@ public:
     using output_func_type = std::function<void (const std::string&)>;
     explicit ostream_adapter(const output_func_type& out_func);
     ~ostream_adapter();
+private:
+    std::unique_ptr<std::streambuf> buffer_;
 };
 
 } } // namespace funtls::util

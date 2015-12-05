@@ -212,7 +212,7 @@ biguint& biguint::mul(biguint& res, const biguint& lhs, const biguint& rhs)
         return res;
     }
 
-    res.size_ = std::min(biguint::max_size, static_cast<size_type>(lhs.size_ + rhs.size_));
+    res.size_ = std::min(biguint::max_size, static_cast<size_type>(ls + rs));
 
     memset(&res.v_[0], 0, sizeof(limb_type)*res.size_);
 

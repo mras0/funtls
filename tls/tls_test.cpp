@@ -208,7 +208,7 @@ void test_protocol_version()
     FUNTLS_ASSERT_BINARY_MESSAGE(tls::protocol_version_tls_1_2, >=, tls::protocol_version_tls_1_1, "");
 }
 
-int main()
+void tls_test()
 {
     //const auto secret = util::base16_decode("01234567");
     //const auto seed   = util::base16_decode("89ABCDEF");
@@ -223,4 +223,14 @@ int main()
     test_protocol_version();
 
     // TODO: Test tls::tls_base and tls::client
+}
+
+int main()
+{
+    try {
+        tls_test();
+    } catch (const std::exception& e) {
+        std::cerr << e.what() << std::endl;
+        return 1;
+    }
 }

@@ -89,8 +89,13 @@ void test_random_prime()
 
 int main()
 {
-    // TODO: More tests
-    test_gcd();
-    test_random_large_uint();
-    test_random_prime();
+    try {
+        // TODO: More tests
+        test_gcd();
+        test_random_large_uint();
+        test_random_prime();
+    } catch (const std::exception& e) {
+        std::cerr << e.what() << std::endl;
+        return 1;
+    }
 }

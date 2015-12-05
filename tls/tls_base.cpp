@@ -9,6 +9,18 @@ using util::do_wrapped;
 
 namespace funtls { namespace tls {
 
+tls_base::tls_base(std::unique_ptr<stream> stream, connection_end ce) : stream_(std::move(stream)), connection_end_(ce) {
+    assert(stream_);
+    memset(&client_random_, 0, sizeof(client_random_));
+    memset(&server_random_, 0, sizeof(server_random_));
+    if (connection_end_ == connection_end::server) {
+        server_random_ = make_random();
+    } else {
+        assert(connection_end_ == connection_end::client);
+        client_random_ = make_random();
+    }
+}
+
 tls_base::~tls_base() = default;
 
 void tls_base::send_app_data(const std::vector<uint8_t>& d, const app_data_sent_handler& handler)

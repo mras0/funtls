@@ -250,10 +250,15 @@ void test_ostream_adapter()
 
 int main()
 {
-    base16_test();
-    base64_test();
-    buffer_test();
-    test_buffer_getters();
-    test_async_result();
-    test_ostream_adapter();
+    try {
+        base16_test();
+        base64_test();
+        buffer_test();
+        test_buffer_getters();
+        test_async_result();
+        test_ostream_adapter();
+    } catch (const std::exception& e) {
+        std::cerr << e.what() << std::endl;
+        return 1;
+    }
 }

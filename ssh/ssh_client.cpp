@@ -737,10 +737,16 @@ void ssh_client::do_command(const std::string& command)
 
 int main()
 {
-    const char* u = getenv("USER");
-    const char* user_name = u && u[0] ? u : "test";
-    const auto private_key = x509::rsa_private_key_from_pki(x509::read_pem_private_key_from_file("../rsa-key.pem"));
-    ssh_client client("localhost", "1234", user_name, private_key);
-    client.do_command("whoami");
-    client.do_command("ls");
+    try {
+        const char* u = getenv("USER");
+        const char* user_name = u && u[0] ? u : "test";
+        const auto private_key = x509::rsa_private_key_from_pki(x509::read_pem_private_key_from_file("../rsa-key.pem"));
+        ssh_client client("localhost", "1234", user_name, private_key);
+        client.do_command("whoami");
+        client.do_command("ls");
+    } catch (const std::exception& e) {
+        std::cerr << e.what() << std::endl;
+        return 1;
+    }
+
 }

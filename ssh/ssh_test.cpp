@@ -35,7 +35,7 @@ large_uint parse_ssh_mpint(const std::vector<uint8_t>& v) {
 
 } // unnamed namespace
 
-int main()
+void ssh_test()
 {
     FUNTLS_ASSERT_EQUAL("", parse_ssh_string({0,0,0,0}));
     FUNTLS_ASSERT_THROWS(parse_ssh_string({0,0,0,2,0}), std::runtime_error);
@@ -67,4 +67,14 @@ int main()
     FUNTLS_ASSERT_EQUAL("zlib", nl2s(ssh::name_list({"zlib"})));
     FUNTLS_ASSERT_EQUAL("zlib,none", nl2s(ssh::name_list({"zlib","none"})));
     FUNTLS_ASSERT_EQUAL("zlib,none, 123,  AAQQ   ,X", nl2s(ssh::name_list({"zlib","none"," 123","  AAQQ   ", "X"})));
+}
+
+int main()
+{
+    try {
+        ssh_test();
+    } catch (const std::exception& e) {
+        std::cerr << e.what() << std::endl;
+        return 1;
+    }
 }

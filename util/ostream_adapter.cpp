@@ -28,13 +28,14 @@ private:
 namespace funtls { namespace util {
 
 // This will leak if ostream's constructor throws, but that's a concern for another day
-ostream_adapter::ostream_adapter(const output_func_type& out_func) : std::ostream(new ostream_adapter_bufimpl(out_func))
+ostream_adapter::ostream_adapter(const output_func_type& out_func) : std::ostream(nullptr), buffer_(new ostream_adapter_bufimpl(out_func))
 {
+    rdbuf(buffer_.get());
 }
 
 ostream_adapter::~ostream_adapter()
 {
-    delete rdbuf();
+    rdbuf(nullptr);
 }
 
 } } // namespace funtls::util

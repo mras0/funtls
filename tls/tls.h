@@ -267,7 +267,7 @@ std::ostream& operator<<(std::ostream& os, extension_type etype);
 struct extension {
     using data_type = vector<uint8, 0, (1<<16)-1>;
 
-    extension() = default;
+    extension() : type(static_cast<extension_type>(-1)) {}
     
     extension(extension_type type, const data_type& data) : type(type), data(data) {}
 

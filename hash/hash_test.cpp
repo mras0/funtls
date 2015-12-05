@@ -236,7 +236,7 @@ void test_md5()
     FUNTLS_ASSERT_EQUAL(util::base16_decode("80070713463e7749b90c2dc24911e275"), hash::hmac_md5(std::string("key")).input(s2v("The quick brown fox jumps over the lazy dog")).result());
 }
 
-int main()
+void hash_test()
 {
     const auto sha256_of_empty_string = util::base16_decode("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
     FUNTLS_ASSERT_EQUAL(sha256_of_empty_string, hash::sha256().result());
@@ -252,4 +252,14 @@ int main()
     FUNTLS_ASSERT_EQUAL(util::base16_decode("fbdb1d1b18aa6c08324b7d64b71fb76370690e1d"), hash::hmac_sha1(empty_key).result());
     FUNTLS_ASSERT_EQUAL(util::base16_decode("b613679a0814d9ec772f95d778c35fc5ff1697c493715653c6c712144292c5ad"), hash::hmac_sha256(empty_key).result());
 
+}
+
+int main()
+{
+    try {
+        hash_test();
+    } catch (const std::exception& e) {
+        std::cerr << e.what() << std::endl;
+        return 1;
+    }
 }
