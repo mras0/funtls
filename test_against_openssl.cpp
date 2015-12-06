@@ -39,15 +39,6 @@ void send_enter_to_console()
 }
 #endif
 
-void close_stdin(util::child_process& p)
-{
-    p.close_stdin();
-#ifdef WIN32
-    // HACK for openssl
-    send_enter_to_console();
-#endif
-}
-
 void openssl_test_client(boost::asio::io_service& io_service, uint16_t port)
 {
     const std::vector<std::string> ciphers {
@@ -67,6 +58,9 @@ void openssl_test_client(boost::asio::io_service& io_service, uint16_t port)
             "-tls1_2",   // We require TLS1.2 (this will also catch us testing against ancient versions of openssl
             "-debug",
             "-msg",
+#ifndef WIN32
+            "-ign_eof", // On non-windows platforms ignore std-in EOF, instead wait for the server to close the connection
+#endif
             "-cipher",
             cipher,
             "-connect",
@@ -74,7 +68,10 @@ void openssl_test_client(boost::asio::io_service& io_service, uint16_t port)
         });
 
         openssl_child_process->write("HELLO WORLD\r\n");
-        close_stdin(*openssl_child_process);
+        openssl_child_process->close_stdin();
+#ifdef WIN32
+        send_enter_to_console(); // Hack required for most versions of openssl for windows
+#endif
 
         std::string all_output_from_openssl;
         for (std::string s; openssl_child_process->read_line(s); ) {
