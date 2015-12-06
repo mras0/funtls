@@ -99,7 +99,7 @@ private:
 class child_process_posix : public child_process {
 public:
     explicit child_process_posix(const std::vector<std::string>& args) {
-        std::vector<char*> argv(args.size());
+        std::vector<char*> argv(args.size() + 1); // argv must be null terminated
         for (size_t i = 0; i < args.size(); ++i) {
             argv[i] = const_cast<char*>(args[i].c_str());
         }
