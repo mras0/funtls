@@ -17,6 +17,9 @@ tcp_tls_server::~tcp_tls_server() = default;
 void tcp_tls_server::start_accept() {
     auto socket = std::make_shared<boost::asio::ip::tcp::socket>(acceptor_.get_io_service());
     auto self = shared_from_this();
+
+    (*self->main_log_) << __FUNCTION__ << "\n";
+
     acceptor_.async_accept(*socket,
         [self, socket] (const boost::system::error_code& ec) {
         if (ec) {

@@ -125,39 +125,28 @@ include_directories(${funtls_SOURCE_DIR})
 add_library(https_fetch https_fetch.cpp https_fetch.h)
 target_link_libraries(https_fetch tls)
 
-add_executable(funtls client.cpp)
-target_link_libraries(funtls https_fetch)
+add_executable(funtls_client client.cpp)
+target_link_libraries(funtls_client https_fetch)
 
 add_library(tcp_tls_server tcp_tls_server.cpp tcp_tls_server.h)
 target_link_libraries(tcp_tls_server tls)
 
-add_executable(test_server test_server.cpp)
-target_link_libraries(test_server tcp_tls_server)
+add_executable(funtls_server server.cpp)
+target_link_libraries(funtls_server tcp_tls_server)
 
-add_executable(self_test test_server.cpp)
-target_link_libraries(self_test https_fetch tcp_tls_server)
-set_target_properties(self_test PROPERTIES COMPILE_FLAGS "-DSELF_TEST")
+add_library(server_test_utils server_test_utils.cpp server_test_utils.h)
+target_link_libraries(server_test_utils tcp_tls_server)
+
+add_executable(self_test self_test.cpp)
+target_link_libraries(self_test https_fetch server_test_utils)
 add_test(self_test self_test)
 
 if (OPENSSL_EXE)
-    add_executable(test_against_openssl test_server.cpp)
-    target_link_libraries(test_against_openssl tcp_tls_server)
+    add_executable(test_against_openssl test_against_openssl.cpp)
+    target_link_libraries(test_against_openssl server_test_utils)
     file(TO_NATIVE_PATH "${OPENSSL_EXE}" OPENSSL_EXE_ESCAPED)
     string(REPLACE "\\" "\\\\" OPENSSL_EXE_ESCAPED ${OPENSSL_EXE_ESCAPED})
-    set_target_properties(test_against_openssl PROPERTIES COMPILE_FLAGS "-DOPENSSL_TEST -DOPENSSL_EXE=\\\"${OPENSSL_EXE_ESCAPED}\\\"")
-    add_test(test_against_openssl test_against_openssl 0 ${OPENSSL_EXE})
+    set_target_properties(test_against_openssl PROPERTIES COMPILE_FLAGS "-DOPENSSL_EXE=\\\"${OPENSSL_EXE_ESCAPED}\\\"")
+    add_test(test_against_openssl test_against_openssl)
     set_tests_properties(test_against_openssl PROPERTIES PASS_REGULAR_EXPRESSION "openssl exited OK")
-endif()
-
-if (NOT WIN32)
-    find_program(HAS_CTAGS ctags)
-    if (HAS_CTAGS)
-        message("ctags found")
-
-        set_source_files_properties(tags PROPERTIES GENERATED true)
-        add_custom_target(tags
-            COMMAND ctags -R --c++-kinds=+p --fields=+iaS --extra=+q --exclude=build* .
-            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-        add_dependencies(funtls tags)
-    endif()
 endif()
