@@ -20,6 +20,12 @@ if (MSVC)
     add_definitions("/W4")
     add_definitions("/wd4127") # C4127: conditional expression is constant
 
+    # MSVC++ 2015 RTM       19.0.23026
+    # MSVC++ 2015 Update 1  19.0.23506
+    if (${CMAKE_CXX_COMPILER_VERSION} VERSION_EQUAL 19.0.23506.0)
+        add_definitions("/wd4592") # C4592: '???': symbol will be dynamically initialized (implementation limitation)
+    endif()
+
     add_definitions("-DWIN32")
     add_definitions("-D__PRETTY_FUNCTION__=__func__")
     add_definitions("-D_SCL_SECURE_NO_WARNINGS")
@@ -122,18 +128,23 @@ target_link_libraries(https_fetch tls)
 add_executable(funtls client.cpp)
 target_link_libraries(funtls https_fetch)
 
+add_library(tcp_tls_server tcp_tls_server.cpp tcp_tls_server.h)
+target_link_libraries(tcp_tls_server tls)
+
 add_executable(test_server test_server.cpp)
-target_link_libraries(test_server tls)
+target_link_libraries(test_server tcp_tls_server)
 
 add_executable(self_test test_server.cpp)
-target_link_libraries(self_test https_fetch)
+target_link_libraries(self_test https_fetch tcp_tls_server)
 set_target_properties(self_test PROPERTIES COMPILE_FLAGS "-DSELF_TEST")
 add_test(self_test self_test)
 
 if (OPENSSL_EXE)
     add_executable(test_against_openssl test_server.cpp)
-    target_link_libraries(test_against_openssl tls)
-    set_target_properties(test_against_openssl PROPERTIES COMPILE_FLAGS "-DOPENSSL_TEST")
+    target_link_libraries(test_against_openssl tcp_tls_server)
+    file(TO_NATIVE_PATH "${OPENSSL_EXE}" OPENSSL_EXE_ESCAPED)
+    string(REPLACE "\\" "\\\\" OPENSSL_EXE_ESCAPED ${OPENSSL_EXE_ESCAPED})
+    set_target_properties(test_against_openssl PROPERTIES COMPILE_FLAGS "-DOPENSSL_TEST -DOPENSSL_EXE=\\\"${OPENSSL_EXE_ESCAPED}\\\"")
     add_test(test_against_openssl test_against_openssl 0 ${OPENSSL_EXE})
     set_tests_properties(test_against_openssl PROPERTIES PASS_REGULAR_EXPRESSION "openssl exited OK")
 endif()

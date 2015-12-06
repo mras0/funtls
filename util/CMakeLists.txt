@@ -26,4 +26,8 @@ add_library(util STATIC
 add_executable(util_test util_test.cpp)
 target_link_libraries(util_test util)
 
+if (MSVC AND ${CMAKE_CXX_COMPILER_VERSION} VERSION_EQUAL 19.0.23506.0)
+    set_source_files_properties(util_test.cpp PROPERTIES COMPILE_FLAGS "/wd4702") # warning C4702: unreachable code
+endif()
+
 add_test(util_test util_test)

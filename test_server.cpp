@@ -1,16 +1,57 @@
-#include <iostream>
-
 #include <util/test.h>
 #include <util/base_conversion.h>
 #include <util/ostream_adapter.h>
+#include "tcp_tls_server.h"
 #include <asio_stream_adapter.h>
 #include <tls/tls_server.h>
 
 using namespace funtls;
 
+#include <iostream>
+
 #if defined(OPENSSL_TEST) || defined(SELF_TEST)
 #define TESTING
 #include <thread>
+
+class client_thread {
+public:
+    using func_type = std::function<void (void)>;
+
+    client_thread(boost::asio::io_service& io_service, const func_type& main) : io_service_(io_service), main_(main), thread_([this] { thread_func(); }) {
+    }
+
+    ~client_thread() {
+        thread_.join();
+    }
+
+    void get() {
+        if (exception_) {
+            std::rethrow_exception(exception_);
+        }
+    }
+
+private:
+    boost::asio::io_service& io_service_;
+    func_type                main_;
+    std::exception_ptr       exception_;
+    std::thread              thread_;
+
+    void thread_func() {
+        boost::asio::io_service::work work(io_service_); // keep the io_service running as long as the thread does
+
+        try {
+            main_();
+        } catch (...) {
+            exception_ = std::current_exception();
+        }
+
+        // Make sure we only capture the io_service
+        boost::asio::io_service& io_service = io_service_;
+        io_service.post([&io_service] { io_service.stop(); });
+    }
+};
+
+
 #endif
 
 #include <x509/x509_io.h>
@@ -97,9 +138,9 @@ static const char certificate[] =
     return tls::make_rsa_server_id({util::base64_decode(certificate, sizeof(certificate)-1)}, x509::rsa_private_key_from_pki(pki));
 }
 
-#ifdef SELF_TEST
-#include "https_fetch.h"
-#elif defined(OPENSSL_TEST)
+const std::string generic_reply = "Content-type: text/ascii\r\n\r\nHello world!\r\n";
+
+#ifdef OPENSSL_TEST
 #include <util/child_process.h>
 #include <util/win32_util.h>
 #ifdef WIN32
@@ -132,15 +173,102 @@ void send_enter_to_console()
     assert(cWritten == _countof(ir));
 }
 #endif
-#endif
-const std::string generic_reply = "Content-type: text/ascii\r\n\r\nHello world!\r\n";
 
-std::shared_ptr<util::ostream_adapter> make_log(const std::string& name)
+void openssl_test_client(boost::asio::io_service& io_service, uint16_t port, std::string openssl_path)
+{
+    const std::string cipher = "RC4-MD5";
+#ifdef WIN32
+    std::replace(begin(openssl_path), end(openssl_path), '/', '\\');
+#endif
+    auto openssl_child_process = util::child_process::create({
+        openssl_path,
+        "s_client",
+        "-tls1_2",   // We require TLS1.2 (this will also catch us testing against ancient versions of openssl
+        "-debug",
+        "-msg",
+        "-cipher",
+        cipher,
+        "-connect",
+        "localhost:" + std::to_string(port)
+    });
+
+    openssl_child_process->write("HELLO WORLD\r\n");
+    openssl_child_process->close_stdin();
+
+#ifdef WIN32
+    // HACK for openssl
+    send_enter_to_console();
+#endif
+    for (std::string s; openssl_child_process->read_line(s); ) {
+        io_service.post([s] {
+            std::cout << "[openssl] " << s;
+        });
+    }
+    const auto wait_result = openssl_child_process->wait();
+    io_service.post([wait_result] {
+        FUNTLS_CHECK_BINARY(wait_result, ==, 0, "Wait failed");
+        std::cout << "openssl exited OK\n";
+    });
+}
+#endif
+
+#ifdef SELF_TEST
+#include "https_fetch.h"
+
+void self_test(boost::asio::io_service& io_service, uint16_t port)
+{
+    x509::trust_store ts;
+
+    const std::vector<tls::cipher_suite> cipher_suites{
+        //tls::cipher_suite::ecdhe_ecdsa_with_aes_256_gcm_sha384,
+        //tls::cipher_suite::ecdhe_ecdsa_with_aes_128_gcm_sha256,
+
+        tls::cipher_suite::ecdhe_rsa_with_aes_256_cbc_sha,
+        tls::cipher_suite::ecdhe_rsa_with_aes_128_cbc_sha,
+
+        tls::cipher_suite::ecdhe_rsa_with_aes_256_gcm_sha384,
+        tls::cipher_suite::ecdhe_rsa_with_aes_128_gcm_sha256,
+
+        tls::cipher_suite::dhe_rsa_with_aes_256_cbc_sha256,
+        tls::cipher_suite::dhe_rsa_with_aes_128_cbc_sha256,
+        tls::cipher_suite::dhe_rsa_with_aes_256_cbc_sha,
+        tls::cipher_suite::dhe_rsa_with_aes_128_cbc_sha,
+        tls::cipher_suite::dhe_rsa_with_3des_ede_cbc_sha,
+
+        tls::cipher_suite::rsa_with_aes_256_gcm_sha384,
+        tls::cipher_suite::rsa_with_aes_128_gcm_sha256,
+        tls::cipher_suite::rsa_with_aes_256_cbc_sha256,
+        tls::cipher_suite::rsa_with_aes_128_cbc_sha256,
+        tls::cipher_suite::rsa_with_aes_256_cbc_sha,
+        tls::cipher_suite::rsa_with_aes_128_cbc_sha,
+        tls::cipher_suite::rsa_with_3des_ede_cbc_sha,
+        tls::cipher_suite::rsa_with_rc4_128_sha,
+        tls::cipher_suite::rsa_with_rc4_128_md5,
+    };
+
+    for (const auto& cs: cipher_suites) {
+        io_service.post([cs] { std::cout << "=== Testing " << cs << " ===" << std::endl; });
+        std::string res;
+        util::ostream_adapter fetch_log{[&io_service](const std::string& s) { io_service.post([s] { std::cout << "Client: " << s; }); }};
+        https_fetch("localhost", std::to_string(port), "/", {cs}, ts, [&res](const std::vector<uint8_t>& data) {
+            res.insert(res.end(), data.begin(), data.end());
+        }, fetch_log);
+        io_service.post([res] {
+            std::cout << "Got result: \"" << res << "\"" << std::endl;
+            FUNTLS_ASSERT_EQUAL(generic_reply, res);
+        });
+    }
+}
+
+
+#endif
+
+std::shared_ptr<std::ostream> make_log(const std::string& name)
 {
     return std::make_shared<util::ostream_adapter>([name](const std::string& s) { std::cout << name + ": " + s; });
 }
 
-void main_loop(std::shared_ptr<util::ostream_adapter> log, util::async_result<std::shared_ptr<tls::tls_base>> async_self)
+void main_loop(util::async_result<std::shared_ptr<tls::tls_base>> async_self, std::shared_ptr<std::ostream> log)
 {
     auto self = async_self.get();
     self->recv_app_data(
@@ -154,152 +282,42 @@ void main_loop(std::shared_ptr<util::ostream_adapter> log, util::async_result<st
     });
 }
 
-
-
 int main(int argc, char* argv[])
 {
-    int wanted_port = 0;
-    if (argc > 1) {
-        std::istringstream iss(argv[1]);
-        if (!(iss >> wanted_port) || wanted_port < 0 || wanted_port > 65535) {
-            std::cerr << "Invalid port " << argv[1] << "" << std::endl;
-            return 1;
+    int retval = 1;
+    try {
+        int wanted_port = 0;
+        if (argc > 1) {
+            std::istringstream iss(argv[1]);
+            if (!(iss >> wanted_port) || wanted_port < 0 || wanted_port > 65535) {
+                std::cerr << "Invalid port " << argv[1] << "" << std::endl;
+                return 1;
+            }
         }
-    }
 
-    const auto loopback_address = boost::asio::ip::address_v4(0x7F000001);
+        boost::asio::io_service  io_service;
+        auto server  = tcp_tls_server::create(io_service, boost::asio::ip::tcp::endpoint(boost::asio::ip::address_v4::loopback(), static_cast<uint16_t>(wanted_port)), get_server_id(), &make_log, &main_loop);
 
-    boost::asio::io_service        io_service;
-    boost::asio::ip::tcp::acceptor acceptor(io_service, boost::asio::ip::tcp::endpoint(loopback_address, static_cast<uint16_t>(wanted_port)));
-
-    struct accept_state {
-        accept_state(boost::asio::io_service& io_service) : socket(io_service) {
-        }
-        boost::asio::ip::tcp::socket socket;
-    };
-
-    auto server_id = get_server_id();
-
-    std::function<void (void)> start_accept = [&acceptor, &start_accept, &server_id] {
-        auto state = std::make_shared<accept_state>(acceptor.get_io_service());
-        acceptor.async_accept(state->socket,
-            [state, &start_accept, &server_id] (const boost::system::error_code& ec) {
-                if (ec) {
-                    std::cout << "Accept failed: " << ec << std::endl;
-                } else {
-                    std::ostringstream oss;
-                    oss << state->socket.remote_endpoint();
-                    auto log = make_log(oss.str());
-                    tls::perform_handshake_with_client(make_tls_stream(std::move(state->socket)), {server_id.get()}, std::bind(&main_loop, log, std::placeholders::_1), log.get());
-                }
-                start_accept();
-            });
-    };
-
-    start_accept();
-    std::cout << "Server running: " << acceptor.local_endpoint() << std::endl;
+        std::cout << "Server running: " << server->local_endpoint() << std::endl;
 
 #ifdef TESTING
-
-    unsigned short port = acceptor.local_endpoint().port();
-    std::exception_ptr eptr = nullptr;
-    std::thread client_thread([&] {
-            boost::asio::io_service::work work(io_service); // keep the io_service running as long as the thread does
-
-            try {
+        unsigned short port = server->local_endpoint().port();
+        client_thread test_client{io_service, [&] {
 #ifdef OPENSSL_TEST
-                FUNTLS_CHECK_BINARY(argc, ==, 3, "Invalid arguments to test");
-                const std::string cipher = "RC4-MD5";
-                std::string openssl = argv[2];
-#ifdef WIN32
-                std::replace(begin(openssl), end(openssl), '/', '\\');
-#endif
-                auto openssl_child_process = util::child_process::create({
-                    openssl,
-                    "s_client",
-                    "-tls1_2",   // We require TLS1.2 (this will also catch us testing against ancient versions of openssl
-                    "-debug",
-                    "-msg",
-                    "-cipher",
-                    cipher,
-                    "-connect",
-                    "localhost:" + std::to_string(port)
-                });
-
-                openssl_child_process->write("HELLO WORLD\r\n");
-                openssl_child_process->close_stdin();
-
-#ifdef WIN32
-                // HACK for openssl
-                send_enter_to_console();
-#endif
-                for (std::string s; openssl_child_process->read_line(s); ) {
-                    io_service.post([s] {
-                            std::cout << "[openssl] " << s;
-                            });
-                }
-                const auto wait_result = openssl_child_process->wait();
-                io_service.post([wait_result] {
-                    FUNTLS_CHECK_BINARY(wait_result, ==, 0, "Wait failed");
-                    std::cout << "openssl exited OK\n";
-                    });
+            std::cout << OPENSSL_EXE << std::endl;
+            //FUNTLS_CHECK_BINARY(argc, ==, 3, "Invalid arguments to test");
+            openssl_test_client(io_service, port, OPENSSL_EXE);
 #elif defined(SELF_TEST)
-                x509::trust_store ts;
-
-                const std::vector<tls::cipher_suite> cipher_suites{
-                    //tls::cipher_suite::ecdhe_ecdsa_with_aes_256_gcm_sha384,
-                    //tls::cipher_suite::ecdhe_ecdsa_with_aes_128_gcm_sha256,
-
-                    tls::cipher_suite::ecdhe_rsa_with_aes_256_cbc_sha,
-                    tls::cipher_suite::ecdhe_rsa_with_aes_128_cbc_sha,
-
-                    tls::cipher_suite::ecdhe_rsa_with_aes_256_gcm_sha384,
-                    tls::cipher_suite::ecdhe_rsa_with_aes_128_gcm_sha256,
-
-                    tls::cipher_suite::dhe_rsa_with_aes_256_cbc_sha256,
-                    tls::cipher_suite::dhe_rsa_with_aes_128_cbc_sha256,
-                    tls::cipher_suite::dhe_rsa_with_aes_256_cbc_sha,
-                    tls::cipher_suite::dhe_rsa_with_aes_128_cbc_sha,
-                    tls::cipher_suite::dhe_rsa_with_3des_ede_cbc_sha,
-
-                    tls::cipher_suite::rsa_with_aes_256_gcm_sha384,
-                    tls::cipher_suite::rsa_with_aes_128_gcm_sha256,
-                    tls::cipher_suite::rsa_with_aes_256_cbc_sha256,
-                    tls::cipher_suite::rsa_with_aes_128_cbc_sha256,
-                    tls::cipher_suite::rsa_with_aes_256_cbc_sha,
-                    tls::cipher_suite::rsa_with_aes_128_cbc_sha,
-                    tls::cipher_suite::rsa_with_3des_ede_cbc_sha,
-                    tls::cipher_suite::rsa_with_rc4_128_sha,
-                    tls::cipher_suite::rsa_with_rc4_128_md5,
-                };
-
-                for (const auto& cs: cipher_suites) {
-                    io_service.post([cs] { std::cout << "=== Testing " << cs << " ===" << std::endl; });
-                    std::string res;
-                    util::ostream_adapter fetch_log{[&io_service](const std::string& s) { io_service.post([s] { std::cout << "Client: " << s; }); }};
-                    https_fetch("localhost", std::to_string(port), "/", {cs}, ts, [&res](const std::vector<uint8_t>& data) {
-                        res.insert(res.end(), data.begin(), data.end());
-                    }, fetch_log);
-                    io_service.post([res] {
-                        std::cout << "Got result: \"" << res << "\"" << std::endl;
-                        FUNTLS_ASSERT_EQUAL(generic_reply, res);
-                    });
-                }
+            self_test(io_service, port);
 #else
 #error What are we testing???
 #endif
-            } catch (...) {
-                eptr = std::current_exception();
-            }
-            io_service.post([&io_service] { io_service.stop(); });
-    });
+        }};
 #endif
 
-    int retval = 1;
-    try {
         io_service.run();
 #ifdef TESTING
-        if (eptr) std::rethrow_exception(eptr);
+        test_client.get();
 #endif
         retval = 0;
     } catch (const std::exception& e) {
@@ -307,9 +325,5 @@ int main(int argc, char* argv[])
     } catch (...) {
         std::cerr << "Unknown exception caught" << std::endl;
     }
-#ifdef TESTING
-    client_thread.join();
-#endif
     return retval;
 }
-

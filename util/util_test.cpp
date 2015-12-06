@@ -153,6 +153,16 @@ void buffer_test()
     FUNTLS_ASSERT_EQUAL(0, empty.size());
     FUNTLS_ASSERT_EQUAL(0, empty.remaining());
     FUNTLS_ASSERT_THROWS(empty.get(), std::runtime_error);
+
+    std::string exception_msg;
+    try {
+        char buffer[256];
+        empty.read(buffer, sizeof(buffer));
+        FUNTLS_CHECK_FAILURE("Expected buffer_view::read to throw");
+    } catch (const std::runtime_error& e) {
+        exception_msg = e.what();
+    }
+    FUNTLS_ASSERT_EQUAL_MESSAGE(true, exception_msg.find("Out of buffer. 256 requested 0 available") != std::string::npos, exception_msg);
 }
 
 void test_buffer_getters()

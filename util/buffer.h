@@ -3,7 +3,6 @@
 
 #include <stdint.h>
 #include <cassert>
-#include <stdexcept>
 #include <cstring>
 #include <string>
 
@@ -27,9 +26,7 @@ struct buffer_view {
     }
 
     void skip(size_t num_bytes) {
-        if (index_ + num_bytes > size_) {
-            throw std::runtime_error("Out of data in " + std::string(__PRETTY_FUNCTION__));
-        }
+        check_available(num_bytes);
         index_ += num_bytes;
     }
 
@@ -40,17 +37,13 @@ struct buffer_view {
     }
 
     void read(void* dest, size_t num_bytes) {
-        if (index_ + num_bytes > size_) {
-            throw std::runtime_error("Out of data in " + std::string(__PRETTY_FUNCTION__));
-        }
+        check_available(num_bytes);
         std::memcpy(dest, &buffer_[index_], num_bytes);
         index_ += num_bytes;
     }
 
     buffer_view get_slice(size_t slice_size) {
-        if (index_ + slice_size > size_) {
-            throw std::runtime_error("Out of data in " + std::string(__PRETTY_FUNCTION__));
-        }
+        check_available(slice_size);
         const uint8_t* slice_buffer = buffer_ + index_;
         index_ += slice_size;
         return buffer_view(slice_buffer, slice_size);
@@ -60,6 +53,13 @@ private:
     const uint8_t* buffer_;
     size_t         size_;
     size_t         index_;
+
+    void check_available(size_t num_bytes) const {
+        if (index_ + num_bytes > size_) {
+            out_of_buffer(num_bytes);
+        }
+    }
+    void out_of_buffer(size_t num_bytes) const;
 };
 
 template<typename T, unsigned bits=sizeof(T)*8>
