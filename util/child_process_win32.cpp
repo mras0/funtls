@@ -57,11 +57,19 @@ public:
         child_in_.reset();
         child_out_.reset();
         if (process_) {
-            const DWORD dwWaitRes = WaitForSingleObject(process_.get(), 60*1000);
-            if (dwWaitRes != WAIT_OBJECT_0) {
-                assert(false);
-                std::abort();
+            const unsigned wait_for_exit_milliseconds = 5 * 1000;
+            // Wait for normal exit
+            if (!wait(wait_for_exit_milliseconds)) {
+#ifndef NDEBUG
+                OutputDebugStringA("Wait for child process failed - terminating");
+#endif
+                if (!TerminateProcess(process_.get(), 0xBADBAD)) {
+                    assert(false);
+                    std::abort();
+                }
+                wait(wait_for_exit_milliseconds);
             }
+            assert(wait(0));
         }
     }
 
@@ -69,6 +77,19 @@ private:
     win32_handle process_;
     win32_handle child_in_;
     win32_handle child_out_;
+
+    bool wait(unsigned max_wait_milliseconds) {
+        assert(process_);
+        const DWORD dwWaitRes = WaitForSingleObject(process_.get(), max_wait_milliseconds);
+        if (dwWaitRes == WAIT_OBJECT_0) {
+            return true;
+        } else if (dwWaitRes == WAIT_TIMEOUT) {
+            return false;
+        } else {
+            assert(false);
+            std::abort();
+        }
+    }
 
     static std::pair<win32_handle, win32_handle> create_inheritable_pipe() {
         HANDLE hRead, hWrite;
@@ -83,12 +104,34 @@ private:
 
     virtual bool do_fill_child_out_buffer(std::string& out_buffer) override {
         assert(child_out_);
+
+        const unsigned poll_interval_milliseconds = 50;
+        const unsigned read_timeout_milliseconds  = 5 * 1000;
+
+        DWORD dwStartTick = GetTickCount();
+        for (;;) {
+            DWORD dwTotalBytesAvail;
+            if (!PeekNamedPipe(child_out_.get(), nullptr, 0, nullptr, &dwTotalBytesAvail, nullptr)) {
+                if (GetLastError() == ERROR_BROKEN_PIPE) {
+                    return false;
+
+                }
+                throw_system_error("Error peeking at child stdout");
+            }
+            if (dwTotalBytesAvail) {
+                break;
+            }
+            if (GetTickCount() - dwStartTick > read_timeout_milliseconds) {
+                throw std::runtime_error("Timeout while reading from child stdout");
+            }
+
+            Sleep(poll_interval_milliseconds);
+        }
+
         char buffer[256];
         DWORD dwRead;
         if (!ReadFile(child_out_.get(), buffer, sizeof(buffer), &dwRead, nullptr)) {
-            if (GetLastError() == ERROR_BROKEN_PIPE) {
-                return false;
-            }
+            // Broken pipe should be handled in the poll loop above
             throw_system_error("Error reading from child stdout");
         }
         assert(dwRead != 0);

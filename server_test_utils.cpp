@@ -1,5 +1,7 @@
 #include "server_test_utils.h"
 #include <thread>
+#include <mutex>
+#include <condition_variable>
 #include <boost/asio/io_service.hpp>
 
 #include <util/base_conversion.h>
@@ -55,6 +57,7 @@ public:
     }
 
     ~client_thread() {
+        io_service_.stop(); // Make sure the io service is stopped before joining
         thread_.join();
     }
 
@@ -107,6 +110,74 @@ void main_loop(util::async_result<std::shared_ptr<tls::tls_base>> async_self, st
 } // unnamed namespace
 
 namespace funtls {
+
+class sync_shared_state {
+public:
+    explicit sync_shared_state() : state(states::constructed) {}
+
+    void signal() {
+        std::unique_lock<std::mutex> lock{mutex_};
+        change_state(states::done, lock);
+    }
+
+    void mark_provider_dead_if_not_done() {
+        std::unique_lock<std::mutex> lock{mutex_};
+        if (state != states::done) {
+            change_state(states::provider_dead, lock);
+        }
+    }
+
+    void wait() {
+        std::unique_lock<std::mutex> lock{mutex_};
+        cv_.wait(lock, [this] { return state != states::constructed; });
+        if (state == states::provider_dead) {
+            throw std::runtime_error("Sync provider exited without signalling");
+        }
+    }
+    
+private:
+    std::mutex              mutex_;
+    std::condition_variable cv_;
+    enum class states { constructed, provider_dead, done } state;
+
+    void change_state(states new_state, std::unique_lock<std::mutex>& lock) {
+        assert(lock.owns_lock());
+        assert(state == states::constructed);
+        state = new_state;
+        cv_.notify_all();
+        lock.unlock();
+    }
+};
+
+sync_flag_provider::sync_flag_provider() : state_(std::make_shared<sync_shared_state>()) {
+}
+
+sync_flag_provider::sync_flag_provider(sync_flag_provider&& rhs) : state_(std::move(rhs.state_)) {
+    assert(!rhs.state_);
+}
+
+sync_flag_provider& sync_flag_provider::operator=(sync_flag_provider&& rhs) {
+    state_ = std::move(rhs.state_);
+    assert(!rhs.state_);
+    return *this;
+}
+
+sync_flag_provider::~sync_flag_provider() {
+    if (state_) {
+        state_->mark_provider_dead_if_not_done();
+    }
+}
+
+void sync_flag_provider::signal() {
+    state_->signal();
+}
+
+std::function<void (void)> sync_flag_provider::get_observer() {
+    auto state = state_;
+    return [state] {
+        state->wait();
+    };
+}
 
 const std::string generic_reply = "Content-type: text/ascii\r\n\r\nHello world!\r\n";
 

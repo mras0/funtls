@@ -2,8 +2,7 @@
 #include <tls/tls_ser.h>
 #include <tls/tls_ecc.h>
 #include <util/base_conversion.h>
-#include <sstream>
-
+#
 using funtls::util::wrapped;
 
 namespace funtls { namespace tls {
@@ -30,8 +29,6 @@ private:
     void send_server_key_exchange();
     void send_server_hello_done();
     void read_client_key_exchange();
-
-    void handle_error(std::exception_ptr e) const;
 };
 
 void perform_handshake_with_client(std::unique_ptr<stream> stream, const std::vector<const server_id*> server_ids, const client_connect_handler& on_client_connected, std::ostream* log)
@@ -55,23 +52,6 @@ connection_to_client::~connection_to_client()
 {
     *log_ << "Conncetion dropped" << std::endl;
 }
-
-void connection_to_client::handle_error(std::exception_ptr e) const
-{
-    assert(e);
-    std::ostringstream msg;
-    msg << "[!!!] ";
-    try {
-        std::rethrow_exception(e);
-    } catch (const std::exception& e) {
-        msg << e.what();
-    } catch (...) {
-        msg << "Unknown exception type caught";
-    }
-    msg << "" << std::endl;
-    *const_cast<std::ostream*>(log_) << msg.str(); // Meh...
-}
-
 
 void connection_to_client::read_client_hello() {
     *log_ << "Reading ClientHello" << std::endl;
@@ -150,8 +130,7 @@ void connection_to_client::read_client_hello() {
         assert(self->server_kex_);
 
         self->send_server_hello();
-    },
-        std::bind(&connection_to_client::handle_error, self, std::placeholders::_1)));
+    }, on_client_connected_));
 }
 
 void connection_to_client::send_server_hello()
@@ -168,7 +147,7 @@ void connection_to_client::send_server_hello()
         std::vector<extension>{}
     }), wrapped([self]() {
         self->send_server_certificate();
-    }, std::bind(&connection_to_client::handle_error, self, std::placeholders::_1)));
+    }, on_client_connected_));
 }
 
 void connection_to_client::send_server_certificate()
@@ -180,7 +159,7 @@ void connection_to_client::send_server_certificate()
         send_handshake(make_handshake(
             certificate{*chain}), wrapped([self]() {
             self->send_server_key_exchange();
-        }, std::bind(&connection_to_client::handle_error, self, std::placeholders::_1)));
+        }, on_client_connected_));
     } else {
         send_server_key_exchange();
     }
@@ -193,7 +172,7 @@ void connection_to_client::send_server_key_exchange()
         auto self = shared_from_this();
         send_handshake(*handshake, wrapped([self]() {
             self->send_server_hello_done();
-        }, std::bind(&connection_to_client::handle_error, self, std::placeholders::_1)));
+        }, on_client_connected_));
     } else {
         send_server_hello_done();
     }
@@ -206,31 +185,29 @@ void connection_to_client::send_server_hello_done()
     send_handshake(make_handshake(
         server_hello_done{}), wrapped([self]() {
         self->read_client_key_exchange();
-    }, std::bind(&connection_to_client::handle_error, self, std::placeholders::_1)));
+    }, on_client_connected_));
 }
 
 void connection_to_client::read_client_key_exchange() {
     *log_ << "Reading ClientKeyExchange" << std::endl;
     auto self = shared_from_this();
+    auto on_client_connected = on_client_connected_;
     read_handshake(wrapped(
-        [self](tls::handshake&& handshake) {
+        [self, on_client_connected](tls::handshake&& handshake) {
         auto pre_master_secret = self->server_kex_->client_key_exchange(handshake);
         //(*self->log_) << "Premaster secret: " << util::base16_encode(pre_master_secret) << std::endl;
         self->set_pending_ciphers(pre_master_secret);
         (*self->log_) << "Reading ChangeCipherSpec" << std::endl;
         self->read_change_cipher_spec(wrapped(
-            [self]() {
+            [self, on_client_connected]() {
             (*self->log_) << "Sending ChangeCipherSpec" << std::endl;
             self->send_change_cipher_spec(wrapped(
-                [self]() {
+                [self, on_client_connected]() {
                 (*self->log_) << "Handshake done. Session id " << util::base16_encode(self->session_id().as_vector()) << std::endl;
-                self->on_client_connected_(std::shared_ptr<tls_base>{self});
-            },
-                std::bind(&connection_to_client::handle_error, self, std::placeholders::_1)));
-        },
-            std::bind(&connection_to_client::handle_error, self, std::placeholders::_1)));
-    },
-        std::bind(&connection_to_client::handle_error, self, std::placeholders::_1)));
+                on_client_connected(std::shared_ptr<tls_base>{self});
+            }, on_client_connected));
+        }, on_client_connected));
+    }, on_client_connected));
 }
 
 } } // namespace funtls::tls

@@ -45,10 +45,17 @@ void self_test(boost::asio::io_service& io_service, uint16_t port)
         https_fetch("localhost", std::to_string(port), "/", {cs}, ts, [&res](const std::vector<uint8_t>& data) {
             res.insert(res.end(), data.begin(), data.end());
         }, fetch_log);
-        io_service.post([res] {
+
+        // Make sure we synchronize with the main thread before proceeding to the next test
+        sync_flag_provider provider;
+        auto observer = provider.get_observer();
+        io_service.post([res, &provider] {
+            auto p = std::move(provider);
             std::cout << "Got result: \"" << res << "\"" << std::endl;
             FUNTLS_ASSERT_EQUAL(generic_reply, res);
+            p.signal();
         });
+        observer();
     }
 }
 
