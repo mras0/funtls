@@ -7,7 +7,7 @@
 
 using namespace funtls;
 
-void self_test(boost::asio::io_service& io_service, uint16_t port)
+void self_test(exec_in_main_thread_func_type exec_in_main_thread,  uint16_t port)
 {
     x509::trust_store ts;
 
@@ -39,23 +39,18 @@ void self_test(boost::asio::io_service& io_service, uint16_t port)
     };
 
     for (const auto& cs: cipher_suites) {
-        io_service.post([cs] { std::cout << "=== Testing " << cs << " ===" << std::endl; });
+        exec_in_main_thread([cs] { std::cout << "=== Testing " << cs << " ===" << std::endl; });
         std::string res;
-        util::ostream_adapter fetch_log{[&io_service](const std::string& s) { io_service.post([s] { std::cout << "Client: " << s; }); }};
+        util::ostream_adapter fetch_log{[exec_in_main_thread](const std::string& s) { exec_in_main_thread([s] { std::cout << "Client: " << s; }); }};
         https_fetch("localhost", std::to_string(port), "/", {cs}, ts, [&res](const std::vector<uint8_t>& data) {
             res.insert(res.end(), data.begin(), data.end());
         }, fetch_log);
 
         // Make sure we synchronize with the main thread before proceeding to the next test
-        sync_flag_provider provider;
-        auto observer = provider.get_observer();
-        io_service.post([res, &provider] {
-            auto p = std::move(provider);
+        exec_in_main_thread([res] {
             std::cout << "Got result: \"" << res << "\"" << std::endl;
             FUNTLS_ASSERT_EQUAL(generic_reply, res);
-            p.signal();
         });
-        observer();
     }
 }
 

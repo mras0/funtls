@@ -39,7 +39,7 @@ void send_enter_to_console()
 }
 #endif
 
-void openssl_test_client(boost::asio::io_service& io_service, uint16_t port)
+void openssl_test_client(exec_in_main_thread_func_type exec_in_main_thread, uint16_t port)
 {
     const std::vector<std::string> ciphers {
         "RC4-MD5",
@@ -50,7 +50,7 @@ void openssl_test_client(boost::asio::io_service& io_service, uint16_t port)
     };
 
     for (const auto& cipher : ciphers) {
-        io_service.post([cipher] { std::cout << "=== Testing " << cipher << " ===" << std::endl; });
+        exec_in_main_thread([cipher] { std::cout << "=== Testing " << cipher << " ===" << std::endl; });
 
         auto openssl_child_process = util::child_process::create({
             OPENSSL_EXE,
@@ -76,24 +76,18 @@ void openssl_test_client(boost::asio::io_service& io_service, uint16_t port)
         std::string all_output_from_openssl;
         for (std::string s; openssl_child_process->read_line(s); ) {
             all_output_from_openssl += s;
-            io_service.post([s] {
+            exec_in_main_thread([s] {
                 std::cout << "[openssl] " << s;
             });
         }
 
         const auto wait_result = openssl_child_process->wait();
 
-        // Make sure we synchronize with the main thread before proceeding to the next test
-        sync_flag_provider provider;
-        auto observer = provider.get_observer();
-        io_service.post([=, &provider] {
-            sync_flag_provider p{std::move(provider)};
+        exec_in_main_thread([=] {
             FUNTLS_CHECK_BINARY(wait_result, ==, 0, "Wait failed");
             FUNTLS_CHECK_BINARY(all_output_from_openssl.find("Cipher is " + cipher), !=, std::string::npos, "Wrong cipher used? Expected " + cipher);
             FUNTLS_CHECK_BINARY(all_output_from_openssl.find(generic_reply), !=, std::string::npos, "Expected reply not found in output.");
-            p.signal();
         });
-        observer();
     }
 }
 

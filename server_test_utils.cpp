@@ -2,6 +2,7 @@
 #include <thread>
 #include <mutex>
 #include <condition_variable>
+#include <exception>
 #include <boost/asio/io_service.hpp>
 
 #include <util/base_conversion.h>
@@ -107,79 +108,53 @@ void main_loop(util::async_result<std::shared_ptr<tls::tls_base>> async_self, st
     });
 }
 
+std::mutex mutex;
+std::condition_variable cv;
+std::exception_ptr error;
+bool done;
+
+void new_task()
+{
+    done  = false;
+    error = nullptr;
+}
+
+void signal(const std::exception_ptr& e = nullptr)
+{
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        done = true;
+        error = e;
+    }
+    cv.notify_all();
+}
+
+void wait_for_task()
+{
+    std::unique_lock<std::mutex> lock(mutex);
+    cv.wait(lock, [] { return done; });
+    if (error) std::rethrow_exception(error);
+}
+
 } // unnamed namespace
 
 namespace funtls {
 
-class sync_shared_state {
-public:
-    explicit sync_shared_state() : state(states::constructed) {}
-
-    void signal() {
-        std::unique_lock<std::mutex> lock{mutex_};
-        change_state(states::done, lock);
-    }
-
-    void mark_provider_dead_if_not_done() {
-        std::unique_lock<std::mutex> lock{mutex_};
-        if (state != states::done) {
-            change_state(states::provider_dead, lock);
-        }
-    }
-
-    void wait() {
-        std::unique_lock<std::mutex> lock{mutex_};
-        cv_.wait(lock, [this] { return state != states::constructed; });
-        if (state == states::provider_dead) {
-            throw std::runtime_error("Sync provider exited without signalling");
-        }
-    }
-    
-private:
-    std::mutex              mutex_;
-    std::condition_variable cv_;
-    enum class states { constructed, provider_dead, done } state;
-
-    void change_state(states new_state, std::unique_lock<std::mutex>& lock) {
-        assert(lock.owns_lock());
-        assert(state == states::constructed);
-        state = new_state;
-        cv_.notify_all();
-        lock.unlock();
-    }
-};
-
-sync_flag_provider::sync_flag_provider() : state_(std::make_shared<sync_shared_state>()) {
-}
-
-sync_flag_provider::sync_flag_provider(sync_flag_provider&& rhs) : state_(std::move(rhs.state_)) {
-    assert(!rhs.state_);
-}
-
-sync_flag_provider& sync_flag_provider::operator=(sync_flag_provider&& rhs) {
-    state_ = std::move(rhs.state_);
-    assert(!rhs.state_);
-    return *this;
-}
-
-sync_flag_provider::~sync_flag_provider() {
-    if (state_) {
-        state_->mark_provider_dead_if_not_done();
-    }
-}
-
-void sync_flag_provider::signal() {
-    state_->signal();
-}
-
-std::function<void (void)> sync_flag_provider::get_observer() {
-    auto state = state_;
-    return [state] {
-        state->wait();
-    };
-}
-
 const std::string generic_reply = "Content-type: text/ascii\r\n\r\nHello world!\r\n";
+
+void do_in_main_thread(boost::asio::io_service& io_service, const std::function<void (void)>& f)
+{
+    new_task();
+    io_service.post([&] {
+        try {
+            f();
+            signal();
+        } catch (...) {
+            signal(std::current_exception());
+        }
+    });
+    wait_for_task();
+}
 
 int server_test_main(const test_main_func_type& test_main)
 {
@@ -191,7 +166,7 @@ int server_test_main(const test_main_func_type& test_main)
 
         unsigned short port = server->local_endpoint().port();
         client_thread test_client{io_service, [&] {
-            test_main(io_service, port);
+            test_main(std::bind(&do_in_main_thread, std::ref(io_service), std::placeholders::_1), port);
         }};
         io_service.run();
         test_client.get();
