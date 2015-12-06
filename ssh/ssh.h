@@ -6,6 +6,7 @@
 #include <util/buffer.h>
 #include <vector>
 #include <string>
+#include <stdexcept>
 
 namespace funtls { namespace ssh {
 
