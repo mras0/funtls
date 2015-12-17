@@ -2,9 +2,15 @@
 #define FUNTLS_SERVER_TEST_UTILS_H_INCLUDED
 
 #include <functional>
+#include <stdexcept>
 #include <x509/x509.h>
 
 namespace funtls {
+
+class main_thread_aborted_exception : public std::runtime_error {
+public:
+    explicit main_thread_aborted_exception() : std::runtime_error("Main thread aborted") {}
+};
 
 extern const std::string generic_reply;
 

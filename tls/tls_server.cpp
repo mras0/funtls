@@ -50,7 +50,7 @@ connection_to_client::connection_to_client(std::unique_ptr<stream> stream, const
 
 connection_to_client::~connection_to_client()
 {
-    *log_ << "Conncetion dropped" << std::endl;
+    *log_ << "Connection dropped" << std::endl;
 }
 
 void connection_to_client::read_client_hello() {

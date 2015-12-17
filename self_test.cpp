@@ -42,7 +42,13 @@ void self_test(exec_in_main_thread_func_type exec_in_main_thread,  uint16_t port
     for (const auto& cs: cipher_suites) {
         exec_in_main_thread([cs] { std::cout << "=== Testing " << cs << " ===" << std::endl; });
         std::string res;
-        util::ostream_adapter fetch_log{[exec_in_main_thread](const std::string& s) { exec_in_main_thread([s] { std::cout << "Client: " << s; }); }};
+        util::ostream_adapter fetch_log{[exec_in_main_thread](const std::string& s) {
+            try {
+                exec_in_main_thread([s] { std::cout << "Client: " << s; });
+            } catch (const main_thread_aborted_exception&) {
+                std::cout << "Client (main thread aborted): " << s << std::endl;
+            }
+        }};
         https_fetch("localhost", std::to_string(port), "/", {cs}, ts, [&res](const std::vector<uint8_t>& data) {
             res.insert(res.end(), data.begin(), data.end());
         }, fetch_log);

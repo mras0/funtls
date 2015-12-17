@@ -109,20 +109,29 @@ void main_loop(util::async_result<std::shared_ptr<tls::tls_base>> async_self, st
 }
 
 std::mutex mutex;
+std::thread::id main_thread_id;
 std::condition_variable cv;
 std::exception_ptr error;
 bool done;
 
 void new_task()
 {
+    assert(std::this_thread::get_id() != main_thread_id);
+    std::lock_guard<std::mutex> lock(mutex);
+    if (done) {
+        assert(error);
+        throw main_thread_aborted_exception{};
+    }
     done  = false;
     error = nullptr;
 }
 
 void signal(const std::exception_ptr& e = nullptr)
 {
+    assert(std::this_thread::get_id() == main_thread_id);
     {
         std::lock_guard<std::mutex> lock(mutex);
+        assert(!done); // Perhaps server_test_main has goofed up?
         done = true;
         error = e;
     }
@@ -131,9 +140,15 @@ void signal(const std::exception_ptr& e = nullptr)
 
 void wait_for_task()
 {
+    assert(std::this_thread::get_id() != main_thread_id);
     std::unique_lock<std::mutex> lock(mutex);
     cv.wait(lock, [] { return done; });
-    if (error) std::rethrow_exception(error);
+    done = false;
+    if (error) {
+        auto error_copy = error;
+        error = nullptr;
+        std::rethrow_exception(error_copy);
+    }
 }
 
 } // unnamed namespace
@@ -165,6 +180,7 @@ void do_in_main_thread(boost::asio::io_service& io_service, const std::function<
 
 int server_test_main(const test_main_func_type& test_main)
 {
+    main_thread_id = std::this_thread::get_id();
     try {
         boost::asio::io_service  io_service;
         auto server  = tcp_tls_server::create(io_service, boost::asio::ip::tcp::endpoint(boost::asio::ip::address_v4::loopback(), 0), get_server_test_id(), &make_log, &main_loop);
@@ -175,7 +191,12 @@ int server_test_main(const test_main_func_type& test_main)
         client_thread test_client{io_service, [&] {
             test_main(std::bind(&do_in_main_thread, std::ref(io_service), std::placeholders::_1), port);
         }};
-        io_service.run();
+        try {
+            io_service.run();
+        } catch (...) {
+            signal(std::current_exception());
+            throw;
+        }
         test_client.get();
     } catch (const std::exception& e) {
         std::cerr << e.what() << std::endl;

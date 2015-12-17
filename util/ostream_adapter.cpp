@@ -11,7 +11,9 @@ public:
     }
 
     ~ostream_adapter_bufimpl() {
-        pubsync();
+        if (!str().empty()) {
+            pubsync();
+        }
     }
 
     int sync() {
