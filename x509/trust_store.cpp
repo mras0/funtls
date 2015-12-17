@@ -125,6 +125,18 @@ void trust_store::verify_cert_chain(const std::vector<x509::certificate>& certli
         if (log_) {
             (*log_) << "Checking self-signed certificate\n" << certlist[0] << std::endl;
         }
+        const auto issuer_name = certlist[0].tbs().issuer;
+        const auto certs = find(issuer_name);
+        if (certs.size() != 1) {
+            std::ostringstream oss;
+            oss << "No valid certificate found in trust store for " << issuer_name << ". " << certs.size() << " entries found.";
+            FUNTLS_CHECK_FAILURE(oss.str());
+        }
+        if (certs[0]->signature().as_vector() != certlist[0].signature().as_vector()) {
+            std::ostringstream oss;
+            oss << "Certificate mismatch for " << issuer_name << ". Supplied:\n" << certlist[0] << "\nIn trust store:\n" << *certs[0];
+            FUNTLS_CHECK_FAILURE(oss.str());
+        }
         x509::verify_x509_signature(certlist[0], certlist[0]);
         return;
     }

@@ -17,6 +17,16 @@ using namespace funtls;
 
 namespace {
 
+static const char certificate[] =
+"MIIBUjCB/aADAgECAgEBMA0GCSqGSIb3DQEBBAUAMBQxEjAQBgNVBAMWCWxvY2Fs"
+"aG9zdDAaFwsxNTExMDgwMDAwWhcLMjUxMTA4MDAwMFowFDESMBAGA1UEAxYJbG9j"
+"YWxob3N0MIGbMA0GCSqGSIb3DQEBAQUAA4GJADCBhQJBAJVEHtEbSIAl6Q9JZB+Z"
+"XKKRv165iUoXEuOtmi4bnFhCo1+aGynhydDQxM6aIRkf72U052LAAVKd+fVqLzFw"
+"/mUCQCUN4GWuP9wEDq06zmZJPMcefNzt5ZFD7Lh6mf5VzqeYqWaw1s5yuhHKF1Xv"
+"SCVs6CA1UHYo2brgQSAAlzZBD38wDQYJKoZIhvcNAQEEBQADQQBMhEJLmCS0dkS8"
+"NKWutTJIaoON+jkLOnIXauB3f2XXQ5J+Bm8HquJHPGx4CGG/5SasJr/RBOzZN6Mv"
+"L3SPTuuT";
+
 std::unique_ptr<tls::server_id> get_server_test_id()
 {
     static const char private_key[] =
@@ -33,16 +43,6 @@ std::unique_ptr<tls::server_id> get_server_test_id()
         "qZJDN4j7pg/q/iUJDrhSP0Ru87iPcejoB0qA2sx5QJAAAAAAAAAAAAAAAAAAAAAAAAAAA\n"
         "AAAAAAAAAAAAAAAACdt2KWqpWDI9KyNS/jMho4UBocb4Ax3E/2TNRLMsRtwg==\n"
         "-----END PRIVATE KEY-----";
-    static const char certificate[] =
-        "MIIBUjCB/aADAgECAgEBMA0GCSqGSIb3DQEBBAUAMBQxEjAQBgNVBAMWCWxvY2Fs"
-        "aG9zdDAaFwsxNTExMDgwMDAwWhcLMjUxMTA4MDAwMFowFDESMBAGA1UEAxYJbG9j"
-        "YWxob3N0MIGbMA0GCSqGSIb3DQEBAQUAA4GJADCBhQJBAJVEHtEbSIAl6Q9JZB+Z"
-        "XKKRv165iUoXEuOtmi4bnFhCo1+aGynhydDQxM6aIRkf72U052LAAVKd+fVqLzFw"
-        "/mUCQCUN4GWuP9wEDq06zmZJPMcefNzt5ZFD7Lh6mf5VzqeYqWaw1s5yuhHKF1Xv"
-        "SCVs6CA1UHYo2brgQSAAlzZBD38wDQYJKoZIhvcNAQEEBQADQQBMhEJLmCS0dkS8"
-        "NKWutTJIaoON+jkLOnIXauB3f2XXQ5J+Bm8HquJHPGx4CGG/5SasJr/RBOzZN6Mv"
-        "L3SPTuuT";
-
     auto pki = x509::read_pem_private_key_from_string(private_key);
     assert(pki.version.as<int>() == 0);
     assert(pki.algorithm.id() == x509::id_rsaEncryption);
@@ -141,6 +141,13 @@ void wait_for_task()
 namespace funtls {
 
 const std::string generic_reply = "Content-type: text/ascii\r\n\r\nHello world!\r\n";
+
+x509::certificate server_test_certificate()
+{
+    auto cert_data = util::base64_decode(certificate, sizeof(certificate)-1);
+    util::buffer_view buf{cert_data.data(), cert_data.size()};
+    return x509::certificate::parse(asn1::read_der_encoded_value(buf));
+}
 
 void do_in_main_thread(boost::asio::io_service& io_service, const std::function<void (void)>& f)
 {

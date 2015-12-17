@@ -52,7 +52,12 @@ void https_fetch(const std::string& host, const std::string& port, const std::st
     }, handler));
     io_service.run();
     log << "io service exiting\n";
-    result.get();
+    try {
+        result.get();
+    } catch (const std::exception& e) {
+        log << e.what() << std::endl;
+        throw;
+    }
 }
 
 } // namespace funtls

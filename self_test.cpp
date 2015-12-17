@@ -10,6 +10,7 @@ using namespace funtls;
 void self_test(exec_in_main_thread_func_type exec_in_main_thread,  uint16_t port)
 {
     x509::trust_store ts;
+    ts.add(server_test_certificate());
 
     const std::vector<tls::cipher_suite> cipher_suites{
         //tls::cipher_suite::ecdhe_ecdsa_with_aes_256_gcm_sha384,

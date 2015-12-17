@@ -521,6 +521,26 @@ void test_cert_extensions()
     //std::cout << cert4 << std::endl;
 }
 
+#include <x509/trust_store.h>
+void test_trust_store()
+{
+    std::istringstream chain_iss(test_cert_chain0);
+    const auto chain = read_pem_cert_chain(chain_iss);
+    const auto root_cert = x509::read_pem_certificate_from_string(test_cert_chain0_root);
+
+    x509::trust_store empty_ts;
+    FUNTLS_ASSERT_THROWS(empty_ts.verify_cert_chain(chain), std::runtime_error);
+    FUNTLS_ASSERT_THROWS(empty_ts.verify_cert_chain({root_cert}), std::runtime_error);
+
+    x509::trust_store ts1;
+    ts1.add(root_cert);
+    ts1.verify_cert_chain(chain);
+    ts1.verify_cert_chain({root_cert});
+
+    // TODO: Improve negative tests, e.g. the case where a self-signed certificate for the subject
+    // is found in the trust store, but we try to verify another certificate for the same subject
+}
+
 int main()
 {
     // TODO: Check x509::name equals operations. Only exact matches should be allowed (with order being important) etc.
@@ -530,6 +550,7 @@ int main()
         test_pkey();
         test_pkey_generation();
         test_serialization();
+        test_trust_store();
     } catch (const std::exception& e) {
         std::cerr << e.what() << std::endl;
         return 1;
