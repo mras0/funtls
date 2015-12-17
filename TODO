@@ -1,0 +1,6 @@
+Turn assert()s into FUNTLS_CHECK_BINARY()s in tls/tls_ciphers.cpp
+Implement ecdsa in server key exchange
+Generate keys for usage in self_test and test_against_openssl (Either in code or in cmake)
+Test all supported ciphers in test_against_openssl
+Improve SSH code (including making a ssh server)
+Automate browser testing (long long term)
